@@ -1,8 +1,8 @@
 # Learning Hub
 
-[![Deploy to GitHub Pages](https://github.com/vicky124/react-learning-app/actions/workflows/deploy.yml/badge.svg)](https://github.com/vicky124/react-learning-app/actions/workflows/deploy.yml)
+[![Deploy to GitHub Pages](https://github.com/vicky124/learning-app/actions/workflows/deploy.yml/badge.svg)](https://github.com/vicky124/learning-app/actions/workflows/deploy.yml)
 
-**🔗 Live demo: [vicky124.github.io/react-learning-app](https://vicky124.github.io/react-learning-app/)**
+**🔗 Live demo: [vicky124.github.io/learning-app](https://vicky124.github.io/learning-app/)**
 
 An interactive, single-page app for learning React live and studying for technical interviews
 across a growing list of subjects — Python, JavaScript, TypeScript, Git, Low-Level Design,
