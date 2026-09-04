@@ -8,6 +8,175 @@ export const systemDesignPatternsSection = {
       label: 'Guide',
       topics: [
         {
+          id: 'what-is-a-distributed-system',
+          title: 'What Is a Distributed System, and Why Do We Need One?',
+          summary:
+            'The foundational motivation for everything that follows: a single machine has hard physical limits, and every technique in this guide exists to work around what breaks when you spread work across many machines.',
+          keyPoints: [
+            'A distributed system is a collection of independent computers that coordinate over a network and present themselves to users as a single coherent system.',
+            'Vertical scaling (a bigger machine) hits hard physical and economic limits; horizontal scaling (more machines) has no such ceiling, but trades that limit for an entirely new category of problems.',
+            'The moment there is more than one machine, there is a network between them — and a network is slower, less reliable, and more failure-prone than a function call. This single fact is the root cause of almost everything covered in this guide.',
+            'The "Fallacies of Distributed Computing" catalog the false assumptions engineers make about networks that reliably cause production incidents.',
+            'Every later topic — partitioning, replication, consensus, caching, idempotency — is a structured, named answer to "how do multiple machines cooperate correctly despite an unreliable network?"',
+          ],
+          blocks: [
+            {
+              type: 'p',
+              text: 'Every technique in this guide exists to answer one underlying question: once a system outgrows a single machine, how do multiple machines cooperate correctly — and stay useful — despite failures that a single-machine system never has to think about? Before diving into any specific mechanism, it is worth being explicit about *why* single-machine solutions eventually stop working, because every later tradeoff traces back to this.',
+            },
+            {
+              type: 'heading',
+              text: 'Why Not Just Use a Bigger Machine?',
+            },
+            {
+              type: 'p',
+              text: '**Vertical scaling** (a faster CPU, more RAM, a bigger disk) is the simplest way to handle more load, and it is the right first move for a huge number of systems — it adds zero coordination complexity. But it runs into two hard limits: **physical** (there is a ceiling on how much CPU/RAM/disk a single machine can practically hold) and **economic** (the cost of ever-larger machines grows much faster than linearly, and cloud providers price the largest instance tiers at a steep premium). A single machine is also, by definition, **a single point of failure** — when it goes down, the whole system goes down with it, no matter how large it is.',
+            },
+            {
+              type: 'p',
+              text: '**Horizontal scaling** (more machines instead of a bigger one) has no such ceiling — need more capacity, add another commodity machine — and survives individual machine failures by design. That is the appeal. The cost is what this entire guide is about: coordinating many independent machines correctly is a fundamentally harder problem than running code on one.',
+            },
+            {
+              type: 'mermaid',
+              code: 'flowchart TB\n    subgraph Vertical["Vertical Scaling"]\n        direction TB\n        Small[Small Server] -->|upgrade| Medium[Bigger Server] -->|upgrade| Huge[Biggest Server<br/>money and physics<br/>both run out]\n    end\n    subgraph Horizontal["Horizontal Scaling"]\n        direction TB\n        LB{Load Balancer / Router} --> N1[Node 1]\n        LB --> N2[Node 2]\n        LB --> N3[Node 3]\n        LB --> N4[Node N...]\n    end',
+            },
+            {
+              type: 'heading',
+              text: 'The Network Changes Everything',
+            },
+            {
+              type: 'p',
+              text: 'In a single-process program, calling a function is nearly instant and nearly always succeeds — the two things happen on the same machine, sharing memory, with no network in between. The moment two machines need to coordinate, every one of those assumptions breaks: a message can be delayed, dropped, duplicated, or arrive out of order, and — critically — **a caller cannot always tell the difference between "the request failed" and "the request succeeded but the response was lost."** That ambiguity alone is the seed of an entire later topic (idempotency and delivery semantics).',
+            },
+            {
+              type: 'list',
+              items: [
+                '**The network is reliable.** It is not — packets get dropped, connections reset, links fail.',
+                '**Latency is zero.** A round trip across a data center, let alone across regions, is orders of magnitude slower than an in-process call.',
+                '**Bandwidth is infinite.** Large payloads and high request volume both compete for finite network capacity.',
+                '**The network is secure.** Every hop is a potential attack surface; nothing crossing a network should be implicitly trusted.',
+                '**Topology doesn\'t change.** Nodes get added, removed, and rescheduled constantly in any system that auto-scales or self-heals.',
+                '**There is one administrator.** Real systems span teams, vendors, and cloud providers, each with their own failure modes and change schedules.',
+                '**Transport cost is zero.** Serialization, encryption, and data transfer all cost real CPU and money at scale.',
+                '**The network is homogeneous.** Different links, protocols, and hardware behave differently under load.',
+              ],
+            },
+            {
+              type: 'callout',
+              kind: 'tip',
+              text: 'Naming these explicitly — "that design assumes the network call always succeeds, which it won\'t" — is a strong senior-level move in an interview. It is also, not coincidentally, exactly the assumption that later causes production incidents when a team skips it.',
+            },
+            {
+              type: 'callout',
+              kind: 'note',
+              text: 'Every mechanism from here on — partitioning a dataset, replicating it, getting nodes to agree via consensus, caching to reduce network round trips, making retries safe with idempotency — is a structured, named answer to problems created directly by the fallacies above. Keep them in mind; they explain *why* each later technique exists, not just *what* it does.',
+            },
+          ],
+        },
+        {
+          id: 'cap-theorem',
+          title: 'The CAP Theorem — Consistency, Availability, and the Price of a Network Partition',
+          summary:
+            'Every distributed data system makes this tradeoff whether or not the team ever says its name out loud; understanding it precisely — not the oversimplified "pick 2 of 3" — is what separates a junior and a senior answer.',
+          keyPoints: [
+            'CAP: when a network partition happens, a distributed data system must choose between Consistency (every read sees the latest write) and Availability (every request gets a non-error response) — it cannot guarantee both.',
+            'Partition tolerance is not really a design choice for a distributed system — networks partition regardless of what you want, so the real, ongoing decision is CP vs AP for how the system behaves *when* one happens.',
+            'CP systems (etcd, ZooKeeper, HBase, MongoDB in its default majority-write config) refuse to serve a request rather than risk returning stale or conflicting data when they cannot reach a quorum.',
+            'AP systems (Cassandra, DynamoDB, Riak) keep serving reads and writes through a partition and reconcile divergent replicas afterward (read repair, last-write-wins, CRDTs).',
+            'CAP only describes behavior *during* a partition — outside of one, a well-built system delivers both consistency and availability, which is exactly why the tradeoff is easy to state wrong in an interview.',
+            'PACELC extends CAP: even with no partition (Else), a system still trades Latency against Consistency on every request.',
+          ],
+          blocks: [
+            {
+              type: 'p',
+              text: 'Formally: in the presence of a network **P**artition, a distributed data system must choose between **C**onsistency (every read receives the most recent write, or an error) and **A**vailability (every request receives a non-error response, without guaranteeing it contains the latest write). This is not a free-form design preference — once a partition happens, one of the two has to give, and CAP says so with mathematical certainty.',
+            },
+            {
+              type: 'mermaid',
+              code: 'flowchart TB\n    P((Partition Tolerance<br/>not really optional —<br/>networks WILL partition))\n    C((Consistency<br/>every read = latest write))\n    A((Availability<br/>every request gets a response))\n\n    C ---|"CP: refuse to answer<br/>rather than risk stale data<br/>etcd, ZooKeeper, HBase"| P\n    A ---|"AP: keep answering,<br/>reconcile after the fact<br/>Cassandra, DynamoDB, Riak"| P\n    C -.-|"CA: only true with no real<br/>partition possible at all<br/>(effectively single-node)"| A',
+            },
+            {
+              type: 'heading',
+              text: 'What Actually Happens During a Partition',
+            },
+            {
+              type: 'p',
+              text: 'Picture two data centers, each holding a replica of the same key, and the network link between them drops. A write arrives at data center A. Should A (a) accept the write and risk data center B serving stale reads until the link recovers — choosing **A**vailability — or (b) refuse the write until it can confirm data center B is reachable and in sync — choosing **C**onsistency? There is no third option that gets both; that is the entire theorem in one concrete scenario.',
+            },
+            {
+              type: 'table',
+              headers: ['System', 'Choice during a partition', 'Concrete behavior'],
+              rows: [
+                ['etcd / ZooKeeper / Consul', 'CP', 'Reject writes (and often reads) on the minority side of a partition until quorum is restored — exactly why they are used for leader election and config, not general-purpose app data.'],
+                ['Cassandra / DynamoDB (default config)', 'AP', 'Keep accepting reads/writes on both sides during a partition; reconcile conflicting versions afterward via read repair, vector clocks, or last-write-wins.'],
+                ['A traditional single-node RDBMS', 'N/A', 'Not a distributed system in the CAP sense — no partition is possible with one node, so the theorem does not apply until replicas are added.'],
+              ],
+            },
+            {
+              type: 'callout',
+              kind: 'pitfall',
+              text: '"CA" is a common trap answer in interviews — a system that is both fully consistent and fully available with no partition tolerance can only exist if a partition is truly impossible, which in practice means a single node (or nodes close enough that the network between them is treated as infallible). Any real multi-node, multi-region system has to pick CP or AP for its partition behavior, whether or not the team ever consciously decided to.',
+            },
+            {
+              type: 'callout',
+              kind: 'tip',
+              text: '**PACELC** (Daniel Abadi) is the more complete version working system designers actually reach for: **if P**artitioned, choose **A**vailability or **C**onsistency (that\'s CAP); **E**lse (no partition, normal operation), choose **L**atency or **C**onsistency — because even a healthy-network synchronous quorum write to guarantee consistency adds latency versus an async, eventually-consistent write. This is why, e.g., DynamoDB is roughly "PA/EL" (available under partition, low-latency/eventually-consistent normally) while a system requiring synchronous quorum writes is "PC/EC" even when nothing is partitioned.',
+            },
+          ],
+        },
+        {
+          id: 'basic-sharding-partitioning',
+          title: 'Partitioning (Sharding) a Dataset — the Basic Idea',
+          summary:
+            'Before consistent hashing solves the rebalancing problem elegantly, it helps to see the plain version of the problem: split a dataset across multiple machines, and decide, simply, what goes where.',
+          keyPoints: [
+            'Partitioning (sharding) splits a large dataset across multiple machines because a single machine eventually cannot hold or serve all of it — the data-layer version of the vertical-vs-horizontal scaling problem.',
+            'Hash-based partitioning spreads keys evenly across shards but destroys range-query locality; range-based partitioning keeps ranges together for efficient range scans but risks a hot shard when access is skewed.',
+            'A naive `hash(key) % N` scheme remaps nearly every key whenever N changes — the exact pain point consistent hashing (the next topic) exists to fix.',
+            'Something has to know which shard owns which key or range — a routing/directory layer, or client-side logic embedding the rule — and that component becomes critical infrastructure in its own right.',
+            'Partitioning and replication solve different problems and are used together in practice: partitioning scales throughput/storage by splitting data up, replication adds durability/availability by copying it.',
+          ],
+          blocks: [
+            {
+              type: 'p',
+              text: 'The same problem that motivates horizontal scaling of compute applies directly to data: a dataset can grow past what one machine can store or serve. **Partitioning** (also called **sharding**) is the answer — split the dataset into pieces (**shards**, or **partitions**) and place each piece on a different machine, so no single machine needs to hold everything.',
+            },
+            {
+              type: 'heading',
+              text: 'Two Basic Strategies',
+            },
+            {
+              type: 'list',
+              items: [
+                '**Hash-based partitioning**: compute `hash(key)`, then assign the key to a shard based on that hash (e.g., `hash(key) % N`). Spreads keys roughly evenly across shards regardless of the key values themselves, which avoids hot shards from sequential or skewed key patterns — but two keys that were adjacent before hashing end up on unrelated shards, so an efficient range scan ("all orders between two dates") is no longer possible on one shard.',
+                '**Range-based partitioning**: assign contiguous ranges of the key space to each shard (shard 1 owns A-H, shard 2 owns I-P, and so on). Keeps range scans fast and local to one or a few shards, but is vulnerable to a **hot shard**: if writes are skewed toward one part of the key space (the classic case — a table partitioned by timestamp means every *current* write lands on the single "latest" shard), that one shard takes disproportionate load while the others sit idle.',
+              ],
+            },
+            {
+              type: 'mermaid',
+              code: 'flowchart TB\n    Data[(Full Dataset<br/>too large / too hot for one machine)] --> Strategy{Partitioning Strategy}\n    Strategy -->|hash key, e.g. hash key mod 3| Shard1[(Shard 1<br/>scattered keys)]\n    Strategy -->|hash key, e.g. hash key mod 3| Shard2[(Shard 2<br/>scattered keys)]\n    Strategy -->|hash key, e.g. hash key mod 3| Shard3[(Shard 3<br/>scattered keys)]\n\n    Data -.->|OR: range of keys| RShard1[(Shard A: keys A-H)]\n    Data -.->|OR: range of keys| RShard2[(Shard B: keys I-P)]\n    Data -.->|OR: range of keys| RShard3[(Shard C: keys Q-Z)]',
+            },
+            {
+              type: 'callout',
+              kind: 'pitfall',
+              text: 'The naive version of hash-based partitioning — `hash(key) % N` — has a serious flaw: change `N` (add or remove one machine) and the modulo result changes for almost every key, forcing a near-total data reshuffle. That flaw is significant enough to be worth its own topic: **consistent hashing**, next, is the standard fix.',
+            },
+            {
+              type: 'heading',
+              text: 'Something Has to Know Where a Key Lives',
+            },
+            {
+              type: 'p',
+              text: 'Whichever strategy is used, a client or gateway needs to be able to answer "which shard owns this key?" before it can route a request — either by running the same partitioning function client-side, or by asking a **routing/directory service** that tracks shard boundaries explicitly (this is how systems like Vitess, MongoDB\'s `mongos` router, and HBase\'s region servers actually work in production, as opposed to a client blindly hashing). That routing layer becomes critical infrastructure: if it is wrong or unavailable, requests go to the wrong shard, or nowhere at all.',
+            },
+            {
+              type: 'callout',
+              kind: 'note',
+              text: 'Partitioning and replication solve different problems and are almost always used together: partitioning splits data up to scale storage/throughput across machines; replication copies each partition onto multiple machines for durability and availability. A production cluster shards the dataset into partitions *and* replicates each partition — see the next two topics.',
+            },
+          ],
+        },
+        {
           id: 'consistent-hashing',
           title: 'Consistent Hashing — Adding a Node Without Reshuffling Everything',
           summary:
@@ -22,7 +191,7 @@ export const systemDesignPatternsSection = {
           blocks: [
             {
               type: 'p',
-              text: '**The problem it solves**: with plain `hash(key) % N` sharding, adding or removing one node changes `N`, which remaps almost every key to a different node — a catastrophic amount of data movement.',
+              text: '**The problem it solves**: with plain `hash(key) % N` sharding, adding or removing one node changes `N`, which remaps almost every key to a different node — a catastrophic amount of data movement, exactly the flaw called out at the end of the previous topic.',
             },
             {
               type: 'p',
@@ -79,50 +248,6 @@ export const systemDesignPatternsSection = {
           ],
         },
         {
-          id: 'consensus-algorithms',
-          title: 'Consensus Algorithms — Paxos, Raft, and Why They Exist',
-          summary:
-            'Consensus lets multiple nodes agree on a single value or order despite failures and network delays — the mechanism underneath leader election, distributed locks, and strongly-consistent replicated logs.',
-          keyPoints: [
-            'Consensus is needed for leader election, distributed locks, config stores, and any strongly-consistent replicated log.',
-            'Paxos proves consensus is achievable in an asynchronous network with crash failures, but is notoriously hard to implement correctly.',
-            'Raft was designed explicitly to be more understandable, decomposing into Leader, Follower, and Candidate roles.',
-            'A leader is elected by majority vote; log entries commit once replicated to a majority; randomized election timeouts avoid split-vote livelock.',
-            'Consensus clusters run with an odd number of nodes (3 or 5) to maximize fault tolerance per node deployed.',
-          ],
-          blocks: [
-            {
-              type: 'p',
-              text: 'Consensus is needed whenever multiple nodes must agree on a single value/order despite failures and network delays — leader election, distributed locks, config stores, and any strongly-consistent replicated log.',
-            },
-            {
-              type: 'heading',
-              text: 'Paxos',
-            },
-            {
-              type: 'p',
-              text: 'The original proof that consensus is achievable in an asynchronous network with crash failures; notoriously hard to understand and implement correctly, so it\'s rarely implemented from scratch in interviews — know that it exists and what it guarantees (safety: never agree on two different values; a majority quorum is required to make progress).',
-            },
-            {
-              type: 'heading',
-              text: 'Raft',
-            },
-            {
-              type: 'p',
-              text: 'Designed explicitly to be more understandable than Paxos, and is what most modern systems actually implement (etcd, Consul, CockroachDB, Kafka\'s KRaft mode). Three roles: **Leader** (handles all client writes, replicates a log to followers), **Follower** (passive, applies the leader\'s log), **Candidate** (a follower that hasn\'t heard from a leader within a timeout, so it starts an election). A leader is elected by majority vote; log entries are committed once replicated to a majority; if the leader fails, a new election happens after a randomized timeout (randomization avoids split-vote livelock).',
-            },
-            {
-              type: 'mermaid',
-              code: 'stateDiagram-v2\n    [*] --> Follower\n    Follower --> Candidate : election timeout elapses, no heartbeat from leader\n    Candidate --> Leader : receives majority of votes\n    Candidate --> Follower : discovers current leader or higher term\n    Leader --> Follower : discovers a node with higher term (steps down)\n    Candidate --> Candidate : election timeout, split vote, retry with new term',
-            },
-            {
-              type: 'callout',
-              kind: 'tip',
-              text: '**Why this matters practically**: whenever your HLD answer includes "a distributed lock," "leader election," "a strongly consistent config store," or "a replicated log for a database," the mechanism underneath is Raft (or Paxos) — naming it, and knowing it needs a majority quorum to make progress (hence deploying an odd number of nodes: 3 or 5, tolerating 1 or 2 failures respectively), is a strong senior/staff signal.',
-            },
-          ],
-        },
-        {
           id: 'database-internals',
           title: 'Database Internals: How Storage Engines Actually Work',
           summary:
@@ -174,6 +299,50 @@ export const systemDesignPatternsSection = {
           ],
         },
         {
+          id: 'consensus-algorithms',
+          title: 'Consensus Algorithms — Paxos, Raft, and Why They Exist',
+          summary:
+            'Consensus lets multiple nodes agree on a single value or order despite failures and network delays — the mechanism underneath leader election, distributed locks, and strongly-consistent replicated logs.',
+          keyPoints: [
+            'Consensus is needed for leader election, distributed locks, config stores, and any strongly-consistent replicated log.',
+            'Paxos proves consensus is achievable in an asynchronous network with crash failures, but is notoriously hard to implement correctly.',
+            'Raft was designed explicitly to be more understandable, decomposing into Leader, Follower, and Candidate roles.',
+            'A leader is elected by majority vote; log entries commit once replicated to a majority; randomized election timeouts avoid split-vote livelock.',
+            'Consensus clusters run with an odd number of nodes (3 or 5) to maximize fault tolerance per node deployed.',
+          ],
+          blocks: [
+            {
+              type: 'p',
+              text: 'Consensus is needed whenever multiple nodes must agree on a single value/order despite failures and network delays — leader election, distributed locks, config stores, and any strongly-consistent replicated log. This is also the mechanism a CP system (previous CAP theorem topic) reaches for to implement its consistency guarantee correctly.',
+            },
+            {
+              type: 'heading',
+              text: 'Paxos',
+            },
+            {
+              type: 'p',
+              text: 'The original proof that consensus is achievable in an asynchronous network with crash failures; notoriously hard to understand and implement correctly, so it\'s rarely implemented from scratch in interviews — know that it exists and what it guarantees (safety: never agree on two different values; a majority quorum is required to make progress).',
+            },
+            {
+              type: 'heading',
+              text: 'Raft',
+            },
+            {
+              type: 'p',
+              text: 'Designed explicitly to be more understandable than Paxos, and is what most modern systems actually implement (etcd, Consul, CockroachDB, Kafka\'s KRaft mode). Three roles: **Leader** (handles all client writes, replicates a log to followers), **Follower** (passive, applies the leader\'s log), **Candidate** (a follower that hasn\'t heard from a leader within a timeout, so it starts an election). A leader is elected by majority vote; log entries are committed once replicated to a majority; if the leader fails, a new election happens after a randomized timeout (randomization avoids split-vote livelock).',
+            },
+            {
+              type: 'mermaid',
+              code: 'stateDiagram-v2\n    [*] --> Follower\n    Follower --> Candidate : election timeout elapses, no heartbeat from leader\n    Candidate --> Leader : receives majority of votes\n    Candidate --> Follower : discovers current leader or higher term\n    Leader --> Follower : discovers a node with higher term (steps down)\n    Candidate --> Candidate : election timeout, split vote, retry with new term',
+            },
+            {
+              type: 'callout',
+              kind: 'tip',
+              text: '**Why this matters practically**: whenever your HLD answer includes "a distributed lock," "leader election," "a strongly consistent config store," or "a replicated log for a database," the mechanism underneath is Raft (or Paxos) — naming it, and knowing it needs a majority quorum to make progress (hence deploying an odd number of nodes: 3 or 5, tolerating 1 or 2 failures respectively), is a strong senior/staff signal.',
+            },
+          ],
+        },
+        {
           id: 'load-balancing',
           title: 'Load Balancing — Algorithms and Layers',
           summary:
@@ -192,9 +361,18 @@ export const systemDesignPatternsSection = {
                 '**Layer 7 (application layer)**: inspects HTTP request (path, headers, cookies), enabling content-based routing (`/api/*` → service A, `/static/*` → CDN), but adds overhead from parsing/terminating connections.',
                 '**Round robin**: simplest, cycles through servers; ignores actual server load.',
                 '**Least connections**: routes to the server with the fewest active connections; better for long-lived/uneven-duration requests.',
-                '**Consistent hashing**: routes the same client/key to the same server consistently — critical for sticky sessions or when a server holds in-memory state/cache for a key (e.g., WebSocket connection gateways, or a caching layer where you want the same key always hitting the same cache instance to maximize hit ratio).',
+                '**Consistent hashing**: routes the same client/key to the same server consistently — critical for sticky sessions or when a server holds in-memory state/cache for a key (e.g., WebSocket connection gateways, or a caching layer where you want the same key always hitting the same cache instance to maximize hit ratio). The same hash-ring mechanism from earlier in this guide, applied to routing instead of storage.',
                 '**Health checks**: active (LB pings a `/health` endpoint periodically) vs passive (LB observes real traffic failures and ejects a server that\'s erroring). Production systems use both.',
               ],
+            },
+            {
+              type: 'mermaid',
+              code: 'flowchart TB\n    Client([Client requests]) --> LB{Load Balancer}\n    LB -->|round robin /<br/>least connections /<br/>consistent hash| S1[Server 1]\n    LB --> S2[Server 2]\n    LB --> S3[Server 3]\n\n    LB -.->|active health check:<br/>periodic GET /health| S1\n    LB -.->|active health check| S2\n    LB -.->|active health check| S3\n    S3 -.->|passive: real traffic erroring<br/>-> ejected from rotation| LB',
+            },
+            {
+              type: 'callout',
+              kind: 'note',
+              text: 'A retried request that a load balancer routes to a *different* backend than the one that timed out is exactly the ambiguous-failure scenario from the idempotency topic later in this guide — the client cannot assume the first backend didn\'t already process it.',
             },
           ],
         },
@@ -209,6 +387,7 @@ export const systemDesignPatternsSection = {
             'Write-behind (write-back) gives the fastest writes but risks data loss if the cache node fails before flushing.',
             'Eviction policy choice (LRU, LFU, TTL) should match the actual access pattern.',
             'Cache stampede is mitigated with request coalescing or probabilistic early expiration.',
+            'Real systems layer multiple caches (CDN, distributed cache, sometimes an in-process cache) so a hit at any layer short-circuits everything behind it.',
           ],
           blocks: [
             {
@@ -220,6 +399,10 @@ export const systemDesignPatternsSection = {
                 '**Write-behind (write-back)**: writes go to the cache and are acknowledged immediately; the cache asynchronously flushes to the DB in the background. Fastest writes, but risks data loss if the cache node fails before flushing, and needs careful ordering/batching logic.',
                 '**Eviction policies**: LRU (evict least-recently-used, good general default), LFU (evict least-frequently-used, better when popularity is stable over time and you don\'t want a single recent burst to evict a perennially popular item), TTL-based (simplest, good when staleness has a hard deadline like a session token).',
               ],
+            },
+            {
+              type: 'mermaid',
+              code: 'flowchart LR\n    Client[Client / Browser] --> CDN[CDN Edge Cache<br/>static/public assets]\n    CDN --> AppCache[Distributed Cache<br/>Redis / Memcached]\n    AppCache --> DB[(Primary Database)]\n\n    CDN -.->|hit here: never reaches origin| Client\n    AppCache -.->|hit here: DB never queried| CDN',
             },
             {
               type: 'callout',
@@ -263,6 +446,10 @@ export const systemDesignPatternsSection = {
               type: 'p',
               text: 'The standard, low-risk way to migrate a monolith to microservices incrementally: put a routing layer in front of the monolith, peel off one capability at a time into a new service, route an increasing share of traffic to it, and only decommission the monolith\'s code path for that capability once the new service has proven itself — never a big-bang rewrite.',
             },
+            {
+              type: 'mermaid',
+              code: 'flowchart LR\n    Client --> Router{Routing / Facade Layer}\n    Router -->|capability not yet migrated| Monolith[Legacy Monolith]\n    Router -->|capability A: migrated| ServiceA[New Service: Capability A]\n    Router -.->|capability B: next to extract| Monolith\n\n    ServiceA -.->|monolith code path for A<br/>eventually decommissioned| Monolith',
+            },
           ],
         },
         {
@@ -283,7 +470,7 @@ export const systemDesignPatternsSection = {
             },
             {
               type: 'p',
-              text: 'Services communicate by publishing/subscribing to events on a broker (Kafka/SNS/EventBridge) rather than calling each other directly. Benefits: loose coupling (a producer doesn\'t know or care who consumes its events), independent scaling, natural audit trail. Costs: harder to trace a single business transaction across services (needs distributed tracing/correlation IDs), eventual consistency between services becomes the default, and debugging "why didn\'t X happen" requires understanding an asynchronous chain rather than a stack trace.',
+              text: 'Services communicate by publishing/subscribing to events on a broker (Kafka/SNS/EventBridge) rather than calling each other directly. Benefits: loose coupling (a producer doesn\'t know or care who consumes its events), independent scaling, natural audit trail. Costs: harder to trace a single business transaction across services (needs distributed tracing/correlation IDs), eventual consistency between services becomes the default, and debugging "why didn\'t X happen" requires understanding an asynchronous chain rather than a stack trace. A consumer can also see the same event more than once — see the delivery-semantics topic later in this guide for how that\'s handled safely.',
             },
             {
               type: 'heading',
@@ -308,6 +495,65 @@ export const systemDesignPatternsSection = {
           ],
         },
         {
+          id: 'idempotency-delivery-semantics',
+          title: 'Idempotency and Delivery Semantics: At-Least-Once, At-Most-Once, "Exactly-Once"',
+          summary:
+            'Once a request can time out ambiguously — and in a distributed system it always eventually will — idempotency is what stops a safe retry from silently corrupting state.',
+          keyPoints: [
+            'A network timeout is ambiguous: the request may have failed before or after the server processed it, so the caller cannot know whether to retry.',
+            'At-least-once delivery (retry until acknowledged) is the easiest and most common guarantee to build, but it requires the receiver to be idempotent to be safe.',
+            'At-most-once (never retry) avoids duplicates but risks silently losing work.',
+            'True "exactly-once" delivery is not achievable as a pure network guarantee — what production systems actually build is at-least-once delivery plus idempotent processing, which behaves like exactly-once from the caller\'s perspective.',
+            'An idempotency key (a client-generated unique ID attached to a request) lets the receiver recognize and safely no-op a retried request instead of double-processing it.',
+            'Idempotency is what makes Saga compensations, payment retries, and message-queue consumers safe — it directly enables the distributed transactions topic that follows.',
+          ],
+          blocks: [
+            {
+              type: 'p',
+              text: 'Topic one flagged the core problem: a network call can fail in a way that leaves the caller unable to tell whether the request never arrived, arrived but the response was lost, or arrived and is still being processed. If a caller\'s only safe move on timeout is "give up," the system is fragile; if the safe move is "retry," the system needs a way to make retries harmless. That is what this topic is about.',
+            },
+            {
+              type: 'heading',
+              text: 'The Three Delivery Semantics',
+            },
+            {
+              type: 'table',
+              headers: ['Semantics', 'How it works', 'Risk', 'When it fits'],
+              rows: [
+                ['At-most-once', 'Send once, never retry.', 'A lost message is lost forever — silent data loss.', 'Rarely acceptable alone; sometimes fine for best-effort telemetry/metrics.'],
+                ['At-least-once', 'Retry until acknowledged.', 'The same message/request may be processed more than once (duplicates).', 'The most common real-world default — safe only if the receiver is idempotent.'],
+                ['"Exactly-once"', 'Each message\'s effect is applied exactly one time, no more, no less.', 'Not actually achievable as a pure network guarantee — see below.', 'What people usually mean is at-least-once delivery + idempotent processing, which behaves like exactly-once from the caller\'s point of view.'],
+              ],
+            },
+            {
+              type: 'callout',
+              kind: 'pitfall',
+              text: '"Exactly-once delivery" as a literal network-layer guarantee is not achievable in an asynchronous system with unreliable networks — a sender fundamentally cannot know with certainty whether its message was received without also handling the case where the *acknowledgment* itself is lost, which puts you right back in retry territory. What message queues that advertise "exactly-once" (Kafka\'s idempotent/transactional producers, SQS FIFO) actually provide is at-least-once delivery combined with deduplication — exactly-once *processing effects*, not exactly-once transmission. Know what\'s actually guaranteed before relying on it.',
+            },
+            {
+              type: 'mermaid',
+              code: 'sequenceDiagram\n    participant Client\n    participant Server\n    Note over Client,Server: Without an idempotency key\n    Client->>Server: ChargeCard($50)\n    Server->>Server: charges card, response lost in transit\n    Note over Client: times out, doesn\'t know if it worked\n    Client->>Server: ChargeCard($50)  (retry)\n    Server->>Server: charges card AGAIN - customer double-charged\n\n    Note over Client,Server: With an idempotency key\n    Client->>Server: ChargeCard($50, key=abc123)\n    Server->>Server: charges card, stores result for key=abc123, response lost\n    Client->>Server: ChargeCard($50, key=abc123)  (retry, same key)\n    Server->>Server: sees key=abc123 already processed -> returns stored result, no second charge',
+            },
+            {
+              type: 'heading',
+              text: 'Idempotency Keys in Practice',
+            },
+            {
+              type: 'p',
+              text: 'An **idempotency key** is a unique identifier the *client* generates once per logical operation (not per network attempt) and sends with every retry of that same operation. The server stores, keyed by that identifier, either "already in progress" or the final result, for a reasonable retention window — a repeated request with the same key returns the stored result instead of re-executing the operation. This is exactly how payment APIs (Stripe\'s `Idempotency-Key` header is the canonical example) let clients retry a charge safely after an ambiguous timeout.',
+            },
+            {
+              type: 'p',
+              text: 'Some operations are naturally idempotent without any extra machinery — `SET x = 5` produces the same end state no matter how many times it runs — while others are not by default — `increment balance by 5` applied twice is a bug. An idempotency key (or an equivalent, like a unique constraint on a `request_id` column) is what turns a naturally non-idempotent operation into a safely-retryable one.',
+            },
+            {
+              type: 'callout',
+              kind: 'tip',
+              text: 'This is not an isolated topic — it is the mechanism that makes several other ideas in this guide actually safe in production: a load-balanced client retrying a request against a different backend (Load Balancing), a message-queue consumer that might see the same message twice (Event-Driven Architecture), and a Saga orchestrator retrying a step or a compensation after a crash (Distributed Transactions, next) all depend on the operation they\'re retrying being idempotent.',
+            },
+          ],
+        },
+        {
           id: 'distributed-transactions',
           title: 'Distributed Transactions: 2PC and Saga',
           summary:
@@ -317,6 +563,7 @@ export const systemDesignPatternsSection = {
             'Saga: breaks a transaction into local steps, each with a compensating transaction to undo it if a later step fails.',
             'Choreography: services react to each other\'s events, no central coordinator, but the flow is implicit and harder to trace.',
             'Orchestration: a central orchestrator explicitly calls each step and its compensations — easier to monitor as one defined workflow.',
+            'Both a Saga\'s steps and its compensations must be idempotent — an orchestrator that retries after a crash relies entirely on the mechanism from the previous topic.',
           ],
           blocks: [
             {
@@ -326,6 +573,10 @@ export const systemDesignPatternsSection = {
             {
               type: 'p',
               text: 'A coordinator asks all participants to "prepare" (lock resources, confirm they *can* commit) in phase 1, then tells them all to "commit" (or "abort" if any participant said no) in phase 2. Guarantees atomicity across services/databases, but the coordinator is a single point of failure/blocking — if it crashes between phases, participants can be left holding locks indefinitely ("in doubt"). Rarely used across microservices in practice because of this blocking behavior and the tight coupling it requires (all participants must be up and reachable simultaneously).',
+            },
+            {
+              type: 'mermaid',
+              code: 'sequenceDiagram\n    participant Coordinator\n    participant P1 as Participant 1 (Inventory)\n    participant P2 as Participant 2 (Payment)\n\n    Note over Coordinator,P2: Phase 1: Prepare (vote)\n    Coordinator->>P1: prepare()\n    Coordinator->>P2: prepare()\n    P1-->>Coordinator: yes, locked & ready\n    P2-->>Coordinator: yes, locked & ready\n\n    Note over Coordinator,P2: Phase 2: Commit (only if ALL voted yes)\n    Coordinator->>P1: commit()\n    Coordinator->>P2: commit()\n    P1-->>Coordinator: ack\n    P2-->>Coordinator: ack\n\n    Note over P1,P2: If the coordinator crashes between<br/>phase 1 and phase 2, both participants<br/>are stuck holding locks, "in doubt"',
             },
             {
               type: 'heading',
@@ -349,7 +600,7 @@ export const systemDesignPatternsSection = {
             {
               type: 'callout',
               kind: 'note',
-              text: 'This is the standard answer to "how do you handle a checkout flow that spans Inventory, Payment, and Shipping services without a shared database transaction."',
+              text: 'This is the standard answer to "how do you handle a checkout flow that spans Inventory, Payment, and Shipping services without a shared database transaction." Notice both `ChargeCard` and its compensation `RefundPayment` need to be safe to retry — if the orchestrator itself crashes and resumes, it may re-issue a step it already ran. That safety is exactly the idempotency guarantee from the previous topic; a Saga without idempotent steps is not actually safe.',
             },
           ],
         },
@@ -369,7 +620,7 @@ export const systemDesignPatternsSection = {
           blocks: [
             {
               type: 'p',
-              text: 'Ties together nearly every concept above into one coherent system — a strong template for "design Amazon/Flipkart" prompts.',
+              text: 'Ties together nearly every concept above — partitioning, replication, caching, consensus-backed coordination, event-driven decoupling, idempotency, and Sagas — into one coherent system. A strong template for "design Amazon/Flipkart" prompts.',
             },
             {
               type: 'mermaid',
@@ -398,7 +649,7 @@ export const systemDesignPatternsSection = {
           summary:
             'A practical prompt list to rehearse against — each one draws on the mechanisms covered above.',
           keyPoints: [
-            'These prompts are less about memorizing one correct architecture and more about applying consistent hashing, consensus, caching, and replication correctly to a new domain.',
+            'These prompts are less about memorizing one correct architecture and more about correctly applying CAP tradeoffs, partitioning, consensus, caching, and replication to a new domain.',
             'Several of these map directly onto a subset of the e-commerce case study\'s building blocks.',
             'Practice explaining the mechanism (why), not just naming the component (what).',
           ],
@@ -429,8 +680,28 @@ export const systemDesignPatternsSection = {
         {
           id: 'qa',
           title: 'Questions & Answers',
-          summary: '25 system design and architecture interview questions with full-depth answers.',
+          summary: '30 system design and architecture interview questions with full-depth answers.',
           qa: [
+            {
+              question: 'What is a distributed system, and why can\'t every problem just be solved by using a bigger single machine?',
+              answer:
+                'A distributed system is a collection of independent computers that coordinate over a network to appear as one system to users. Vertical scaling a single machine is simpler (no coordination complexity) and is the right first move for many systems, but it hits a physical ceiling (a machine can only hold so much CPU/RAM/disk) and an economic one (cost grows faster than linearly at the top end), and it remains a single point of failure no matter how large it gets. Horizontal scaling (many machines) has no such ceiling and tolerates individual machine failures, but introduces a network between the machines — and a network is slower, less reliable, and fails in ways an in-process function call never does. Every technique in a distributed systems curriculum (partitioning, replication, consensus, caching, idempotency) exists specifically to manage that tradeoff.',
+            },
+            {
+              question: 'What exactly does the CAP theorem say, and what\'s the most common misunderstanding about it in interviews?',
+              answer:
+                'CAP says that during a network partition, a distributed data system must choose between Consistency (every read reflects the latest write) and Availability (every request gets a non-error response) — it cannot guarantee both simultaneously in that scenario. The most common misunderstanding is treating it as "pick any 2 of 3 at all times," including offering "CA" as an option — but partition tolerance isn\'t really a design choice for a real multi-node system; networks partition whether or not you plan for it, so the only meaningful, ongoing decision is how the system behaves when a partition happens (CP or AP). The other common gap is forgetting CAP only describes partition behavior — outside of a partition, a well-built system delivers both consistency and availability; PACELC is the fuller model that also covers the latency-vs-consistency tradeoff during normal operation.',
+            },
+            {
+              question: 'What are the "Fallacies of Distributed Computing," and why does naming them matter in a system design interview?',
+              answer:
+                'They\'re a catalog of false assumptions engineers make about networks that reliably cause production incidents when unexamined: the network is reliable, latency is zero, bandwidth is infinite, the network is secure, topology doesn\'t change, there is one administrator, transport cost is zero, and the network is homogeneous. They matter in an interview because a design that implicitly assumes any of these (e.g., "the service just calls the other service and gets the result" with no mention of timeouts, retries, or partial failure) signals the candidate hasn\'t internalized what actually makes distributed systems hard. Explicitly naming the assumption being violated — "that call can time out, so we need a retry policy and idempotency on the receiving end" — is a concrete, low-cost way to demonstrate senior-level awareness.',
+            },
+            {
+              question: 'What\'s the difference between partitioning and replication, and why do real systems need both?',
+              answer:
+                'Partitioning (sharding) splits a dataset into pieces spread across multiple machines to scale storage and throughput — no single machine has to hold or serve all the data. Replication copies each piece of data onto multiple machines to provide durability (a disk failure doesn\'t lose data) and availability (a machine going down doesn\'t make that data unreachable). They solve different problems and are orthogonal: partitioning alone with no replication means losing one shard\'s machine loses that slice of data entirely; replication alone with no partitioning means every machine still has to hold the full dataset, which doesn\'t solve the scaling problem. Production distributed databases (Cassandra, DynamoDB, sharded MongoDB) do both at once — the dataset is split into partitions, and each partition is itself replicated across several nodes.',
+            },
             {
               question: 'Explain consistent hashing and why virtual nodes matter.',
               answer:
@@ -465,6 +736,16 @@ export const systemDesignPatternsSection = {
               question: 'When should you choose microservices over a monolith, and what\'s the most common mistake teams make with this decision?',
               answer:
                 'Choose microservices when you have clear, stable bounded contexts, multiple teams that need to deploy independently without blocking each other, and components with genuinely different scaling profiles. The most common mistake is adopting microservices prematurely — before the domain boundaries are well understood — which results in "distributed monolith": services that are still tightly coupled (shared database, synchronous call chains, coordinated deployments) but now also pay the full tax of network calls, partial failure, and operational complexity, with none of the independence benefits.',
+            },
+            {
+              question: 'What does it mean for an operation to be idempotent, and why does that matter specifically for retrying requests in a distributed system?',
+              answer:
+                'An operation is idempotent if performing it multiple times has the same effect as performing it once — `SET balance = 100` is idempotent, `balance += 100` is not. It matters because, per the fallacies of distributed computing, a network call\'s failure is ambiguous: a caller who times out cannot tell whether the request never arrived or arrived and succeeded but the response was lost. The only generally safe response to that ambiguity is to retry — and retrying is only safe if doing the operation twice has the same effect as doing it once. In practice this is achieved with an idempotency key (a client-generated ID sent with every retry of the same logical operation) that lets the receiver recognize and no-op a duplicate rather than re-executing it — this is exactly how payment APIs prevent a retried request from double-charging a customer.',
+            },
+            {
+              question: 'What\'s the practical difference between at-least-once, at-most-once, and "exactly-once" delivery — and is exactly-once actually real?',
+              answer:
+                'At-most-once sends a message once and never retries — simple, but a lost message is lost forever. At-least-once retries until acknowledged — no message is silently lost, but the same message may be delivered/processed more than once, so the receiver must handle duplicates. "Exactly-once" describes each message\'s effect being applied precisely once, but as a pure network-transmission guarantee it is not achievable in an asynchronous system with unreliable networks — the sender can never be fully certain its message (or the acknowledgment of it) wasn\'t lost, which reintroduces the need to retry. What systems that market "exactly-once" (Kafka\'s idempotent producers, SQS FIFO) actually deliver is at-least-once transmission plus deduplication/idempotent processing on the receiving end, which behaves like exactly-once from the caller\'s point of view without literally being a single-transmission guarantee.',
             },
             {
               question: 'Explain the Saga pattern and the difference between choreography and orchestration.',

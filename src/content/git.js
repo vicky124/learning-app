@@ -8,7 +8,127 @@ export const gitSection = {
       label: 'Guide',
       topics: [
         {
-          id: 'model',
+          id: 'what-is-git',
+          title: 'What Is Git, and Why Does Version Control Matter?',
+          summary:
+            'Git is a distributed version control system: every clone is a complete, independent copy of the full project history, not just a pointer back to one central server.',
+          keyPoints: [
+            'Version control tracks every change to a codebase over time, who made it, and why — enabling collaboration, rollback, and auditability.',
+            "Distributed (Git) vs centralized (older systems like SVN/CVS): every developer's clone has the entire history, so most operations (commit, log, diff, branch) happen instantly, offline, with no server round-trip.",
+            'A "repository" (repo) is a project directory plus its hidden `.git` folder, which holds the entire history as a database of objects.',
+            'Git was created by Linus Torvalds in 2005 to manage the Linux kernel — a project with thousands of contributors and no single point of failure.',
+          ],
+          blocks: [
+            {
+              type: 'p',
+              text: 'Version control solves a problem every codebase eventually has: multiple people (or just multiple past versions of yourself) changing the same files over time, needing to know what changed, when, why, and by whom — and needing a safe way to combine everyone\'s work without overwriting each other.',
+            },
+            {
+              type: 'heading',
+              text: 'Centralized vs distributed version control',
+            },
+            {
+              type: 'mermaid',
+              code: 'flowchart LR\n  subgraph Centralized["Centralized (e.g. SVN)"]\n    Server1[(Central Server<br/>full history)]\n    DevA1[Dev A<br/>working copy only] --> Server1\n    DevB1[Dev B<br/>working copy only] --> Server1\n  end\n  subgraph Distributed["Distributed (Git)"]\n    Server2[(Remote<br/>e.g. GitHub)]\n    DevA2[Dev A<br/>FULL history] <--> Server2\n    DevB2[Dev B<br/>FULL history] <--> Server2\n  end',
+            },
+            {
+              type: 'list',
+              items: [
+                '**Centralized systems** store the full history only on a central server; a developer\'s machine has just the current checked-out files, so most operations (history, diffs, branching) require network access to the server.',
+                '**Git**, being distributed, gives every clone the complete history — you can commit, branch, view history, and diff entirely offline; only pushing/pulling to share with others needs a network.',
+                'This is also what makes Git resilient: any clone can restore the entire project (and its history) if the central remote (e.g., GitHub) is ever lost.',
+              ],
+            },
+            {
+              type: 'callout',
+              kind: 'note',
+              text: 'GitHub/GitLab/Bitbucket are not Git itself — they are hosting services built around Git, adding a web UI, pull requests, issue tracking, and access control on top of the plain Git protocol.',
+            },
+          ],
+        },
+        {
+          id: 'core-workflow',
+          title: 'The Core Workflow: init, add, commit, status, log, diff',
+          summary:
+            'Nearly all day-to-day Git usage is a small set of commands moving changes through three stages — working directory, staging area, and repository history.',
+          keyPoints: [
+            '`git init` creates a new repository; `git clone <url>` copies an existing one, including its full history.',
+            '`git status` shows what has changed and what is staged; `git diff` shows the actual line-by-line changes.',
+            '`git add <file>` stages a change; `git commit -m "message"` permanently records the staged snapshot in history.',
+            '`git log` shows the commit history; `git log --oneline --graph` is the compact, visual version most developers actually use day to day.',
+          ],
+          blocks: [
+            {
+              type: 'code',
+              language: 'bash',
+              title: 'a first Git session',
+              code: `git init my-project              # start a brand-new repo
+cd my-project
+
+echo "hello" > README.md
+git status                        # README.md shows as "untracked"
+
+git add README.md                 # stage it
+git status                        # now shows as "staged" / "to be committed"
+
+git commit -m "Add README"        # permanently record it in history
+git log --oneline                 # a1b2c3d Add README
+
+echo "hello world" > README.md
+git diff                          # shows the exact line changed, unstaged
+git add -A                        # stage ALL changes (new/modified/deleted)
+git commit -m "Update README"`,
+            },
+            {
+              type: 'heading',
+              text: 'Where a change lives at each step',
+            },
+            {
+              type: 'mermaid',
+              code: 'flowchart LR\n  WD[Working Directory<br/>files you edit] -- "git add" --> Stage[Staging Area / Index<br/>next commit, in progress]\n  Stage -- "git commit" --> Repo[Repository History<br/>permanent, HEAD]\n  Repo -- "git checkout / restore" --> WD',
+            },
+            {
+              type: 'callout',
+              kind: 'tip',
+              text: 'A good commit message explains **why**, not just what — the diff already shows what changed. "Fix off-by-one error in pagination that skipped the last page" is far more useful later than "fix bug".',
+            },
+          ],
+        },
+        {
+          id: 'branching-basics',
+          title: 'Branching Basics',
+          summary:
+            'A branch is just a movable, lightweight pointer to a commit — creating one is instant and cheap, which is what makes Git branching workflows practical for everyday work.',
+          keyPoints: [
+            '`git branch <name>` creates a branch; `git switch <name>` (or the older `git checkout <name>`) moves HEAD to it.',
+            '`git switch -c <name>` creates and switches in one step — the most common way to start new work.',
+            'HEAD is a pointer to "the branch you are currently on"; committing on a branch moves that branch\'s pointer forward automatically.',
+            'Deleting a branch (`git branch -d <name>`) only deletes the pointer — the commits stay in history if any other branch/tag still reaches them.',
+          ],
+          blocks: [
+            {
+              type: 'p',
+              text: 'Internally, a branch is a tiny file containing just a commit hash — nothing is copied when you create one. This is why Git branching is instant, unlike some older systems where branching meant duplicating the entire codebase on disk.',
+            },
+            {
+              type: 'mermaid',
+              code: 'gitGraph\n  commit id: "C1"\n  commit id: "C2"\n  branch feature/login\n  checkout feature/login\n  commit id: "C3"\n  commit id: "C4"\n  checkout main\n  commit id: "C5"',
+            },
+            {
+              type: 'code',
+              language: 'bash',
+              title: 'everyday branch commands',
+              code: `git branch                     # list local branches, * marks the current one
+git switch -c feature/login    # create + switch to a new branch
+# ... make commits ...
+git switch main                # go back to main
+git branch -d feature/login    # delete it once merged (safe: refuses if unmerged)
+git branch -D feature/login    # force-delete even if unmerged`,
+            },
+          ],
+        },
+        {
+          id: 'how-git-models-history',
           title: 'How Git Actually Models History',
           summary:
             'Git is a content-addressable graph of snapshots, not a list of diffs — understanding that one fact explains almost every command that otherwise seems arbitrary.',
@@ -47,10 +167,56 @@ export const gitSection = {
           ],
         },
         {
-          id: 'branching-merging',
-          title: 'Branching, Merging & Rebasing',
+          id: 'ignoring-stashing-tagging',
+          title: '.gitignore, Stashing & Tags',
           summary:
-            'A branch is cheap (just a pointer), which is what makes Git branching workflows practical — but merge vs rebase is the distinction that trips up almost everyone at some point.',
+            'Three small but constantly-used tools: keeping noise out of the repo, temporarily shelving unfinished work, and marking a specific commit as meaningful (like a release).',
+          keyPoints: [
+            '`.gitignore` lists patterns Git should never track (build output, dependencies, local secrets/env files).',
+            '`git stash` shelves uncommitted changes so you can switch context (e.g., to fix an urgent bug) and restore them later with `git stash pop`.',
+            'A tag is a named pointer to one specific commit — unlike a branch, it never moves forward.',
+            'Annotated tags (`git tag -a`) store metadata (author, date, message, optional GPG signature); lightweight tags are just a name.',
+          ],
+          blocks: [
+            {
+              type: 'code',
+              language: 'bash',
+              title: '.gitignore and stashing',
+              code: `# .gitignore
+node_modules/
+dist/
+*.log
+.env
+
+# Stashing mid-task
+git stash                     # shelve all uncommitted changes
+git switch main
+git switch -c hotfix/urgent-bug
+# ... fix and commit the urgent bug ...
+git switch feature/login
+git stash pop                 # bring your shelved changes back`,
+            },
+            {
+              type: 'code',
+              language: 'bash',
+              title: 'tagging a release',
+              code: `git tag v1.0.0                       # lightweight tag on the current commit
+git tag -a v1.0.0 -m "First release" # annotated tag, with metadata
+git push origin v1.0.0               # tags aren't pushed by default — must push explicitly
+git push origin --tags               # push all tags at once`,
+            },
+            {
+              type: 'callout',
+              kind: 'pitfall',
+              text: 'A file already tracked by Git before it was added to `.gitignore` keeps being tracked — the ignore rule only stops **untracked** files from being picked up. Untrack it explicitly with `git rm --cached <file>` (keeps the file on disk, just stops tracking it).',
+            },
+          ],
+        },
+        {
+          id: 'merging-rebasing',
+          title: 'Merging vs Rebasing',
+          summary:
+            'Both combine work from two branches, but merge preserves history exactly as it happened while rebase rewrites it into a straight line — the distinction that trips up almost everyone at some point.',
           keyPoints: [
             'A merge creates a new commit with two parents, preserving both histories exactly as they happened.',
             'A rebase replays your commits on top of a new base, producing new commits (new hashes) and a linear history.',
@@ -98,7 +264,7 @@ git push --force-with-lease            # safer than --force: fails if the remote
           ],
         },
         {
-          id: 'undoing',
+          id: 'undoing-things',
           title: 'Undoing Things: reset, revert, checkout, restore',
           summary:
             'Four different commands can "undo" something in Git, and picking the wrong one is how history gets rewritten by accident on a shared branch.',
@@ -136,7 +302,7 @@ git branch recovered-work <sha> # turn it back into a real branch`,
           ],
         },
         {
-          id: 'collaboration',
+          id: 'remote-collaboration',
           title: 'Remote Collaboration Workflows',
           summary:
             'fetch vs pull, forks vs shared branches, and the pull-request review cycle — the parts of Git that are really about people, not the object model.',
@@ -150,6 +316,10 @@ git branch recovered-work <sha> # turn it back into a real branch`,
             {
               type: 'p',
               text: '`git fetch origin` updates your local copies of the remote\'s branches (e.g. `origin/main`) without changing anything you\'re currently working on. `git pull` is shorthand for `fetch` immediately followed by `merge FETCH_HEAD` into your current branch — which is also why `git pull` can unexpectedly create a merge commit if your local branch has diverged; `git pull --rebase` replays your local commits on top instead, keeping history linear.',
+            },
+            {
+              type: 'mermaid',
+              code: 'sequenceDiagram\n  participant Local as Your local repo\n  participant Remote as origin (GitHub)\n  Local->>Remote: git fetch\n  Remote-->>Local: updates origin/main (your main untouched)\n  Local->>Local: git merge origin/main\n  Note right of Local: git pull = fetch + merge, in one step',
             },
             {
               type: 'heading',
@@ -174,6 +344,171 @@ git checkout -b feature/add-search
 git push -u origin feature/add-search
 # open a pull request; address review comments with more commits
 # once approved: squash-merge (or per team convention) via the hosting platform`,
+            },
+          ],
+        },
+        {
+          id: 'git-internals',
+          title: 'Git Internals: Objects, Refs & Packfiles',
+          summary:
+            'Under the hood, `.git` is a simple key-value object database plus a handful of pointer files — knowing this makes every higher-level command feel obvious rather than magic.',
+          keyPoints: [
+            'Four object types, all content-addressed by SHA hash: blob (file content), tree (a directory listing), commit (a snapshot + metadata), and tag (an annotated tag).',
+            'Refs are just files: `.git/refs/heads/main` contains a commit hash; `.git/HEAD` contains a reference to the current branch.',
+            'Loose objects (one file per object) get compacted into packfiles for efficiency — Git delta-compresses similar objects against each other.',
+            'The plumbing commands (`git hash-object`, `git cat-file`, `git rev-parse`) expose this model directly and are what the porcelain commands (`add`, `commit`, `log`) are built on top of.',
+          ],
+          blocks: [
+            {
+              type: 'mermaid',
+              code: 'flowchart TB\n  HEAD[".git/HEAD"] -->|"ref: refs/heads/main"| MainRef[".git/refs/heads/main"]\n  MainRef -->|commit hash| Commit["commit object\\ntree + parent + message"]\n  Commit --> Tree["tree object\\n(a directory listing)"]\n  Tree --> Blob1["blob object\\n(App.jsx content)"]\n  Tree --> Blob2["blob object\\n(index.js content)"]\n  Tree --> Subtree["tree object\\n(src/ subdirectory)"]',
+            },
+            {
+              type: 'code',
+              language: 'bash',
+              title: 'poking at the object database directly',
+              code: `git cat-file -p HEAD              # inspect the current commit object: tree, parent, message
+git cat-file -p HEAD^{tree}        # inspect the tree it points to — a directory listing
+git rev-parse HEAD                 # the raw commit hash HEAD currently resolves to
+git count-objects -v               # how many loose objects vs. objects packed in packfiles
+git gc                             # compact loose objects into packfiles, prune unreachable ones`,
+            },
+            {
+              type: 'callout',
+              kind: 'note',
+              text: 'This is why a commit hash changes if you amend a commit, rebase, or even just change its commit message: the hash is a function of the commit object\'s entire content (tree, parent, author, message) — change any of it and you get a brand-new object with a brand-new hash.',
+            },
+          ],
+        },
+        {
+          id: 'interactive-rebase-history',
+          title: 'Interactive Rebase & Rewriting History',
+          summary:
+            'Beyond replaying commits onto a new base, `rebase -i` lets you edit, reorder, squash, or drop individual commits — the main tool for cleaning up a messy branch before merging.',
+          keyPoints: [
+            '`git rebase -i HEAD~N` opens an editable list of the last N commits — reorder lines to reorder commits, or change the leading keyword to act differently.',
+            '`squash`/`fixup` combine a commit into the one before it — turning "WIP", "fix typo", "actually fix it" into one clean commit.',
+            '`git commit --amend` rewrites the most recent commit (message and/or content) instead of creating a new one.',
+            'Only rewrite history that has not been shared/pushed — the golden rule from Merging vs Rebasing applies here even more strongly.',
+          ],
+          blocks: [
+            {
+              type: 'code',
+              language: 'bash',
+              title: 'cleaning up a branch before opening a PR',
+              code: `git rebase -i HEAD~4
+# opens an editor with something like:
+#   pick a1b2c3d Add search input
+#   pick e4f5g6h WIP
+#   pick h7i8j9k fix typo
+#   pick k1l2m3n Actually fix the bug
+#
+# change to:
+#   pick   a1b2c3d Add search input
+#   squash e4f5g6h WIP
+#   squash h7i8j9k fix typo
+#   squash k1l2m3n Actually fix the bug
+# → save, write one clean combined commit message, done
+
+git commit --amend -m "Better message"   # rewrite the last commit's message
+git commit --amend --no-edit             # add staged changes to the last commit, keep its message`,
+            },
+            {
+              type: 'callout',
+              kind: 'tip',
+              text: 'If a rebase gets confusing partway through, `git rebase --abort` puts everything back exactly as it was before you started — there is no penalty for backing out and trying again.',
+            },
+          ],
+        },
+        {
+          id: 'hooks-automation',
+          title: 'Git Hooks & Automation',
+          summary:
+            'Hooks are scripts Git runs automatically at specific points (before a commit, before a push, after a merge) — the foundation of local quality gates like linting and formatting on commit.',
+          keyPoints: [
+            'Hooks live in `.git/hooks/` as executable scripts named after the event (`pre-commit`, `commit-msg`, `pre-push`, `post-merge`).',
+            'A non-zero exit code from a hook script aborts the action — e.g., a `pre-commit` hook that fails stops the commit from happening.',
+            'Because `.git/hooks/` is not tracked by Git itself, teams typically use a tool like Husky (JS) or `pre-commit` (Python) to version and share hook configuration through the repo.',
+            'Common uses: run linters/formatters before commit, run the test suite before push, enforce a commit-message format.',
+          ],
+          blocks: [
+            {
+              type: 'code',
+              language: 'bash',
+              title: 'a minimal pre-commit hook',
+              code: `# .git/hooks/pre-commit  (must be executable: chmod +x)
+#!/bin/sh
+npm run lint || {
+  echo "Lint failed — commit aborted."
+  exit 1
+}`,
+            },
+            {
+              type: 'mermaid',
+              code: 'flowchart LR\n  A[git commit] --> B{pre-commit hook}\n  B -- exit 0 --> C[commit-msg hook]\n  B -- exit non-zero --> X[commit aborted]\n  C -- exit 0 --> D[commit created]\n  C -- exit non-zero --> X',
+            },
+          ],
+        },
+        {
+          id: 'submodules-monorepos',
+          title: 'Submodules & Monorepo Strategies',
+          summary:
+            'Two opposite answers to "how do I manage multiple related codebases": keep them as separate repos linked together (submodules), or put everything in one repo (a monorepo).',
+          keyPoints: [
+            'A submodule embeds another Git repository at a specific commit inside your repo — useful for a genuinely independent dependency you also develop.',
+            'Submodules are notoriously easy to get out of sync (`git submodule update --init --recursive` is required after every clone/pull) — a common source of "why is this file missing" confusion.',
+            'A monorepo keeps multiple projects/packages in one repo instead, sharing one history and one set of commits — simpler day-to-day at the cost of a larger single repo.',
+            'Large monorepos (Google, Meta) typically pair this with tooling for partial checkouts and scoped CI, since a plain `git clone` of everything would be impractical at that scale.',
+          ],
+          blocks: [
+            {
+              type: 'code',
+              language: 'bash',
+              title: 'working with a submodule',
+              code: `git submodule add https://github.com/org/shared-lib libs/shared-lib
+git commit -m "Add shared-lib as a submodule"
+
+# after someone else clones the parent repo:
+git clone https://github.com/org/main-app
+git submodule update --init --recursive   # actually fetch the submodule's content`,
+            },
+            {
+              type: 'callout',
+              kind: 'pitfall',
+              text: 'A submodule reference is a specific pinned commit, not a branch — pulling the parent repo does not automatically update the submodule\'s content. This is a common source of "it works on my machine" when one developer updated the submodule and others forgot to run `git submodule update`.',
+            },
+          ],
+        },
+        {
+          id: 'debugging-bisect-blame',
+          title: 'Debugging History: bisect, blame & log Search',
+          summary:
+            'When something broke and you don\'t know which commit did it, Git has purpose-built tools for searching history itself rather than just the current code.',
+          keyPoints: [
+            '`git bisect` automates a binary search over commit history to find exactly which commit introduced a bug.',
+            '`git blame <file>` shows which commit last touched each line — the starting point for "why is this line here?".',
+            '`git log -S"search term"` finds commits that added or removed a specific string ("the pickaxe") — useful when blame just points to a big refactor.',
+            '`git log --follow <file>` tracks a file\'s history across renames, which plain `git log <file>` does not do.',
+          ],
+          blocks: [
+            {
+              type: 'code',
+              language: 'bash',
+              title: 'bisecting to find a regression',
+              code: `git bisect start
+git bisect bad                    # current commit is broken
+git bisect good v1.2.0             # this older tag was known-good
+# Git checks out the midpoint commit — test it, then:
+git bisect good                    # or: git bisect bad
+# ... repeat until Git identifies the exact first-bad commit ...
+git bisect reset                   # return to where you started
+
+# fully automated, given a script that exits non-zero on failure:
+git bisect run npm test`,
+            },
+            {
+              type: 'mermaid',
+              code: 'flowchart LR\n  Good["known-good\\ncommit"] -.-> C1 -.-> C2 -.-> C3["? bisect checks\\nout the midpoint"] -.-> C4 -.-> C5 -.-> Bad["known-bad\\n(current) commit"]',
             },
           ],
         },
@@ -237,6 +572,21 @@ git push -u origin feature/add-search
               question: 'How would you find which commit introduced a specific bug, in a large history?',
               answer:
                 '`git bisect` automates a binary search over commit history: you mark a known-good commit and a known-bad commit, and Git checks out the midpoint for you to test, narrowing the range by half on each iteration based on whether you mark that commit good or bad — turning what could be a linear scan through hundreds of commits into a logarithmic number of tests. `git bisect run <test-script>` can even automate the "test and mark" step entirely if you have a script that exits non-zero on the bug.',
+            },
+            {
+              question: 'What actually happens inside `.git` when you run `git commit`?',
+              answer:
+                'Git first writes a tree object representing the current staged directory structure (recursively, one tree per directory, referencing blob objects for file contents — reusing any blob/tree that already exists with identical content). It then writes a commit object containing that tree\'s hash, the current HEAD commit as its parent, the author/committer metadata, and the commit message. Finally, it updates the current branch\'s ref file to point at this new commit hash, and moves HEAD along with it (since HEAD is a symbolic reference to the branch).',
+            },
+            {
+              question: 'What is the difference between `git rebase -i` squash and fixup?',
+              answer:
+                'Both combine a commit into the one immediately before it in the list, but `squash` keeps that commit\'s message and lets you edit the combined message, while `fixup` discards its message entirely and silently folds it into the previous commit\'s message unchanged. `fixup` is the right choice for "oops, fix a typo in the last commit" — you don\'t want a trivial fix-up message cluttering the final history.',
+            },
+            {
+              question: 'Why can pulling submodule-based dependencies be a source of confusing bugs on a team, and how do you avoid it?',
+              answer:
+                'A submodule reference in the parent repo is a pointer to one specific pinned commit of the submodule, not to a branch — so pulling the parent repo\'s changes does not automatically update the submodule\'s checked-out content, and a plain `git clone` of the parent repo leaves submodule directories empty until explicitly initialized. This causes "it works on my machine" bugs when one developer bumps the submodule pointer and others simply run `git pull` without also running `git submodule update --init --recursive`. Teams avoid this with a post-checkout/post-merge hook that runs the submodule update automatically, or by preferring a monorepo when the coupling between projects is tight enough that this friction outweighs the benefit of separate repos.',
             },
           ],
         },

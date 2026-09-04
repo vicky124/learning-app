@@ -8,6 +8,171 @@ export const hldSection = {
       label: 'Guide',
       topics: [
         {
+          id: 'what-is-hld',
+          title: 'What High-Level Design Actually Is (and How It Differs From LLD)',
+          summary:
+            'HLD produces the "org chart" of a system - which services, stores, and queues exist and how they talk - while Low-Level Design designs the internals of a single box on that chart.',
+          keyPoints: [
+            'HLD answers "what are the pieces and how do they fit together"; LLD answers "how is this one piece actually built" (classes, algorithms, concurrency inside a service).',
+            'The boundary is fuzzy on purpose - an HLD answer that stays too shallow looks like a slideshow; one that dives too deep into one box runs out of time to cover the system.',
+            'Both get called "system design" casually - when a company says "system design round" without qualifying it, ask which one, because the two are graded on completely different rubrics.',
+            'This guide is scoped to HLD: which services/stores/queues exist and how they talk. Deep component internals - load balancing algorithms, cache eviction policies, DB storage engines - belong to a lower-level fundamentals track.',
+          ],
+          blocks: [
+            {
+              type: 'p',
+              text: '**System design** as a broad term covers everything from "how do you architect a distributed system spanning ten services" down to "how do you design the class hierarchy for a parking garage." **High-Level Design (HLD)** narrows this to the former: given a product requirement, decide which services, data stores, caches, and queues exist, how they communicate, and why - without designing the internals of any single component in detail. **Low-Level Design (LLD)** is the complementary, narrower discipline: given one component (or a small, self-contained problem like "design a rate limiter" or "design a parking lot"), design its classes, interfaces, data structures, and algorithms in code-adjacent detail.',
+            },
+            {
+              type: 'heading',
+              text: 'HLD vs LLD, side by side',
+            },
+            {
+              type: 'table',
+              headers: ['Dimension', 'High-Level Design (HLD)', 'Low-Level Design (LLD)'],
+              rows: [
+                ['Question being answered', 'What components exist, and how do they talk to each other?', 'How is *this one* component built internally?'],
+                ['Typical artifact', 'A box-and-arrow architecture diagram spanning services, stores, queues', 'Class diagrams, interface contracts, algorithms, concurrency handling'],
+                ['Example prompt', '"Design Twitter\'s news feed"', '"Design the rate-limiter class a single service uses"'],
+                ['Granularity', 'One box per service - internals hidden', 'One service\'s internals, fully exposed'],
+                ['What it tests', 'Requirement scoping, estimation, and tradeoffs across a distributed system', 'OOP design, design patterns, data structures, thread-safety'],
+              ],
+            },
+            {
+              type: 'mermaid',
+              code: 'flowchart TB\n    subgraph HLD["HLD view - one box per service"]\n        C1[Client] --> LB1[Load Balancer]\n        LB1 --> Svc1[Feed Service]\n        Svc1 --> DB1[(Database)]\n    end\n    subgraph LLD["LLD view - inside one box"]\n        Class1["FeedService class"]\n        Class1 --> M1["rankPosts(posts)"]\n        Class1 --> M2["mergeSources(sources)"]\n        Class1 --> Cache1["LRUCache&lt;UserId, Feed&gt;"]\n    end\n    Svc1 -.->|zoom in| Class1',
+            },
+            {
+              type: 'callout',
+              kind: 'tip',
+              text: 'If an interviewer pushes you to explain exactly how a load balancer picks a server, or exactly how a cache evicts entries, that is a signal they want an LLD-flavored digression - it is fine to go there briefly, but say out loud that you are doing it ("stepping into the LLD of the cache for a second") so the interviewer can pull you back to the architecture level if that is not what they wanted.',
+            },
+          ],
+        },
+        {
+          id: 'client-server-api',
+          title: 'The Client-Server Model & What an API Really Is',
+          summary:
+            'Nearly every HLD diagram is an elaboration of one idea: a client sends a request, a server does work and sends back a response - an API is just the agreed-upon shape of that conversation.',
+          keyPoints: [
+            'Client-server model: the client initiates, the server responds; in modern designs the server treats each request as independent (stateless), so any server instance can handle any request.',
+            'An **API** is a contract - a set of operations, their inputs, and their outputs - and says nothing about how the server implements them internally.',
+            'REST, RPC, and GraphQL are three common shapes for that contract; HLD interviews mostly care about what fields the contract carries, not which wire format you pick.',
+            'Every arrow between two boxes on an HLD diagram implicitly means "an API call (or a message) with a specific request and response shape" - being able to state that shape concretely is what separates a real design from a cartoon of boxes and arrows.',
+          ],
+          blocks: [
+            {
+              type: 'p',
+              text: 'A **client** is anything that initiates a request - a browser, a mobile app, another backend service. A **server** is anything that listens for requests and responds. The client-server model just says: the client always initiates, the server always responds, and (in almost every modern web-scale design) the server does not remember anything about the client between requests - each request carries everything the server needs to handle it. That last property, **statelessness**, is what makes it possible to put many identical server instances behind a load balancer, covered next.',
+            },
+            {
+              type: 'mermaid',
+              code: 'sequenceDiagram\n    participant Client\n    participant Server\n    participant DB as Database\n\n    Client->>Server: HTTP request, e.g. GET /api/v1/users/42\n    Server->>DB: query for user 42\n    DB-->>Server: row(s)\n    Server-->>Client: HTTP response - status code + JSON body\n    Note over Client,Server: the request/response shape IS the API contract',
+            },
+            {
+              type: 'heading',
+              text: 'What "an API" means at the HLD level',
+            },
+            {
+              type: 'list',
+              items: [
+                '**REST** - resource-oriented (`GET /users/42`, `POST /orders`); the most common default for public/client-facing APIs, maps naturally onto CRUD.',
+                '**RPC** (gRPC, Thrift) - action-oriented (`getUser(42)`, `createOrder(...)`); common for internal service-to-service calls where performance and strict typing matter more than browsability.',
+                '**GraphQL** - the client specifies exactly which fields it needs in one request; useful when many different clients (web, mobile, third parties) need different slices of the same underlying data and you want to avoid over-fetching or under-fetching.',
+                'Internal service-to-service calls are frequently gRPC or plain HTTP+JSON; the choice rarely matters for an HLD interview - naming the *contract fields* for your 3-6 key endpoints matters far more than picking a wire protocol.',
+              ],
+            },
+            {
+              type: 'code',
+              language: 'text',
+              title: 'a minimal, concrete API contract',
+              code: `POST /api/v1/orders
+  body: { "userId": "u_123", "items": [{ "sku": "abc", "qty": 2 }] }
+  201: { "orderId": "o_789", "status": "pending", "total": 41.98 }
+  400: { "error": "invalid sku" }`,
+            },
+            {
+              type: 'callout',
+              kind: 'tip',
+              text: 'Treat every arrow you draw between two boxes as a placeholder for a contract you have not yet written. If you cannot say, on the spot, roughly what request and response cross that arrow, that box has not actually been designed yet - it has just been drawn.',
+            },
+          ],
+        },
+        {
+          id: 'single-server-database-basics',
+          title: 'The Starting Point: One Server, One Database',
+          summary:
+            'Every HLD ends up distributed, but it starts conceptually as one application server talking to one database - understanding why that setup breaks is what motivates every building block that follows.',
+          keyPoints: [
+            'A **database** exists to durably store state so it survives past a single request or process - the app server itself is usually treated as disposable and stateless, the database is not.',
+            'The simplest possible working system is: client -> single app server -> single database, reachable over the network, with no caching, no queue, and no replica.',
+            'This setup breaks along three axes as load grows: the app server runs out of CPU/connections, the database runs out of capacity for reads or writes, and a single machine is a single point of failure.',
+            'Nearly every later building block (load balancer, cache, replica, shard, queue) exists to relieve one specific pressure point in this simple starting picture - naming *which* pressure point a building block relieves is a stronger answer than just naming the building block.',
+          ],
+          blocks: [
+            {
+              type: 'p',
+              text: 'A **database** is software whose job is to store data durably (surviving a crash or restart), let you query it efficiently, and enforce rules about it (uniqueness, relationships, types). Contrast this with the application server: if an app server process dies, you restart it and nothing is lost, because it was not supposed to be holding anything durable in memory. If a database loses data, that is a real incident. This asymmetry - servers are disposable, databases are not - is the single most load-bearing assumption in HLD, and it is why almost every scaling technique treats "add another app server" as cheap and "add another database" as an entire design decision.',
+            },
+            {
+              type: 'mermaid',
+              code: 'flowchart LR\n    Client -->|request| App[App Server]\n    App -->|read / write| DB[(Database)]\n    App -.->|no redundancy| SPOF["Single point of failure:<br/>App or DB dying takes<br/>the whole system down"]',
+            },
+            {
+              type: 'heading',
+              text: 'Where this breaks first, and the typical first fix',
+            },
+            {
+              type: 'list',
+              items: [
+                '**App server runs out of CPU/connections** as request volume grows -> add more app server instances behind a load balancer (cheap, because the app server is stateless).',
+                '**Database runs out of capacity for reads** (the far more common case, since most systems are read-heavy) -> add a cache in front of it, then read replicas.',
+                '**Database runs out of capacity for writes**, or its data no longer fits on one machine -> partition/shard the data across multiple database instances (a much bigger structural decision, usually deferred as long as possible).',
+                '**Single machine = single point of failure** for either tier -> redundancy: multiple app server instances (already true once you add a load balancer), and a database replica that can be promoted if the primary dies.',
+              ],
+            },
+            {
+              type: 'callout',
+              kind: 'note',
+              text: 'This is the picture every later topic in this guide adds one piece to. After reading "Core Building Blocks," come back here and check that you can map each block - load balancer, cache, replica, shard, queue - back to one specific pressure point in this simple starting diagram. If you can, you understand the *why*, not just the vocabulary.',
+            },
+          ],
+        },
+        {
+          id: 'scaling-fundamentals',
+          title: 'Vertical vs Horizontal Scaling',
+          summary:
+            'The single server from the previous topic can only grow two ways - get a bigger machine, or get more machines - and almost every architectural building block in HLD exists to make the second option possible.',
+          keyPoints: [
+            '**Vertical scaling** = a bigger machine (more CPU/RAM/faster disk) - the simplest move, requires no application changes, but hits a hard ceiling (the largest instance available) and is still a single point of failure.',
+            '**Horizontal scaling** = more machines - no practical ceiling, and redundancy comes almost for free, but it requires the application to be designed for it.',
+            'Statelessness in the application layer is the prerequisite that makes horizontal scaling of app servers trivial - any request can go to any server, because no server is holding session state the others lack.',
+            'Databases are the hard part to scale horizontally, because they hold state by definition - this is exactly why replication and sharding get their own dedicated vocabulary in the building-blocks topic.',
+          ],
+          blocks: [
+            {
+              type: 'mermaid',
+              code: 'flowchart TB\n    subgraph Vertical["Vertical scaling"]\n        Small[Small server] -->|upgrade| Big["Bigger server<br/>more CPU/RAM"]\n        Big -->|upgrade again| Biggest["Biggest available server<br/>- hits a ceiling"]\n    end\n    subgraph Horizontal["Horizontal scaling"]\n        LB2[Load Balancer] --> H1[Server 1]\n        LB2 --> H2[Server 2]\n        LB2 --> H3[Server 3]\n        LB2 --> H4[...Server N]\n    end',
+            },
+            {
+              type: 'table',
+              headers: ['Dimension', 'Vertical scaling', 'Horizontal scaling'],
+              rows: [
+                ['Ceiling', 'Hard - largest instance size available', 'No practical ceiling'],
+                ['Code changes required', 'None', 'App layer must be stateless; data layer must support partitioning/replication'],
+                ['Redundancy', 'None - still one machine', 'Comes largely for free (more machines = survives losing one)'],
+                ['Cost curve', 'Non-linear - the biggest instances cost disproportionately more per unit of capacity', 'Roughly linear - N machines cost ~N x one machine'],
+                ['Typical use', 'The right first move for a startup-scale system, or for a database primary before sharding is justified', 'The default once you outgrow one machine, or need redundancy'],
+              ],
+            },
+            {
+              type: 'callout',
+              kind: 'tip',
+              text: 'Vertical scaling is a legitimate, correct first move - not something to skip past to look impressive. Naming "we could just get a bigger box for now, and here is the QPS/data-size point at which that stops working" shows judgment; jumping straight to "microservices and sharding" for a system that estimation shows fits comfortably on one well-provisioned machine is a common overengineering tell.',
+            },
+          ],
+        },
+        {
           id: 'what-hld-tests',
           title: 'What HLD Interviews Actually Test',
           summary:
@@ -43,6 +208,10 @@ export const hldSection = {
                 '**Tradeoff articulation (10%)** — do you say "I chose X over Y because Z, which costs us W" unprompted?',
                 '**Communication (5%)** — structured, checks in with the interviewer, doesn\'t silently disappear into a monologue.',
               ],
+            },
+            {
+              type: 'mermaid',
+              code: 'pie title HLD interview grading weight (typical rubric)\n    "Requirement clarification" : 10\n    "Estimation" : 10\n    "API / data model design" : 15\n    "Component architecture" : 25\n    "Deep dive quality" : 25\n    "Tradeoff articulation" : 10\n    "Communication" : 5',
             },
             {
               type: 'callout',
@@ -81,9 +250,60 @@ export const hldSection = {
               ],
             },
             {
+              type: 'mermaid',
+              code: 'flowchart TD\n    S1["1. Clarify functional reqs"] --> S2["2. Clarify non-functional reqs"]\n    S2 --> S3["3. Back-of-envelope estimation"]\n    S3 --> S4["4. Define API contract"]\n    S4 --> S5["5. Draw component diagram"]\n    S5 --> S6["6. Design data model"]\n    S6 --> S7["7. Deep-dive 2-3 components"]\n    S7 --> S8["8. Identify bottlenecks / SPOFs"]\n    S8 --> S9["9. Discuss tradeoffs"]\n    S9 --> S10["10. Failure modes & monitoring"]',
+            },
+            {
               type: 'callout',
               kind: 'tip',
               text: 'Step 9 (tradeoffs) is worth memorizing as a habit, not a step: unprompted tradeoff articulation is rated separately in most rubrics and is the thing junior candidates consistently forget to say out loud even when they clearly know it.',
+            },
+          ],
+        },
+        {
+          id: 'mock-interview-run',
+          title: 'Running the Interview: Time Budgeting & What to Draw First',
+          summary:
+            'Knowing the ten-step framework is necessary but not sufficient - most candidates who "know the steps" still run out of time on the deep dive because they never rehearsed a time budget.',
+          keyPoints: [
+            'A 45-60 minute HLD interview is not evenly split across the ten steps - the deep dive deserves roughly a third of the time, and it is the section most candidates shortchange by over-polishing the initial diagram.',
+            'Draw the high-level box diagram first, in under a couple of minutes, and deliberately rough - a rough diagram the interviewer can react to beats a polished one that ate ten minutes of silence.',
+            'Narrate while you draw - silence for more than about 20-30 seconds reads as "stuck," even when you are simply thinking.',
+            'If time is running short, say so out loud and propose what to cut ("I\'ll skip the notification service deep-dive and spend the remaining time on sharding the message store") - naming the tradeoff between coverage and depth is itself a strong signal.',
+          ],
+          blocks: [
+            {
+              type: 'table',
+              headers: ['Phase', 'Target time (of a ~45 min slot)', 'What "done" looks like'],
+              rows: [
+                ['Clarify requirements + estimate', '~7 min', 'An explicit scope list, plus 2-3 headline numbers (QPS, storage/year)'],
+                ['API contract + high-level diagram', '~9 min', 'A rough box diagram on the board/whiteboard, 3-6 endpoints named'],
+                ['Data model', '~4 min', 'Key tables/columns named, what is indexed and what is partitioned by what'],
+                ['Deep dive (1-2 components)', '~16 min', 'A real mechanism discussed, not hand-waving - the section worth the most rubric weight'],
+                ['Tradeoffs + failure modes + wrap-up', '~9 min', 'At least 2 tradeoffs named unprompted, one failure mode discussed'],
+              ],
+            },
+            {
+              type: 'mermaid',
+              code: 'pie title Time budget for a 45-minute HLD interview\n    "Clarify + estimate" : 15\n    "API contract + diagram" : 20\n    "Data model" : 10\n    "Deep dive" : 35\n    "Tradeoffs + failure modes + wrap-up" : 20',
+            },
+            {
+              type: 'heading',
+              text: 'What to draw first, concretely',
+            },
+            {
+              type: 'list',
+              items: [
+                'Draw the client -> load balancer -> service(s) -> database skeleton immediately after estimation - do not wait until you feel "ready," the skeleton is what makes everything after it concrete.',
+                'Label the arrows with the API calls you already defined - an unlabeled arrow invites the interviewer to ask "what exactly happens here," which costs you time you could have spent proactively.',
+                'Leave room on the board/canvas for the parts you will deep-dive into - do not cram detail into the first pass; a second, denser pass over one subsystem is expected and normal.',
+                'Add caches, queues, and replicas only once you have named the specific pressure point they relieve, not preemptively - "I am adding a cache here because reads outnumber writes 100:1 and redirect latency needs to stay under 100ms" outscores silently drawing a Redis box because it "belongs" in system design diagrams.',
+              ],
+            },
+            {
+              type: 'callout',
+              kind: 'warning',
+              text: 'The most common failure mode is spending 20 minutes perfecting the box diagram and leaving 5 minutes for the deep dive. Deep-dive quality is typically worth as much as component architecture and estimation combined - protect that time budget even if it means presenting a visibly rougher diagram.',
             },
           ],
         },
@@ -133,6 +353,10 @@ export const hldSection = {
                 'Conclusion chain an interviewer wants to hear: "~40K peak QPS, read-heavy at ~70:1 ratio → precompute is worth it for the 99% of normal users; ~3.2TB feed-cache footprint needs a sharded store; ~54TB/year of post data needs a horizontally scalable primary store (Cassandra/DynamoDB) rather than a single Postgres instance." This is estimation *driving* the architecture, not decoration after the fact.',
               ],
             },
+            {
+              type: 'mermaid',
+              code: 'flowchart LR\n    DAU["DAU + usage pattern"] --> QPS["Requests/sec<br/>avg + peak"]\n    QPS --> RW["Read:Write ratio"]\n    RW --> Storage["Storage growth/year<br/>x replication factor"]\n    Storage --> Decision{"Fits on one<br/>well-tuned DB?"}\n    Decision -->|Yes| SingleDB["Single primary +<br/>replicas + cache"]\n    Decision -->|No| Sharded["Sharded / horizontally<br/>scaled store"]',
+            },
           ],
         },
         {
@@ -166,6 +390,46 @@ export const hldSection = {
             {
               type: 'mermaid',
               code: 'flowchart LR\n    Client -->|HTTPS| CDN\n    CDN --> LB[Load Balancer]\n    LB --> GW[API Gateway<br/>authn, rate limit, routing]\n    GW --> SvcA[Service A<br/>stateless]\n    GW --> SvcB[Service B<br/>stateless]\n    SvcA --> Cache[(Redis Cache)]\n    SvcA --> DBPrimary[(Primary DB)]\n    DBPrimary --> DBReplica1[(Read Replica)]\n    DBPrimary --> DBReplica2[(Read Replica)]\n    SvcB --> Queue[[Message Queue]]\n    Queue --> Worker[Async Worker Pool]\n    Worker --> Blob[(Object Storage)]\n    Worker --> Search[(Search Index)]\n    SvcA --> Blob',
+            },
+          ],
+        },
+        {
+          id: 'cdn-caching',
+          title: 'CDNs & Edge Caching',
+          summary:
+            'A CDN moves content geographically closer to users and off your origin entirely - one of the highest-leverage, lowest-effort wins in almost any HLD answer that involves static or semi-static content.',
+          keyPoints: [
+            'A CDN is a globally-distributed network of edge servers that cache content close to users, so most requests never reach your origin servers at all.',
+            'Static/immutable assets (images, video segments, JS/CSS bundles) are the easy case - cache aggressively with a long TTL and a content-hashed filename, so a new version is simply a new URL and there is nothing to invalidate.',
+            'Dynamic/personalized content can still benefit from edge caching of the cacheable parts (e.g., a product page\'s static shell) or from edge compute that personalizes at the edge instead of round-tripping to origin.',
+            'Cache invalidation at a CDN is expensive and slow (propagation across hundreds of edge nodes) - prefer versioned/hashed URLs over "purge on update" wherever possible.',
+          ],
+          blocks: [
+            {
+              type: 'p',
+              text: 'A **CDN (Content Delivery Network)** is a set of servers ("edge nodes" or "PoPs" - points of presence) distributed across many geographic regions, sitting in front of your actual application/storage servers (the **origin**). When a user requests a cacheable resource, the request hits the nearest edge node instead of traveling all the way to the origin; if that edge node already has the content cached, it serves it directly, shaving off both the cross-region network latency and the load on your origin entirely.',
+            },
+            {
+              type: 'mermaid',
+              code: 'flowchart TD\n    User["User request"] --> Edge["Nearest CDN Edge Node"]\n    Edge --> Hit{"Cached?"}\n    Hit -->|Yes: cache hit| Serve["Serve directly from edge<br/>~ms latency"]\n    Hit -->|No: cache miss| Origin["Fetch from Origin Server"]\n    Origin --> StoreEdge["Store at edge with TTL"]\n    StoreEdge --> Serve2["Serve to user"]\n    Origin -.->|only on first request<br/>per region| Edge',
+            },
+            {
+              type: 'heading',
+              text: 'What to cache at the edge, and how',
+            },
+            {
+              type: 'list',
+              items: [
+                '**Static assets** (images, JS/CSS bundles, fonts) - content-hashed filenames (`app.a1b2c3.js`) plus a very long (often "forever") TTL; a deploy simply produces new filenames, so there is nothing stale to invalidate.',
+                '**Public, non-personalized API responses** (a product catalog page, a public leaderboard) - a short TTL (seconds to minutes) trades a small amount of staleness for a large reduction in origin load.',
+                '**Video/HLS/DASH segments** - the textbook CDN use case (see the Video Streaming case study below); nearly all bytes served by a video platform are immutable segments once transcoded.',
+                '**Personalized pages** are generally *not* cached wholesale - either cache only the static shell and hydrate personalized parts client-side, or use edge compute (CDN-run functions, e.g. Cloudflare Workers/Lambda@Edge) to personalize without a round trip to origin.',
+              ],
+            },
+            {
+              type: 'callout',
+              kind: 'pitfall',
+              text: 'Forgetting to mention a CDN is a common miss in case studies that are obviously read-heavy and static-content-heavy (video streaming, image hosting, a static marketing site). Naming it explicitly - and naming *what specifically* gets cached and for how long, not just "we use a CDN" - is the actual signal an interviewer is listening for.',
             },
           ],
         },
@@ -392,7 +656,7 @@ Table: posts
               items: [
                 '**Upload and playback are entirely separate pipelines** with different latency budgets — uploads can take minutes to process (transcoding into multiple resolutions/formats for adaptive bitrate streaming), while playback must start in under a second.',
                 '**Adaptive bitrate streaming** (HLS/DASH): video is chunked into short segments (2-10s) at multiple quality levels; the client player switches quality dynamically based on measured bandwidth — this is why "transcode into 5 different resolutions" is a core, non-optional part of the pipeline, not an optimization.',
-                '**CDN is not optional at this scale** — nearly all bytes served are static video segments, the textbook CDN use case; origin (S3) is only hit on a CDN cache miss (first request for a segment in a region).',
+                '**CDN is not optional at this scale** — nearly all bytes served are static video segments, the textbook CDN use case (see the dedicated CDN topic above); origin (S3) is only hit on a CDN cache miss (first request for a segment in a region).',
                 '**Metadata (views, likes, recommendations) is decoupled from the video bytes themselves** — a separate service/DB, updated asynchronously, so a spike in "like" button clicks never competes with video byte-serving for capacity.',
                 '**Storage cost tradeoff**: storing every resolution forever is expensive; production systems often transcode top resolutions eagerly and lower/rare ones lazily (on first request), or evict rarely-watched high-res variants and regenerate on demand — a cost/latency tradeoff worth naming explicitly.',
               ],
@@ -420,6 +684,10 @@ Table: posts
                 '**Eventual consistency** where staleness is acceptable for a latency/availability win (social feed like counts, view counts, recommendations).',
                 '**Idempotency**: any HLD involving retries (and all distributed systems need retries) must design idempotent writes — idempotency keys on payment/order APIs, `UPSERT` semantics, dedup on message consumption.',
               ],
+            },
+            {
+              type: 'mermaid',
+              code: 'flowchart TD\n    Partition{"Network<br/>partition?"}\n    Partition -->|Yes - P| APChoice{"Choose"}\n    APChoice -->|A| Availability["Availability:<br/>keep responding,<br/>maybe stale"]\n    APChoice -->|C| Consistency1["Consistency:<br/>reject/block until resolved"]\n    Partition -->|No - Else| ELChoice{"Choose"}\n    ELChoice -->|L| Latency["Latency:<br/>respond fast,<br/>maybe stale"]\n    ELChoice -->|C| Consistency2["Consistency:<br/>wait for confirmation"]',
             },
             {
               type: 'callout',
@@ -480,6 +748,10 @@ Table: posts
               ],
             },
             {
+              type: 'mermaid',
+              code: 'flowchart LR\n    subgraph NoBreaker["Without a circuit breaker"]\n        A1[Service A] -->|calls B, no timeout| B1[Slow Service B]\n        B1 -->|response never returns| A1\n        A1 --> C1["A\'s thread pool<br/>exhausted waiting"]\n        C1 --> D1[A becomes slow too]\n        D1 --> E1[Failure cascades<br/>to A\'s callers]\n    end\n    subgraph WithBreaker["With a circuit breaker"]\n        A2[Service A] -->|calls B, with timeout| B2[Slow Service B]\n        B2 -->|failures exceed threshold| Open["Circuit opens:<br/>fail fast / fallback"]\n        Open --> Healthy["A stays responsive,<br/>B gets time to recover"]\n    end',
+            },
+            {
               type: 'callout',
               kind: 'note',
               text: 'This is the section most candidates skip entirely because it comes after the "interesting" architecture work. Bringing it up unprompted — even briefly — is a disproportionately strong signal relative to how little time it takes to say.',
@@ -517,8 +789,33 @@ Table: posts
         {
           id: 'qa',
           title: 'Questions & Answers',
-          summary: '25 HLD interview questions with full-depth answers, covering framework, case-study follow-ups, and tradeoff reasoning.',
+          summary: '30 HLD interview questions with full-depth answers, covering foundational concepts, the framework, case-study follow-ups, and tradeoff reasoning.',
           qa: [
+            {
+              question: 'What\'s the actual difference between High-Level Design and Low-Level Design, and how do you know which one an interviewer wants?',
+              answer:
+                'HLD decides which services, stores, and queues exist and how they communicate — the artifact is a box-and-arrow architecture diagram, and the skills tested are requirement scoping, estimation, and system-wide tradeoffs. LLD designs the internals of one component — the artifact is class diagrams and algorithms, and the skills tested are OOP design, patterns, and data structures. If a prompt is ambiguous ("design a rate limiter" could be either), ask: it changes whether you should be drawing services and databases or writing out a class with a token-bucket algorithm.',
+            },
+            {
+              question: 'What is an API, conceptually, and why does every arrow on an HLD diagram imply one?',
+              answer:
+                'An API is a contract: a defined set of operations with specific inputs and outputs, saying nothing about how the server implements them. Any two boxes on an architecture diagram that are connected by an arrow are, by definition, communicating through some request/response (or message) shape — that shape is an API whether or not it is ever exposed publicly. Being unable to state roughly what crosses a given arrow on the spot is a reliable sign that box has been drawn but not actually designed.',
+            },
+            {
+              question: 'How do you know when a single-server, single-database setup is no longer good enough, and what\'s the very first thing you\'d add?',
+              answer:
+                'Watch three signals: the app server is CPU/connection-saturated under normal load, the database is slow or saturated on reads or writes, or the setup has no redundancy and an outage would be unacceptable. The cheapest and usually first fix is adding a second app server behind a load balancer (free, since the app layer should already be stateless) and a cache in front of the database for the hottest reads — sharding the database itself is a much bigger structural decision and should be the last resort, justified by an actual estimation number showing a single well-tuned primary genuinely cannot keep up.',
+            },
+            {
+              question: 'What is a CDN doing under the hood, and why can\'t you just rely on caching at your origin servers?',
+              answer:
+                'A CDN places cached copies of content on servers physically distributed across many regions, so a user\'s request is served from the nearest edge node instead of crossing the network to a single origin location — this cuts the actual physical round-trip latency (speed-of-light-bound, not just processing time) in a way that caching only at the origin cannot, since an origin-only cache still requires every user worldwide to reach that one location. A CDN also removes that traffic from your origin entirely, which a same-location cache tier does not.',
+            },
+            {
+              question: 'How would you budget your time in a 45-60 minute HLD interview if you noticed you were falling behind?',
+              answer:
+                'Say so explicitly rather than silently rushing: name what you are cutting and why ("I will skip the notification service deep-dive and put the remaining time into sharding the message store, since that is the harder problem here"). Protect the deep-dive phase above all else — it typically carries as much rubric weight as component architecture and estimation combined — even if it means presenting a visibly rougher initial diagram. Cutting scope deliberately and out loud reads as self-awareness; running out of time silently reads as poor planning.',
+            },
             {
               question: 'Walk me through how you\'d approach any system design question in the first 5 minutes.',
               answer:

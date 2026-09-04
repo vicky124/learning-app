@@ -8,32 +8,66 @@ export const langgraphSection = {
       label: 'Guide',
       topics: [
         {
-          id: 'why-langgraph',
-          title: 'LangGraph — Why It Exists When LangChain Already Has "Agents"',
+          id: 'graphs-as-a-mental-model',
+          title: 'The Mental Model: Nodes, Edges, and State',
           summary:
-            'Classic LangChain agents are a black-box while loop you don\'t control directly. LangGraph models an agent as an explicit state machine — a graph of nodes and edges — giving you the control flow of a real program instead of an opaque loop.',
+            'Before asking why LangGraph exists, get the underlying idea straight: a graph here is nothing more exotic than a set of steps (nodes), the connections that say what runs next (edges), and a shared object that flows through all of them (state).',
           keyPoints: [
-            'State: a shared, typed object every node reads from and writes to — what makes inspection, checkpointing, and resuming possible.',
-            'Nodes are functions that take the current state and return an update; edges (fixed or conditional) decide what runs next.',
-            'Cycles are the structural feature that make LangGraph suited to agents, not just fixed DAG pipelines.',
-            'Persistence (checkpointing) enables pause/resume, replay for debugging, and human-in-the-loop approval gates.',
-            'Multi-agent orchestration models specialized agents as nodes/subgraphs with explicit, auditable routing/handoff logic.',
+            'A **node** is a function: it receives the current state and returns an update to it — nothing more.',
+            'An **edge** decides which node runs next — either always the same next node (a fixed edge), or a choice made by inspecting the current state (a conditional edge).',
+            '**State** is a single shared object every node reads from and writes to, rather than each step passing its own private return value directly to only the next step in a fixed chain.',
+            'Unlike a strict linear pipeline (always A, then B, then C), a graph can loop back on itself, branch into different paths, and (in principle) run independent parts concurrently — because "what runs next" is a decision made at runtime, not a fixed sequence baked in ahead of time.',
+            'This mental model is generic to graph-based orchestration in general — it is not specific to LangGraph or even to AI. LangGraph is this idea applied specifically to LLM application control flow.',
           ],
           blocks: [
             {
               type: 'p',
-              text: 'Classic LangChain agents (the ReAct loop) are a black-box `while` loop you don\'t control directly — hard to add custom branching logic, hard to persist and resume state, hard to have multiple agents collaborate with explicit handoffs, and hard to add a human-approval step in the middle of a run. **LangGraph models an agent as an explicit state machine (a graph of nodes and edges)** — you define the states, the transitions between them, and the shared state object that flows through the graph, giving you the control flow of a real program instead of an opaque loop.',
+              text: 'If you have ever sketched a flowchart on a whiteboard — boxes for steps, arrows for what happens next, and some shared notion of "where things stand" that the boxes read and update — you already have the entire mental model. The only new part is making that literal in code: an actual shared data structure (state), actual functions (nodes), and actual routing logic (edges) that a runtime executes.',
+            },
+            {
+              type: 'mermaid',
+              code: `flowchart TD
+    State[("Shared State<br/>(read + written by every node)")]
+    Start([START]) --> A[Node A]
+    A -.reads/writes.- State
+    A -->|fixed edge| B[Node B]
+    B -.reads/writes.- State
+    B -->|conditional edge:<br/>state decides which way| C[Node C]
+    B -->|conditional edge| End1([END])
+    C -.reads/writes.- State
+    C --> End2([END])`,
+            },
+            {
+              type: 'callout',
+              kind: 'note',
+              text: 'This is deliberately abstract on purpose — the next topic explains concretely why LangChain\'s own pre-built "agent" abstraction did not already give application developers this level of control, and why a dedicated graph-based framework was built to expose it directly.',
+            },
+          ],
+        },
+        {
+          id: 'why-langgraph',
+          title: 'Why LangGraph Exists When LangChain Already Has "Agents"',
+          summary:
+            'Classic LangChain agents are a black-box while loop you don\'t control directly. LangGraph models an agent as an explicit instance of the node/edge/state graph from the previous topic, giving you the control flow of a real program instead of an opaque loop.',
+          keyPoints: [
+            'Classic LangChain agents (the ReAct loop, via `AgentExecutor`) run as a black-box `while` loop you don\'t control directly — hard to add custom branching logic, hard to persist and resume state, hard to have multiple agents collaborate with explicit handoffs, and hard to add a human-approval step in the middle of a run.',
+            'LangGraph applies the node/edge/state model directly: you define the nodes, the edges between them, and the shared state object that flows through the graph, as real code you own and can inspect.',
+            'Cycles are the structural feature that make LangGraph suited to agents specifically, not just fixed DAG pipelines — a tool-calling node can route back to the reasoning node repeatedly until the model decides it is done.',
+            'Persistence (checkpointing) enables pause/resume, replay for debugging, and human-in-the-loop approval gates — covered in depth in later topics.',
+            'Multi-agent orchestration models specialized agents as nodes/subgraphs with explicit, auditable routing/handoff logic, instead of implicit agent-to-agent calls buried inside one opaque loop.',
+          ],
+          blocks: [
+            {
+              type: 'p',
+              text: 'Classic LangChain agents (the ReAct loop) are a black-box `while` loop you don\'t control directly — hard to add custom branching logic, hard to persist and resume state, hard to have multiple agents collaborate with explicit handoffs, and hard to add a human-approval step in the middle of a run. **LangGraph models an agent as an explicit state machine** — a concrete instance of the node/edge/state graph from the previous topic — giving you the control flow of a real program instead of an opaque loop.',
             },
             {
               type: 'heading',
-              text: 'Core concepts',
+              text: 'What explicit control flow buys you',
             },
             {
               type: 'list',
               items: [
-                '**State**: a shared, typed object (e.g., a `TypedDict` or Pydantic model) that every node reads from and writes to as execution proceeds — this is what makes it possible to inspect, checkpoint, and resume execution at any point.',
-                '**Nodes**: functions (a model call, a tool call, a custom transformation) that take the current state and return an update to it.',
-                '**Edges**: define which node runs next — can be a fixed edge (always go to node B after node A) or a **conditional edge** (a function inspects the state and decides which node to route to — this is what implements branching, retries, and loops).',
                 '**Cycles**: unlike a DAG-based pipeline framework, LangGraph graphs can loop (a tool-calling node can route back to the reasoning node repeatedly until the model decides it\'s done) — this is the structural feature that makes it suited to agents specifically, not just fixed pipelines.',
                 '**Persistence (checkpointing)**: LangGraph can persist state after every node execution (to memory, a DB, etc.), enabling pause/resume, replay for debugging, and — critically — **human-in-the-loop**: pause the graph at a specific node (e.g., before executing a risky tool call), wait for external human approval, then resume exactly where it left off.',
                 '**Multi-agent orchestration**: model multiple specialized agents as nodes (or subgraphs) in the same graph, with explicit routing/handoff logic between them (a "supervisor" node that decides which specialist agent handles the next step, or agents that hand off directly to each other) — giving you an auditable, debuggable structure for what would otherwise be an implicit, hard-to-trace set of agent-to-agent calls.',
@@ -51,8 +85,29 @@ export const langgraphSection = {
     HumanApproval --> [*] : rejected, run halted`,
             },
             {
+              type: 'callout',
+              kind: 'tip',
+              text: 'When to reach for LangGraph over a plain ReAct agent: whenever you need explicit, auditable control flow — multi-agent handoffs, human approval gates, retry/branching logic that depends on more than "did the model call a tool," or the ability to pause and resume long-running agent sessions. For a simple single-agent tool-loop with no special control-flow requirements, a plain agent loop (or even a hand-rolled `while` loop over the raw API) is simpler and has less to learn/debug.',
+            },
+          ],
+        },
+        {
+          id: 'core-primitives-stategraph',
+          title: 'LangGraph\'s Core Primitives: StateGraph, Nodes, Edges, and Checkpointing',
+          summary:
+            'The concrete mechanics behind the mental model: how you actually define a shared state schema, register nodes and edges, and turn the definition into a runnable, persistable application.',
+          keyPoints: [
+            '`StateGraph(StateSchema)` is the graph builder — the schema (a `TypedDict` or Pydantic model) declares every field the shared state carries.',
+            '`add_node(name, fn)` registers a node; `add_edge(a, b)` wires a fixed transition; `add_conditional_edges(a, router_fn, {...})` wires a branching transition decided by a function that inspects the state.',
+            'A **reducer** (e.g., `Annotated[list, add_messages]`) tells LangGraph how to *merge* a node\'s returned update into existing state for that field, instead of simply overwriting it — essential for fields like message history that should append, not replace.',
+            '`set_entry_point` (or `START`) marks where execution begins; routing to `END` ends that branch of execution.',
+            '`.compile(checkpointer=...)` turns the graph definition into a runnable app, and — given a checkpointer — persists state after every node, which is what enables pause/resume, replay, and human-in-the-loop.',
+          ],
+          blocks: [
+            {
               type: 'code',
               language: 'python',
+              title: 'a minimal StateGraph — the same tool-loop as a real graph',
               code: `from typing import TypedDict, Annotated
 from langgraph.graph import StateGraph, END
 from langgraph.graph.message import add_messages
@@ -77,9 +132,136 @@ graph.add_edge("tools", "agent")  # the cycle: tool result flows back to reasoni
 app = graph.compile(checkpointer=memory_saver)  # enables persistence/resume`,
             },
             {
+              type: 'p',
+              text: 'This compiles to a concrete graph structure — the same shape described abstractly in the mental-model topic, now with real nodes and a real conditional edge:',
+            },
+            {
+              type: 'mermaid',
+              code: `flowchart TD
+    START([START]) --> Agent["agent node<br/>(call_model)"]
+    Agent --> Decide{"should_continue<br/>(conditional edge)"}
+    Decide -->|tool_calls present| Tools["tools node<br/>(execute requested tools)"]
+    Decide -->|no tool_calls| ENDN([END])
+    Tools -->|fixed edge| Agent`,
+            },
+            {
               type: 'callout',
               kind: 'tip',
-              text: 'When to reach for LangGraph over a plain ReAct agent: whenever you need explicit, auditable control flow — multi-agent handoffs, human approval gates, retry/branching logic that depends on more than "did the model call a tool," or the ability to pause and resume long-running agent sessions. For a simple single-agent tool-loop with no special control-flow requirements, a plain agent loop (or even a hand-rolled `while` loop over the raw API) is simpler and has less to learn/debug.',
+              text: 'Why a reducer matters: by default, a node\'s returned dict *replaces* the corresponding state field entirely. For `messages`, that would mean every model call wipes out the prior conversation instead of extending it. `Annotated[list, add_messages]` tells LangGraph to use the `add_messages` function to merge a node\'s returned messages into the existing list (appending, and de-duplicating/updating by message ID) instead of overwriting it — the same idea applies to any field where "merge" is the correct semantics rather than "replace."',
+            },
+          ],
+        },
+        {
+          id: 'human-in-the-loop-patterns',
+          title: 'Human-in-the-Loop: Interrupts and Approval Gates',
+          summary:
+            'Some actions an agent might take are too risky to run unsupervised. LangGraph\'s `interrupt()` lets a running graph pause mid-execution, hand control to a human, and resume exactly where it left off — the mechanism behind every "approve this action" pattern.',
+          keyPoints: [
+            '`interrupt(payload)`, called inside a node, pauses graph execution at that exact point and surfaces `payload` to the calling application — the graph\'s execution is suspended, not destroyed.',
+            'Resuming happens by invoking the compiled graph again with `Command(resume=value)`, which picks up exactly where `interrupt()` left off, with `value` becoming that call\'s return value inside the node.',
+            'This requires a **checkpointer** — without persisted state, there is nothing to resume from once the process that started the run has moved on or restarted.',
+            'Static breakpoints (`interrupt_before=["node_name"]` at compile/invoke time) pause before a specific node every time it would run — simpler than a dynamic in-node `interrupt()` call, but less flexible about deciding when/why to pause.',
+            'A common production pattern: pause before any node that calls a side-effecting tool, show the proposed action to a human via a UI, and resume with either approval, rejection, or an edited version of the action.',
+          ],
+          blocks: [
+            {
+              type: 'code',
+              language: 'python',
+              title: 'pausing for approval and resuming',
+              code: `from langgraph.types import interrupt, Command
+
+def request_approval(state: AgentState):
+    decision = interrupt({
+        "action": state["proposed_action"],
+        "message": "Approve this action?",
+    })
+    if decision != "approve":
+        return {"status": "rejected"}
+    return {"status": "approved"}
+
+# graph.add_node("approval", request_approval), wired in with add_edge/add_conditional_edges
+app = graph.compile(checkpointer=memory_saver)
+
+# First call runs the graph until it hits the interrupt, then pauses:
+app.invoke(
+    {"proposed_action": "delete_prod_database"},
+    config={"configurable": {"thread_id": "run-1"}},
+)
+
+# ...later, once a human has reviewed it via your own UI...
+app.invoke(
+    Command(resume="approve"),
+    config={"configurable": {"thread_id": "run-1"}},   # same thread_id resumes the same run
+)`,
+            },
+            {
+              type: 'mermaid',
+              code: `sequenceDiagram
+    participant Graph as LangGraph app
+    participant Store as Checkpointer
+    participant Human as Human reviewer (UI)
+    Graph->>Graph: run nodes... reach approval node
+    Graph->>Store: interrupt() pauses execution, state persisted
+    Graph-->>Human: proposed action surfaced to a UI
+    Human->>Human: reviews the proposed action
+    Human->>Graph: invoke(Command(resume="approve"))
+    Graph->>Store: load persisted state for this thread_id
+    Graph->>Graph: resume exactly where it paused, decision = "approve"`,
+            },
+            {
+              type: 'callout',
+              kind: 'pitfall',
+              text: 'A checkpointer is not optional here — `interrupt()` relies on the graph\'s state having been persisted so a later, possibly entirely separate process invocation can resume it via the same `thread_id`. Compiling a graph without a checkpointer and calling `interrupt()` inside it will not give you a durable pause; there is nothing for a later `Command(resume=...)` call to resume from.',
+            },
+          ],
+        },
+        {
+          id: 'multi-agent-patterns-langgraph',
+          title: 'Multi-Agent Patterns in LangGraph',
+          summary:
+            'Beyond a single agent looping on its own, LangGraph composes multiple specialized agents as nodes or entire subgraphs with explicit routing between them — most commonly via a supervisor node that decides who acts next.',
+          keyPoints: [
+            'The simplest multi-agent shape is a **supervisor** node that inspects the state/task and routes (via a conditional edge, or by returning a `Command`) to one of several specialized worker nodes, then routes back to itself to decide the next step or to finish.',
+            'A worker can itself be an entire subgraph — a fully compiled `StateGraph` used as a single node in a larger graph — which is how LangGraph composes complex multi-agent systems out of smaller, independently built and tested graphs.',
+            '`Command` can update state *and* specify the next node to route to in a single return value, which is what makes direct agent-to-agent handoffs (not only supervisor-mediated ones) straightforward to express.',
+            'A subgraph can share the parent graph\'s full state schema, or define its own narrower schema with explicit mapping at the boundary — deliberately limiting what a worker agent can see or change.',
+            'The same auditability argument from "why LangGraph exists" applies here concretely: every handoff between agents is a visible edge/state transition in the graph, not an implicit function call buried inside one agent\'s internal reasoning.',
+          ],
+          blocks: [
+            {
+              type: 'code',
+              language: 'python',
+              title: 'a supervisor routing to specialized worker subgraphs',
+              code: `from langgraph.types import Command
+
+def supervisor(state: AgentState):
+    next_agent = decide_next_agent(state)   # an LLM call, or simpler routing logic
+    return Command(goto=next_agent, update={"last_router_decision": next_agent})
+
+graph = StateGraph(AgentState)
+graph.add_node("supervisor", supervisor)
+graph.add_node("researcher", researcher_subgraph)   # itself a compiled StateGraph
+graph.add_node("writer", writer_subgraph)           # itself a compiled StateGraph
+graph.set_entry_point("supervisor")
+graph.add_edge("researcher", "supervisor")   # workers report back to the supervisor
+graph.add_edge("writer", "supervisor")
+# supervisor's Command(goto=...) handles routing to researcher / writer / END directly
+app = graph.compile(checkpointer=memory_saver)`,
+            },
+            {
+              type: 'mermaid',
+              code: `flowchart TD
+    START([START]) --> Supervisor{"Supervisor node:<br/>decide next agent"}
+    Supervisor -->|"goto: researcher"| Researcher["Researcher<br/>(subgraph)"]
+    Supervisor -->|"goto: writer"| Writer["Writer<br/>(subgraph)"]
+    Supervisor -->|"goto: END"| ENDN([END])
+    Researcher --> Supervisor
+    Writer --> Supervisor`,
+            },
+            {
+              type: 'callout',
+              kind: 'note',
+              text: 'Building each worker as its own compiled subgraph is not just organizational tidiness — it means each worker agent can be built, tested, and evaluated in isolation (invoke it directly with representative inputs, check its outputs) before it is ever wired into the larger multi-agent system, the same way you would unit test a function before integrating it.',
             },
           ],
         },
@@ -189,6 +371,16 @@ app = graph.compile(checkpointer=memory_saver)  # enables persistence/resume`,
               text: 'Understanding what these frameworks are actually doing underneath is a strong interview signal — here\'s the loop in raw form, using the Anthropic Messages API\'s tool-use mechanism as the concrete example:',
             },
             {
+              type: 'mermaid',
+              code: `flowchart TD
+    Start(["messages = [user question]"]) --> Call["Call the model"]
+    Call --> Check{"stop_reason ==<br/>tool_use ?"}
+    Check -->|No| Final["Final answer — break"]
+    Check -->|Yes| Exec["Execute every tool_use<br/>block in this turn"]
+    Exec --> Append["Append ALL tool_results<br/>in ONE user message"]
+    Append --> Call`,
+            },
+            {
               type: 'code',
               language: 'python',
               code: `import anthropic
@@ -262,6 +454,22 @@ while True:
               ],
             },
             {
+              type: 'mermaid',
+              code: `flowchart LR
+    subgraph ReAct["ReAct"]
+        direction TB
+        R1[Thought] --> R2[Action] --> R3[Observation] --> R1
+    end
+    subgraph PlanExec["Plan-and-Execute"]
+        direction TB
+        P1["Plan all steps upfront"] --> P2["Execute step 1"] --> P3["Execute step 2"] --> P4["...re-plan only if needed"]
+    end
+    subgraph Reflect["Reflection"]
+        direction TB
+        F1["Produce output"] --> F2["Self-critique"] --> F3["Revise"] -.-> F1
+    end`,
+            },
+            {
               type: 'callout',
               kind: 'pitfall',
               text: 'The senior-level caution to voice unprompted: don\'t reach for multi-agent complexity before establishing that a single agent with the right tools and a good prompt actually fails at the task — it\'s one of the most over-applied patterns in current AI engineering.',
@@ -279,6 +487,31 @@ while True:
           title: 'Questions & Answers',
           summary: 'LangGraph, MCP, and agent-architecture interview questions, with the reasoning interviewers are actually listening for.',
           qa: [
+            {
+              question: 'What is a "reducer" in LangGraph state (e.g., `Annotated[list, add_messages]`), and why is it needed?',
+              answer:
+                'By default, when a node returns an update for a state field, LangGraph *replaces* that field\'s existing value with whatever the node returned. For a field like conversation `messages`, that default would be actively wrong — each model call would wipe out the prior conversation instead of extending it. A reducer, attached via `Annotated[Type, reducer_fn]`, tells LangGraph to instead call `reducer_fn(existing_value, new_value)` and store its result — `add_messages` specifically appends new messages to the existing list (and updates/de-duplicates by message ID rather than blindly appending duplicates). The general principle: any state field where the correct semantics are "merge" rather than "overwrite" needs an explicit reducer, or every node touching that field has to manually read, merge, and return the entire updated value itself.',
+            },
+            {
+              question: 'How does LangGraph\'s `interrupt()` differ from just pausing your own code with a manual approval step outside the graph?',
+              answer:
+                'A manual "pause outside the graph" approach typically means splitting your workflow into two separate invocations at the application level — run part one, store some intermediate result yourself, wait, then manually reconstruct enough context to run part two — which pushes all the state-tracking work onto your application code and is easy to get subtly wrong as the graph grows more complex. `interrupt()`, called inside a node, instead suspends execution at that exact point in the graph, with the checkpointer persisting the *entire* graph state (not just an intermediate result you remembered to save) automatically. Resuming with `Command(resume=value)` and the same `thread_id` picks up execution exactly where it left off — inside the same node, with `value` becoming that `interrupt()` call\'s return value — without your application needing to know or reconstruct anything about how the graph got there. This is what makes it practical to pause arbitrarily deep inside a multi-step, possibly multi-agent graph, not just at the very top level.',
+            },
+            {
+              question: 'What is a checkpointer in LangGraph, and what does it actually persist?',
+              answer:
+                'A checkpointer is the component LangGraph uses to save the graph\'s state after every node execution, keyed by a `thread_id` you supply in the invocation config. It persists the entire state object as defined by the graph\'s state schema — not just a single field, and not just "the last message" — meaning a resumed run has access to everything any prior node wrote to state, exactly as it was at that point in execution. This is what enables three related capabilities: **resuming** a paused run (including one paused via `interrupt()`), **replaying** a past run for debugging by re-invoking from an earlier checkpoint, and **multi-turn persistence** for a long-running conversation or agent session across separate process invocations (e.g., separate HTTP requests to a backend). Without a checkpointer, a compiled graph still runs, but nothing survives past a single `.invoke()` call.',
+            },
+            {
+              question: 'How would you implement a supervisor multi-agent pattern in LangGraph concretely?',
+              answer:
+                'Define a `supervisor` node whose job is purely routing: it inspects the current state (the task, and whatever prior agents have contributed) and decides which specialized agent should act next, then returns either a conditional-edge decision or a `Command(goto=next_agent, update={...})` that both updates state and specifies the next node in one step. Each specialized agent is registered as its own node — often itself a fully compiled `StateGraph` used as a subgraph, so it can be built and tested independently — and each worker\'s edge routes back to the supervisor rather than onward to another worker directly, so the supervisor remains the single place that decides what happens next and can terminate the loop (route to `END`) once the task is complete. The key property this preserves is auditability: at any point you can inspect exactly which node the graph is in and why the supervisor routed there, rather than an agent\'s internal reasoning silently deciding to "call" another agent.',
+            },
+            {
+              question: 'Why must a StateGraph\'s state updates go through reducers rather than nodes simply overwriting state fields directly by default?',
+              answer:
+                'If every node\'s returned update simply overwrote the corresponding state field, any two nodes that both need to contribute to the same field (most commonly, message history, but also things like an accumulating list of tool-call results or a running list of retrieved documents across an agentic RAG loop) would silently clobber each other\'s contributions rather than combining them — the second node to run would erase whatever the first node wrote. Overwrite semantics are still the correct default for fields that genuinely represent "the current value" rather than "an accumulating collection" (e.g., a `status` field), which is why reducers are opt-in per field via `Annotated[Type, reducer_fn]` rather than forced on every field — LangGraph does not assume it knows which merge behavior is correct for an arbitrary field, so it asks you to declare it explicitly.',
+            },
             {
               question: 'What problem does MCP solve that tool/function calling (already supported by most LLM APIs) doesn\'t?',
               answer:
@@ -302,7 +535,7 @@ while True:
             {
               question: 'Why would a system gate ticketing/deployment actions behind human approval but not RAG-based knowledge answers?',
               answer:
-                'The risk profile is fundamentally different: a wrong RAG answer is passively wrong information the user can evaluate and choose to trust or verify (especially with citations shown), while a wrong or premature side-effecting action (creating a duplicate ticket, triggering a deployment rollback) directly changes external system state and may not be easily reversible, with consequences beyond the requesting user. This maps directly to the general principle that the cost of an error should determine how much autonomy an agent is given for that class of action — read-only, informational operations can run fully autonomously with the user as the final check, while state-changing operations warrant a human-in-the-loop gate, implemented cleanly in LangGraph as a checkpointed pause rather than either blocking all autonomy or allowing all actions unchecked.',
+                'The risk profile is fundamentally different: a wrong RAG answer is passively wrong information the user can evaluate and choose to trust or verify (especially with citations shown), while a wrong or premature side-effecting action (creating a duplicate ticket, triggering a deployment rollback) directly changes external system state and may not be easily reversible, with consequences beyond the requesting user. This maps directly to the general principle that the cost of an error should determine how much autonomy an agent is given for that class of action — read-only, informational operations can run fully autonomously with the user as the final check, while state-changing operations warrant a human-in-the-loop gate, implemented cleanly in LangGraph as a checkpointed pause (`interrupt()`) rather than either blocking all autonomy or allowing all actions unchecked.',
             },
             {
               question: 'What\'s the practical difference between "resources" and "tools" in MCP, and why does the protocol distinguish them instead of treating everything as a callable function?',

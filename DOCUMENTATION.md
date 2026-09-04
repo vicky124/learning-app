@@ -472,30 +472,43 @@ real example of *not* over-centralizing state.
 
 ## 8. Other subjects
 
-Every subject below follows the pipeline described in §3.2-3.3: a **Guide** group of written
-lessons (`src/content/<subject>.js`) and an **Interview Q&A** group with one click-to-reveal
-quiz topic. Source material for all of them was adapted from the user's own interview-prep
-notes. Counts are guide-topics / Q&A pairs.
+Every subject below follows the pipeline described in §3.2-3.3: a single **Guide** group of
+written lessons (`src/content/<subject>.js`), ordered basic → advanced within that one group
+(deliberately *not* split into per-level sub-groups the way React's section is — see the note at
+the end of this section), plus an **Interview Q&A** group with one click-to-reveal quiz topic.
+Source material started from the user's own interview-prep notes, then each subject was
+independently restructured and substantially expanded by treating the task as "have an expert
+in that technology redesign the curriculum," rather than just lightly editing the original
+notes. Counts are guide-topics / Q&A pairs / Mermaid diagrams.
 
-| Subject | File | Guide topics | Q&A pairs | Covers |
-|---|---|---|---|---|
-| Python | `src/content/python.js` | 10 | 10 | The GIL, asyncio's event loop, language internals (mutable defaults, decorators, context managers, generators), FastAPI's Pydantic validation & dependency injection, Flask fundamentals, a paginated-API case study |
-| JavaScript | `src/content/javascript.js` | 6 | 2 | The event loop precisely, closures, `this` binding rules, prototypal inheritance, equality/coercion gotchas, promises & async/await |
-| TypeScript | `src/content/typescript.js` | 6 | 3 | Structural typing, generics, union/intersection/discriminated unions, utility types, `unknown` vs `any`, `interface` vs `type` |
-| Git | `src/content/git.js` | 4 | 10 | How Git models history (the three-tree model), branching/merging/rebasing, undoing things (reset vs revert vs restore), remote collaboration workflows |
-| LLD | `src/content/lld.js` | 14 | 25 | SOLID, creational/structural/behavioral design patterns, the repeatable LLD process, five full case studies (Parking Lot, Rate Limiter, Elevator, Splitwise, BookMyShow), concurrency patterns, anti-patterns |
-| HLD | `src/content/hld.js` | 13 | 25 | The HLD framework, an estimation cheat sheet, core building blocks, five case studies (URL Shortener, News Feed, Chat, Ride-Sharing Dispatch, Video Streaming), consistency/availability tradeoffs, failure modes & observability |
-| System Design Patterns | `src/content/system-design-patterns.js` | 11 | 25 | Consistent hashing, replication strategies, Paxos/Raft consensus, database storage engines, load balancing, caching, monolith vs microservices vs serverless, event sourcing/CQRS, 2PC/Saga, an e-commerce case study |
-| Authentication & Authorization | `src/content/auth.js` | 10 | 17 | AuthN vs AuthZ, password hashing, sessions vs JWTs, OAuth 2.0 & PKCE, OIDC, CSRF/XSS/cookies, RBAC/ABAC/ReBAC, a multi-tenant SaaS case study |
-| LangChain | `src/content/langchain.js` | 3 | 2 | What LangChain actually solves, LCEL chains in practice, where it earns criticism |
-| LangGraph | `src/content/langgraph.js` | 5 | 6 | Why LangGraph exists beyond LangChain's agents, the Model Context Protocol (MCP), a hand-rolled agentic tool-use loop, agent architectures beyond ReAct |
-| RAG | `src/content/rag.js` | 9 | 7 | LLM fundamentals, chunking, embeddings & vector search, hybrid search & re-ranking, RAG evaluation, advanced RAG patterns, fine-tuning vs RAG vs prompt engineering, an enterprise-assistant case study |
+| Subject | File | Guide topics | Q&A pairs | Diagrams | Covers |
+|---|---|---|---|---|---|
+| Python | `src/content/python.js` | 22 | 20 | 18 | What Python is, variables/objects, core data structures, control flow, functions & LEGB scope, comprehensions, the mutable-default-argument trap, decorators, context managers, generators/iterators, type hints & dataclasses, exceptions, modules, the GIL, asyncio, metaclasses & descriptors, memory management/GC, testing with pytest, FastAPI validation & DI, Flask, a paginated-API case study |
+| JavaScript | `src/content/javascript.js` | 18 | 12 | 15 | Values/types, `var`/`let`/`const` & scoping, operators/coercion, functions, arrays/objects, closures, `this` binding, prototypal inheritance, destructuring/spread, ES modules, the event loop precisely, promises & async/await, generators/iterators, the Proxy/Reflect API, memory leaks, debounce/throttle & Web APIs, performance patterns |
+| TypeScript | `src/content/typescript.js` | 17 | 12 | 15 | What TypeScript is, basic types, interfaces vs type aliases, structural typing, generics, union/intersection/discriminated unions, utility types, `unknown` vs `any`, conditional types & `infer`, mapped types, template literal types, `satisfies`, decorators, `tsconfig.json`'s consequential options |
+| Git | `src/content/git.js` | 13 | 13 | 12 | What version control is, the core add/commit/status workflow, basic branching, how Git models history (three trees), `.gitignore`/stashing/tags, merging vs rebasing, undoing things, remote collaboration, Git internals (objects/refs/packfiles), interactive rebase & history rewriting, hooks, submodules vs monorepos, debugging with bisect/blame |
+| LLD | `src/content/lld.js` | 17 | 30 | 34 (28 classDiagrams) | What LLD is, OOP fundamentals, UML notation literacy, interfaces vs abstract classes, SOLID (each principle with a violation/fix classDiagram), the LLD interview process, creational/structural/behavioral design patterns (each with a classDiagram), concurrency patterns, anti-patterns, five full case studies (Parking Lot, Rate Limiter, Elevator, Splitwise, BookMyShow) each with a classDiagram |
+| HLD | `src/content/hld.js` | 19 | 30 | 18 | HLD vs LLD, the client-server model, single-server starting point, vertical vs horizontal scaling, what HLD interviews test, the repeatable framework, interview time-budgeting, estimation, core building blocks, CDNs & edge caching, five case studies (URL Shortener, News Feed, Chat, Ride-Sharing Dispatch, Video Streaming), consistency/availability tradeoffs, a distributed rate limiter, failure modes & observability |
+| System Design Patterns | `src/content/system-design-patterns.js` | 15 | 31 | 14 | What a distributed system is, the CAP theorem, basic sharding/partitioning, consistent hashing, replication strategies, database storage engines, Paxos/Raft consensus, load balancing, caching, monolith vs microservices vs serverless, event sourcing/CQRS, idempotency & delivery semantics, 2PC/Saga, an e-commerce case study |
+| Authentication & Authorization | `src/content/auth.js` | 18 | 26 | 18 | Identity fundamentals, a plain login-flow walkthrough, password hashing, MFA, passwordless/WebAuthn passkeys, sessions vs JWTs (structure + security pitfalls), rate limiting & brute-force defenses, CSRF/XSS/cookies, OAuth 2.0 & PKCE, OIDC, SSO/SAML, RBAC/ABAC/ReBAC, API auth patterns, distributed authorization, a multi-tenant SaaS case study |
+| LangChain | `src/content/langchain.js` | 8 | 8 | 6 | The chain abstraction as a mental model, core building blocks (prompts/models/parsers/retrievers), LCEL in practice, LCEL composition patterns, memory/conversation history, tool/function-calling integration, classic ReAct agents, where LangChain earns criticism |
+| LangGraph | `src/content/langgraph.js` | 9 | 11 | 8 | The graph mental model (nodes/edges/state), why LangGraph exists beyond LangChain's agents, StateGraph core primitives, the Model Context Protocol (MCP), human-in-the-loop patterns, multi-agent/supervisor patterns, a hand-rolled agentic tool-use loop, agent architectures beyond ReAct |
+| RAG | `src/content/rag.js` | 13 | 13 | 9 | Vector embeddings & semantic similarity, the basic RAG loop, LLM fundamentals, chunking, embeddings & vector search, vector index tradeoffs (HNSW vs IVF), hybrid search & re-ranking, RAG evaluation, RAG failure modes, advanced/agentic RAG patterns, fine-tuning vs RAG vs prompt engineering, an enterprise-assistant case study |
 
-**Totals: 12 subjects, 26 groups, 129 topics, 132 Q&A pairs.**
+**Totals: 12 subjects, 26 groups, 207 topics, 206 Q&A pairs, 161 Mermaid diagrams.**
 
-Many of these lessons include a live-rendered **Mermaid diagram** (architecture flowcharts,
-sequence diagrams, the Raft leader-election state machine, consistent-hashing rings) — see §3.3
-for how `Mermaid.jsx` renders them and why it's lazy-loaded.
+Most of these lessons include a live-rendered **Mermaid diagram** — architecture flowcharts,
+sequence diagrams, the Raft leader-election state machine, consistent-hashing rings, UML class
+diagrams for every LLD design pattern and case study, even the odd `pie` chart for an interview
+grading rubric — see §3.3 for how `Mermaid.jsx` renders them and why it's lazy-loaded.
+
+**Why one group instead of Basics/Intermediate/Advanced sub-drawers, unlike React**: React's
+four groups exist because each level's lessons are genuinely different *pages* (different demo
+components). A content-driven subject's lessons are just entries in one array — splitting them
+into separate collapsible groups would only add clicks without adding real structure, so each
+subject instead relies on **topic order** within its single Guide group to carry the
+basic-to-advanced narrative, the same way a well-organized book uses chapter order instead of
+separate volumes.
 
 ---
 

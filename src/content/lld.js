@@ -38,6 +38,15 @@ export const lldSection = {
               ],
             },
             {
+              type: 'mermaid',
+              code: `flowchart LR
+    A["System / Architecture\n(HLD)"] --> B["Service / Module\nboundary"] --> C["Class Diagram\n(LLD)"] --> D["Method Body\n(working code)"]`,
+            },
+            {
+              type: 'p',
+              text: 'LLD lives at the two rightmost stops on that zoom: the class diagram tells you the shape of the solution, the method body proves the shape actually works. An answer that only produces one of the two is an incomplete answer.',
+            },
+            {
               type: 'heading',
               text: 'How LLD rounds are actually graded',
             },
@@ -53,6 +62,332 @@ export const lldSection = {
                 '**Extensibility discussion (10%)** — you can answer "how would this change if we added X" without a redesign.',
                 '**Communication (5%)** — you narrate tradeoffs as you go, not just at the end.',
               ],
+            },
+          ],
+        },
+        {
+          id: 'oop-fundamentals',
+          title: 'OOP Fundamentals: The Four Pillars, With Diagrams',
+          summary:
+            'Every later topic — SOLID, patterns, case studies — quietly assumes fluency in these four ideas; interviewers notice immediately when a candidate uses "abstraction" and "encapsulation" interchangeably.',
+          keyPoints: [
+            'Encapsulation hides internal **state** behind a controlled interface so invariants can never be violated from outside.',
+            'Abstraction hides internal **complexity** behind a simple contract — the caller knows *what*, not *how*.',
+            'Inheritance models "is-a" and lets a subtype reuse a supertype\'s shape; polymorphism lets different subtypes respond to the same call differently.',
+            'Runtime (dynamic) polymorphism — the same method call resolving to different code depending on the actual object — is what makes Strategy, Observer, and virtually every GoF pattern work.',
+          ],
+          blocks: [
+            {
+              type: 'p',
+              text: 'These four pillars are usually taught as abstract definitions and then never revisited — but every design decision later in this guide is really just one of these four applied deliberately. Getting sloppy about the distinction between them, especially encapsulation vs. abstraction, is one of the fastest ways to sound junior in an interview even when your final design is fine.',
+            },
+            {
+              type: 'heading',
+              text: 'Encapsulation — hiding state',
+            },
+            {
+              type: 'p',
+              text: 'Encapsulation bundles data with the methods that operate on it, and restricts direct access to that data so an object\'s internal invariants can never be violated from the outside. A `BankAccount` with a public `balance` field is not encapsulated — any caller can set it to a negative number. A `BankAccount` that keeps `balance` private and only allows mutation through `deposit()`/`withdraw()` methods that validate the amount is encapsulated: the invariant "balance never goes negative" is enforced in exactly one place.',
+            },
+            {
+              type: 'code',
+              language: 'python',
+              title: 'Encapsulation: the invariant lives with the data',
+              code: `class BankAccount:
+    def __init__(self, opening_balance: int):
+        self._balance = opening_balance  # "private" by convention
+
+    def withdraw(self, amount: int) -> None:
+        if amount <= 0:
+            raise ValueError("amount must be positive")
+        if amount > self._balance:
+            raise ValueError("insufficient funds")
+        self._balance -= amount
+
+    @property
+    def balance(self) -> int:
+        return self._balance  # read-only from outside`,
+            },
+            {
+              type: 'heading',
+              text: 'Abstraction — hiding complexity',
+            },
+            {
+              type: 'p',
+              text: 'Abstraction is about the **contract**, not the data: it lets a caller depend on *what* an object does without knowing *how*. `PaymentStrategy.pay(amount)` is an abstraction — the caller never sees the HTTP calls, retries, or signature verification happening inside `UpiPayment.pay()`. Encapsulation and abstraction are often confused because they usually appear together, but they solve different problems: encapsulation protects an object\'s **state**; abstraction simplifies an object\'s **interface**. A class can have one without the other — a class with all-public fields but a single well-named method is abstracted but not encapsulated, and vice versa.',
+            },
+            {
+              type: 'heading',
+              text: 'Inheritance & polymorphism',
+            },
+            {
+              type: 'p',
+              text: 'Inheritance lets a subclass reuse a superclass\'s fields/methods and models an "is-a" relationship (`Circle` is-a `Shape`). Polymorphism is the payoff: code written against the supertype (`Shape`) automatically works correctly for any subtype, and calling `shape.area()` runs *different* code depending on whether `shape` is actually a `Circle` or a `Rectangle` at runtime — this is **runtime/dynamic polymorphism**, resolved via a vtable/method-dispatch table, and it is the mechanism underneath nearly every design pattern in this guide.',
+            },
+            {
+              type: 'mermaid',
+              code: `classDiagram
+    class Shape {
+        <<abstract>>
+        +area() float
+        +perimeter() float
+    }
+    class Circle {
+        -radius float
+        +area() float
+        +perimeter() float
+    }
+    class Rectangle {
+        -width float
+        -height float
+        +area() float
+        +perimeter() float
+    }
+    Shape <|-- Circle
+    Shape <|-- Rectangle`,
+            },
+            {
+              type: 'code',
+              language: 'python',
+              title: 'Runtime polymorphism — same call, different code',
+              code: `shapes: list[Shape] = [Circle(radius=2), Rectangle(width=3, height=4)]
+for s in shapes:
+    # s.area() dispatches to Circle.area() or Rectangle.area()
+    # depending on the *actual* object, not the declared type
+    print(s.area())`,
+            },
+            {
+              type: 'callout',
+              kind: 'note',
+              text: 'Compile-time (static) polymorphism — method **overloading**, same name with different parameter lists resolved at compile time — is the other kind, but it is far less relevant to LLD interviews (and Python doesn\'t support it natively at all). When an interviewer says "polymorphism" in an LLD context, they almost always mean runtime/dynamic polymorphism via inheritance or interface implementation.',
+            },
+            {
+              type: 'callout',
+              kind: 'tip',
+              text: 'Interview-favorite one-liner for the encapsulation-vs-abstraction question: **encapsulation hides data, abstraction hides complexity**. If you can only remember one distinction, remember that one.',
+            },
+          ],
+        },
+        {
+          id: 'uml-class-diagram-literacy',
+          title: 'Reading UML: Class & Sequence Diagram Notation',
+          summary:
+            'Every diagram later in this guide assumes you can read the difference between a hollow diamond and a filled one — this is the five-minute primer that makes the rest of the guide legible.',
+          keyPoints: [
+            'Six relationship types, each with its own line/arrowhead: association, aggregation, composition, inheritance, realization, dependency.',
+            'Composition (filled diamond) means the part dies with the whole; aggregation (hollow diamond) means the part can outlive it.',
+            'Multiplicities (1, 0..1, *, 1..*) on association ends state cardinality precisely — always draw them, interviewers notice when you skip them.',
+            'Sequence diagrams show messages over time: a solid arrow is a call, a dashed arrow is a return, and a vertical bar is "this object is currently executing."',
+          ],
+          blocks: [
+            {
+              type: 'p',
+              text: 'UML class diagrams are the whiteboard language of LLD interviews. The notation is small enough to memorize completely, and doing so pays off immediately: every diagram in this guide (and everything you\'ll draw live in an interview) is built from exactly these primitives.',
+            },
+            {
+              type: 'table',
+              headers: ['Relationship', 'Meaning', 'Notation', 'Example'],
+              rows: [
+                ['Association', '"Uses/knows about" — neither owns the other\'s lifecycle', 'plain line, optional arrowhead', '`Driver` drives `Car`'],
+                ['Aggregation', '"Has-a", whole-part, but the part can exist independently', 'line with a **hollow** diamond at the whole', '`Department` has `Professor`s'],
+                ['Composition', '"Has-a", strong ownership — the part dies when the whole is destroyed', 'line with a **filled** diamond at the whole', '`House` owns its `Room`s'],
+                ['Inheritance', '"Is-a" — subtype extends supertype', 'line with a **hollow triangle** arrow at the parent', '`Circle` inherits `Shape`'],
+                ['Realization', 'A class implements an interface\'s contract', '**dashed** line with a hollow triangle arrow', '`UpiPayment` implements `PaymentStrategy`'],
+                ['Dependency', '"Uses temporarily" — e.g. a method parameter or local variable', 'dashed line with an open arrow', '`OrderService.checkout(logger: Logger)`'],
+              ],
+            },
+            {
+              type: 'mermaid',
+              code: `classDiagram
+    class PaymentStrategy {
+        <<interface>>
+        +pay(amount) Receipt
+    }
+    class UpiPayment
+    class OrderService {
+        -PaymentStrategy strategy
+        +checkout(cart) Receipt
+    }
+    class Cart {
+        -List~Item~ items
+    }
+    class Item
+    class Logger
+    class Warehouse
+    class Shelf
+
+    PaymentStrategy <|.. UpiPayment : realization
+    OrderService --> PaymentStrategy : association
+    OrderService ..> Logger : dependency
+    Cart "1" *-- "many" Item : composition
+    Warehouse "1" o-- "many" Shelf : aggregation`,
+            },
+            {
+              type: 'heading',
+              text: 'Multiplicity, precisely',
+            },
+            {
+              type: 'list',
+              items: [
+                '`1` — exactly one.',
+                '`0..1` — zero or one (optional).',
+                '`*` or `0..*` — zero or more.',
+                '`1..*` — one or more (at least one required).',
+                '`n..m` — a bounded range, e.g. `2..4`.',
+              ],
+            },
+            {
+              type: 'heading',
+              text: 'Class box notation',
+            },
+            {
+              type: 'list',
+              items: [
+                '`+` public, `-` private, `#` protected.',
+                '`<<interface>>` / `<<abstract>>` stereotypes mark a class as non-instantiable.',
+                'Underlined members are `static`/class-level (not per-instance).',
+                '`~List~T~~` in Mermaid is how generic types like `List<T>` are written, since `<` `>` are reserved for arrows.',
+              ],
+            },
+            {
+              type: 'heading',
+              text: 'Sequence diagrams: the other half',
+            },
+            {
+              type: 'p',
+              text: 'Where a class diagram shows static structure ("what exists"), a sequence diagram shows a single flow over time ("what happens, in order, for one request"). This is what the process topic below asks you to walk through *before* writing code — it is usually where a hidden design flaw first becomes visible.',
+            },
+            {
+              type: 'mermaid',
+              code: `sequenceDiagram
+    participant Client
+    participant OrderService
+    participant PaymentStrategy
+
+    Client->>OrderService: checkout(cart)
+    activate OrderService
+    OrderService->>PaymentStrategy: pay(amount)
+    activate PaymentStrategy
+    PaymentStrategy-->>OrderService: Receipt
+    deactivate PaymentStrategy
+    OrderService-->>Client: Receipt
+    deactivate OrderService`,
+            },
+            {
+              type: 'list',
+              items: [
+                'A **solid arrow with a filled head** (`->>`) is a synchronous call.',
+                'A **dashed arrow** (`-->>`) is a return value coming back.',
+                'A vertical **activation bar** marks the span during which that object is actively executing/on the call stack.',
+                '`alt`/`opt`/`loop` fragments (boxed regions) express branching and repetition — useful for showing a retry or a "seat already locked" branch without a second diagram.',
+              ],
+            },
+            {
+              type: 'callout',
+              kind: 'tip',
+              text: 'In a live interview, always narrate multiplicities and relationship types out loud as you draw ("Group has-many Expense, composition, an expense doesn\'t make sense without its group") — this single habit signals fluency faster than almost anything else you can do on the whiteboard.',
+            },
+          ],
+        },
+        {
+          id: 'interfaces-abstract-vs-composition',
+          title: 'Interfaces vs Abstract Classes, and Composition over Inheritance',
+          summary:
+            'Two of the most-asked "explain the difference" LLD questions, and the design habit — favor composition — that resolves most inheritance-related design mistakes before they happen.',
+          keyPoints: [
+            'Interface = pure "can-do" contract, no state, a class can implement many; abstract class = "is-a" with shared state/partial implementation, a class can extend only one (in most languages).',
+            'Rule of thumb: shared code + shared state across subtypes → abstract class; a capability unrelated classes can plug into → interface.',
+            'Deep/rigid inheritance hierarchies break the moment a subtype doesn\'t *fully* satisfy the parent\'s contract (an LSP violation waiting to happen).',
+            'Composition assembles behavior from small, independently swappable parts at runtime — Strategy is composition\'s canonical answer to "the algorithm needs to vary."',
+          ],
+          blocks: [
+            {
+              type: 'p',
+              text: 'An abstract class can hold shared state and partial implementation (concrete methods plus abstract ones subclasses must fill in) — but a class can extend only one in almost every mainstream language. An interface defines a pure contract with no state of its own, and a class can implement as many interfaces as it needs. This single constraint (single inheritance vs. multiple implementation) is *the* deciding factor in practice.',
+            },
+            {
+              type: 'mermaid',
+              code: `classDiagram
+    class Payable {
+        <<interface>>
+        +calculatePay() Money
+    }
+    class AbstractEmployee {
+        <<abstract>>
+        #String name
+        #String employeeId
+        +getDetails() String
+        +calculatePay() Money*
+    }
+    class SalariedEmployee {
+        -Money monthlySalary
+        +calculatePay() Money
+    }
+    class ContractEmployee {
+        -Money hourlyRate
+        -int hoursWorked
+        +calculatePay() Money
+    }
+    AbstractEmployee <|-- SalariedEmployee
+    AbstractEmployee <|-- ContractEmployee
+    Payable <|.. SalariedEmployee
+    Payable <|.. ContractEmployee`,
+            },
+            {
+              type: 'table',
+              headers: ['', 'Interface', 'Abstract class'],
+              rows: [
+                ['Holds state?', 'No (contract only)', 'Yes — fields, shared logic'],
+                ['A class can have how many?', 'Many (implements)', 'One (extends), in most languages'],
+                ['Constructor?', 'No', 'Yes — can run shared init logic'],
+                ['Use when...', 'Unrelated classes share a *capability* (`Comparable`, `PaymentStrategy`)', 'Related classes share meaningful *code/state* (`AbstractEmployee`)'],
+              ],
+            },
+            {
+              type: 'heading',
+              text: 'Composition over inheritance',
+            },
+            {
+              type: 'p',
+              text: 'Inheritance is evaluated once, at compile time, and applies to the *entire* object. Composition assembles an object\'s behavior from smaller parts that can each be swapped independently, at runtime. The classic illustration: modeling ducks by inheritance forces every subclass to either implement `fly()` in a way that makes sense, or override it with something awkward (`RubberDuck.fly()` throwing an exception) — the "gorilla holding the banana" problem, where inheriting the one method you wanted drags in the whole hierarchy\'s assumptions with it.',
+            },
+            {
+              type: 'mermaid',
+              code: `classDiagram
+    class Duck {
+        -FlyBehavior flyBehavior
+        -QuackBehavior quackBehavior
+        +performFly()
+        +performQuack()
+    }
+    class FlyBehavior {
+        <<interface>>
+        +fly()
+    }
+    class FlyWithWings
+    class FlyNoWay
+    class QuackBehavior {
+        <<interface>>
+        +quack()
+    }
+    class Quack
+    class MuteQuack
+
+    Duck o-- FlyBehavior
+    Duck o-- QuackBehavior
+    FlyBehavior <|.. FlyWithWings
+    FlyBehavior <|.. FlyNoWay
+    QuackBehavior <|.. Quack
+    QuackBehavior <|.. MuteQuack`,
+            },
+            {
+              type: 'p',
+              text: 'Every `Duck` composes a `FlyBehavior` and a `QuackBehavior` instead of inheriting them — a `RubberDuck` is simply constructed with `FlyNoWay()` and `MuteQuack()`, no exception-throwing override required, and behavior can even be swapped at runtime (`duck.setFlyBehavior(FlyWithWings())` after finding a magic potion). This is literally the Strategy pattern, and it\'s why "favor composition over inheritance" and "program to an interface, not an implementation" are usually taught as the same principle.',
+            },
+            {
+              type: 'callout',
+              kind: 'pitfall',
+              text: 'This is also exactly the shape of a classic Liskov Substitution violation: if `FlyingBird.fly()` is inherited by `Penguin`, either `Penguin` breaks the contract (throws, or does nothing) or every caller of `fly()` now has to special-case penguins. Composition sidesteps the problem entirely by not forcing the capability onto types that don\'t have it.',
             },
           ],
         },
@@ -78,6 +413,97 @@ export const lldSection = {
                 '**I — Interface Segregation Principle.** Don\'t force clients to depend on methods they don\'t use. A fat `Worker` interface with `work()` and `eat()` breaks `RobotWorker`. Split into `Workable` and `Eatable`.',
                 '**D — Dependency Inversion Principle.** High-level modules shouldn\'t depend on low-level modules; both depend on abstractions. `OrderService` should depend on a `PaymentGateway` interface, not a concrete `StripeGateway`, and get the concrete instance injected.',
               ],
+            },
+            {
+              type: 'heading',
+              text: 'SRP: a concrete before / after',
+            },
+            {
+              type: 'mermaid',
+              code: `classDiagram
+    class OrderGod {
+        +calculateTotal()
+        +validate()
+        +persist()
+        +formatInvoicePdf()
+        +sendConfirmationEmail()
+    }
+    note for OrderGod "Violation: 5 unrelated\nreasons to change"`,
+            },
+            {
+              type: 'mermaid',
+              code: `classDiagram
+    class Order {
+        +calculateTotal() Money
+    }
+    class OrderValidator {
+        +validate(order) bool
+    }
+    class OrderRepository {
+        +save(order)
+    }
+    class InvoiceFormatter {
+        +toPdf(order) bytes
+    }
+    class NotificationService {
+        +sendConfirmation(order)
+    }
+    OrderValidator ..> Order
+    OrderRepository ..> Order
+    InvoiceFormatter ..> Order
+    NotificationService ..> Order`,
+            },
+            {
+              type: 'p',
+              text: 'Each extracted class now changes for exactly one reason: a new tax rule touches `Order`, a new PDF layout touches `InvoiceFormatter`, a new DB touches `OrderRepository`. None of those changes ripple into the others.',
+            },
+            {
+              type: 'heading',
+              text: 'LSP: a concrete violation and fix',
+            },
+            {
+              type: 'mermaid',
+              code: `classDiagram
+    class Rectangle {
+        -width float
+        -height float
+        +setWidth(w)
+        +setHeight(h)
+        +area() float
+    }
+    class Square {
+        +setWidth(w)
+        +setHeight(h)
+    }
+    Rectangle <|-- Square
+    note for Square "Violation: setWidth() also\nforces height = w to stay\na square — breaks any caller\nthat sets width/height independently"`,
+            },
+            {
+              type: 'mermaid',
+              code: `classDiagram
+    class Shape {
+        <<interface>>
+        +area() float
+    }
+    class Rectangle {
+        -width float
+        -height float
+        +area() float
+    }
+    class Square {
+        -side float
+        +area() float
+    }
+    Shape <|.. Rectangle
+    Shape <|.. Square`,
+            },
+            {
+              type: 'p',
+              text: 'The fix isn\'t "make `Square` smarter" — it\'s recognizing that `Square` was never really a behavioral subtype of `Rectangle` in the first place (a mutable rectangle is not substitutable for a mutable square and vice versa). Making both independently implement a shared `Shape` interface removes the false is-a relationship entirely.',
+            },
+            {
+              type: 'heading',
+              text: 'OCP, ISP & DIP together, in one payment example',
             },
             {
               type: 'mermaid',
@@ -139,6 +565,53 @@ class OrderService:
           ],
         },
         {
+          id: 'lld-process',
+          title: 'The Repeatable LLD Process',
+          summary:
+            'Use the same eleven-step process in every LLD interview — it is what turns a vague prompt into a class diagram, a sequence walkthrough, and working code, in that order.',
+          keyPoints: [
+            'Clarify scope and explicit out-of-scope items before designing anything.',
+            'Nouns become candidate classes, verbs become candidate methods — then assign responsibilities via SRP.',
+            'Walk through 2-3 core flows as sequence diagrams before writing code — this is where hidden design flaws surface.',
+            'Write real code for the core 20% the interviewer asks for, narrating edge cases out loud.',
+            'Close with extensibility, concurrency, and persistence discussion even if not explicitly asked.',
+          ],
+          blocks: [
+            {
+              type: 'mermaid',
+              code: `flowchart LR
+    A[Clarify scope\n& actors] --> B[Nouns -> classes\nVerbs -> methods]
+    B --> C[Relationships &\nresponsibilities]
+    C --> D[Class diagram\nwith multiplicities]
+    D --> E[Sequence walkthrough\nof 2-3 core flows]
+    E --> F[Code the core\n20%, out loud]
+    F --> G[Extensibility,\nconcurrency, persistence]`,
+            },
+            {
+              type: 'list',
+              ordered: true,
+              items: [
+                '**Clarify scope** — list explicit requirements and explicitly out-of-scope items. ("Should this support multiple parking floors? Multiple vehicle types? Payment? Multiple attendants concurrently?")',
+                '**Identify actors and use cases** — who interacts with the system, and how (a quick use-case list, not necessarily a formal UML diagram).',
+                '**Identify nouns → candidate classes, verbs → candidate methods.**',
+                '**Define relationships** — inheritance ("is-a"), composition ("owns, dies with parent"), aggregation ("has, survives independently"), association.',
+                '**Assign responsibilities** — apply SRP; watch for god classes.',
+                '**Draw the class diagram**, including multiplicities (1, 0..1, 1..*, *) — interviewers notice when you skip these.',
+                '**Walk through 2-3 core flows as sequence diagrams** — this is where hidden design flaws surface (e.g., you realize `ParkingSpot` needs a way to notify `Floor` when it frees up).',
+                '**Write real code for the core 20%** — usually the interviewer will ask you to implement one specific class/method fully (e.g., "now code the `allocateSpot` method"). Handle edge cases out loud: empty input, capacity exceeded, concurrent access, not-found.',
+                '**Discuss extensibility** — "how would this change if we added X?" Show OCP in action.',
+                '**Discuss concurrency/edge cases** if relevant (e.g., two users grabbing the last parking spot, double-booking the same seat).',
+                '**Discuss persistence** briefly — which fields would be columns, what would need an index, would this entity be its own table or embedded (a natural bridge to a DB-schema follow-up).',
+              ],
+            },
+            {
+              type: 'callout',
+              kind: 'tip',
+              text: 'Run through this same eleven-step order for every LLD prompt you practice, even ones you already know cold — the process itself, narrated out loud, is a large part of what is being graded, independent of the specific design you land on.',
+            },
+          ],
+        },
+        {
           id: 'creational-patterns',
           title: 'Creational Patterns: Factory, Abstract Factory, Builder, Singleton',
           summary:
@@ -160,6 +633,24 @@ class OrderService:
               ],
             },
             {
+              type: 'mermaid',
+              code: `classDiagram
+    class NotificationChannel {
+        <<interface>>
+        +send(message)
+    }
+    class EmailChannel
+    class SmsChannel
+    class PushChannel
+    class NotificationFactory {
+        +create(channel: String) NotificationChannel
+    }
+    NotificationChannel <|.. EmailChannel
+    NotificationChannel <|.. SmsChannel
+    NotificationChannel <|.. PushChannel
+    NotificationFactory ..> NotificationChannel : creates`,
+            },
+            {
               type: 'code',
               language: 'python',
               title: 'Factory Method via a registry',
@@ -175,6 +666,57 @@ class OrderService:
         if channel not in cls._registry:
             raise ValueError(f"unknown channel: {channel}")
         return cls._registry[channel]()`,
+            },
+            {
+              type: 'mermaid',
+              code: `classDiagram
+    class UIFactory {
+        <<interface>>
+        +createButton() Button
+        +createCheckbox() Checkbox
+    }
+    class LightUIFactory
+    class DarkUIFactory
+    class Button { <<interface>> }
+    class Checkbox { <<interface>> }
+    class LightButton
+    class DarkButton
+    class LightCheckbox
+    class DarkCheckbox
+
+    UIFactory <|.. LightUIFactory
+    UIFactory <|.. DarkUIFactory
+    Button <|.. LightButton
+    Button <|.. DarkButton
+    Checkbox <|.. LightCheckbox
+    Checkbox <|.. DarkCheckbox
+    LightUIFactory ..> LightButton : creates
+    LightUIFactory ..> LightCheckbox : creates
+    DarkUIFactory ..> DarkButton : creates
+    DarkUIFactory ..> DarkCheckbox : creates`,
+            },
+            {
+              type: 'p',
+              text: 'The point of Abstract Factory is the guarantee it gives for free: because `LightUIFactory` only ever produces `LightButton`/`LightCheckbox`, it is *structurally impossible* to accidentally pair a light button with a dark checkbox — the consistency constraint is enforced by which factory you hold, not by a runtime check.',
+            },
+            {
+              type: 'mermaid',
+              code: `classDiagram
+    class HttpRequestBuilder {
+        -method String
+        -headers Map
+        -body bytes
+        +method(m) HttpRequestBuilder
+        +header(k, v) HttpRequestBuilder
+        +body(b) HttpRequestBuilder
+        +build() HttpRequest
+    }
+    class HttpRequest {
+        +method String
+        +headers Map
+        +body bytes
+    }
+    HttpRequestBuilder ..> HttpRequest : builds`,
             },
             {
               type: 'code',
@@ -206,6 +748,17 @@ class OrderService:
 # request = HttpRequestBuilder().method("POST").header("Content-Type", "application/json").body(payload).build()`,
             },
             {
+              type: 'mermaid',
+              code: `classDiagram
+    class ConfigManager {
+        -ConfigManager instance$
+        -Map settings
+        -ConfigManager()
+        +getInstance()$ ConfigManager
+        +get(key: String) String
+    }`,
+            },
+            {
               type: 'callout',
               kind: 'tip',
               text: 'For Singleton, know the standard thread-safety options (eager init, double-checked locking, initialization-on-demand holder, or a class-level lock) — but volunteer the downside unprompted: Singletons hurt unit testing because they hide global state, and dependency injection of the single instance is usually the better fit.',
@@ -234,6 +787,53 @@ class OrderService:
                 '**Composite** — treat individual objects and compositions uniformly (filesystem `File`/`Directory`, org chart, UI component trees).',
                 '**Proxy** — control access to an object (lazy loading, access control, caching, remote proxy — e.g., an ORM\'s lazy-loaded relationship is a Proxy).',
               ],
+            },
+            {
+              type: 'mermaid',
+              code: `classDiagram
+    class PaymentStrategy {
+        <<interface>>
+        +pay(amount) Receipt
+    }
+    class XmlPaymentGateway {
+        +submitXmlPayment(xml) XmlResponse
+    }
+    class XmlGatewayAdapter {
+        -XmlPaymentGateway legacyGateway
+        +pay(amount) Receipt
+    }
+    PaymentStrategy <|.. XmlGatewayAdapter
+    XmlGatewayAdapter --> XmlPaymentGateway : translates calls to`,
+            },
+            {
+              type: 'mermaid',
+              code: `classDiagram
+    class Beverage {
+        <<abstract>>
+        +cost() int
+        +description() String
+    }
+    class Espresso {
+        +cost() int
+        +description() String
+    }
+    class AddOnDecorator {
+        <<abstract>>
+        #Beverage wrapped
+    }
+    class WithMilk {
+        +cost() int
+        +description() String
+    }
+    class WithExtraShot {
+        +cost() int
+        +description() String
+    }
+    Beverage <|-- Espresso
+    Beverage <|-- AddOnDecorator
+    AddOnDecorator <|-- WithMilk
+    AddOnDecorator <|-- WithExtraShot
+    AddOnDecorator o-- Beverage : wraps`,
             },
             {
               type: 'code',
@@ -269,6 +869,68 @@ class WithExtraShot(AddOnDecorator):
               kind: 'tip',
               text: 'Decorator clearly wins over inheritance whenever behaviors need to combine in arbitrary combinations at runtime — a coffee that is both `WithMilk` and `WithExtraShot` and `WithWhippedCream` would need one subclass per combination under inheritance (combinatorial explosion); Decorator lets any combination be assembled at runtime by wrapping.',
             },
+            {
+              type: 'mermaid',
+              code: `classDiagram
+    class OrderFacade {
+        +placeOrder(cart) Receipt
+    }
+    class InventoryService {
+        +reserve(items)
+    }
+    class PaymentService {
+        +charge(amount)
+    }
+    class ShippingService {
+        +schedule(order)
+    }
+    OrderFacade --> InventoryService
+    OrderFacade --> PaymentService
+    OrderFacade --> ShippingService`,
+            },
+            {
+              type: 'mermaid',
+              code: `classDiagram
+    class FileSystemNode {
+        <<abstract>>
+        +getSize() int
+    }
+    class File {
+        +getSize() int
+    }
+    class Directory {
+        -List~FileSystemNode~ children
+        +getSize() int
+        +add(node)
+    }
+    FileSystemNode <|-- File
+    FileSystemNode <|-- Directory
+    Directory o-- "many" FileSystemNode : children`,
+            },
+            {
+              type: 'p',
+              text: '`Directory.getSize()` simply sums `child.getSize()` over its children — it doesn\'t care whether each child is a `File` (base case) or another `Directory` (recursive case). This uniform treatment of leaf and composite nodes is the entire point of the pattern.',
+            },
+            {
+              type: 'mermaid',
+              code: `classDiagram
+    class Image {
+        <<interface>>
+        +display()
+    }
+    class RealImage {
+        -String filename
+        +display()
+    }
+    class ProxyImage {
+        -RealImage realImage
+        -String filename
+        +display()
+    }
+    Image <|.. RealImage
+    Image <|.. ProxyImage
+    ProxyImage --> RealImage : lazily creates on first display()`,
+            },
           ],
         },
         {
@@ -279,9 +941,9 @@ class WithExtraShot(AddOnDecorator):
           keyPoints: [
             'Strategy: interchangeable algorithms chosen externally and static once chosen.',
             'Observer: pub/sub within a process — foundation of event-driven UI and reactive systems.',
+            'Command: encapsulate a request as an object — the basis for undo/redo and job queues.',
             'State: object behavior changes with internal state, and each state controls its own legal transitions.',
-            'Command, Chain of Responsibility, Template Method, Visitor, Mediator, and Memento round out the common set.',
-            'State pattern makes illegal transitions unrepresentable instead of checked with scattered if-guards — a senior-level detail.',
+            'Chain of Responsibility, Template Method, Visitor, Mediator, and Memento round out the common set.',
           ],
           blocks: [
             {
@@ -297,6 +959,91 @@ class WithExtraShot(AddOnDecorator):
                 '**Mediator** — centralize how a set of objects interact instead of each referencing every other (air traffic control tower pattern; chat room routing messages between users without users knowing about each other directly).',
                 '**Memento** — capture and restore an object\'s internal state without violating encapsulation (undo stacks, save/checkpoint systems).',
               ],
+            },
+            {
+              type: 'mermaid',
+              code: `classDiagram
+    class SortStrategy {
+        <<interface>>
+        +sort(list) List
+    }
+    class QuickSort {
+        +sort(list) List
+    }
+    class MergeSort {
+        +sort(list) List
+    }
+    class Sorter {
+        -SortStrategy strategy
+        +setStrategy(s)
+        +sort(list) List
+    }
+    SortStrategy <|.. QuickSort
+    SortStrategy <|.. MergeSort
+    Sorter --> SortStrategy`,
+            },
+            {
+              type: 'mermaid',
+              code: `classDiagram
+    class Subject {
+        <<interface>>
+        +attach(observer)
+        +detach(observer)
+        +notify()
+    }
+    class StockTicker {
+        -List~Observer~ observers
+        -float price
+        +setPrice(p)
+    }
+    class Observer {
+        <<interface>>
+        +update(price)
+    }
+    class PriceDisplay {
+        +update(price)
+    }
+    class AlertService {
+        +update(price)
+    }
+    Subject <|.. StockTicker
+    Observer <|.. PriceDisplay
+    Observer <|.. AlertService
+    StockTicker o-- "many" Observer`,
+            },
+            {
+              type: 'mermaid',
+              code: `classDiagram
+    class Command {
+        <<interface>>
+        +execute()
+        +undo()
+    }
+    class AddTextCommand {
+        +execute()
+        +undo()
+    }
+    class DeleteTextCommand {
+        +execute()
+        +undo()
+    }
+    class TextEditor {
+        +applyCommand(cmd: Command)
+        +undoLast()
+    }
+    class CommandHistory {
+        -Stack~Command~ history
+        +push(cmd)
+        +pop() Command
+    }
+    Command <|.. AddTextCommand
+    Command <|.. DeleteTextCommand
+    TextEditor --> CommandHistory
+    CommandHistory o-- "many" Command`,
+            },
+            {
+              type: 'p',
+              text: 'The reason Command works so cleanly for undo/redo: because the request itself is an object with both `execute()` and `undo()`, `TextEditor` never needs to know *what* it\'s undoing — it just pops the last `Command` off a stack and calls `undo()`. The same shape (encapsulate the action, not just its parameters) is what makes job queues and macro recording easy too — a queued job is just a serialized `Command`.',
             },
             {
               type: 'mermaid',
@@ -367,39 +1114,123 @@ class Order:
           ],
         },
         {
-          id: 'lld-process',
-          title: 'The Repeatable LLD Process',
+          id: 'concurrency-patterns',
+          title: 'Concurrency Patterns Every LLD Round Should Surface',
           summary:
-            'Use the same eleven-step process in every LLD interview — it is what turns a vague prompt into a class diagram, a sequence walkthrough, and working code, in that order.',
+            'Naming the right concurrency pattern for a given contention profile — even without full implementation — is one of the highest-signal things you can do unprompted.',
           keyPoints: [
-            'Clarify scope and explicit out-of-scope items before designing anything.',
-            'Nouns become candidate classes, verbs become candidate methods — then assign responsibilities via SRP.',
-            'Walk through 2-3 core flows as sequence diagrams before writing code — this is where hidden design flaws surface.',
-            'Write real code for the core 20% the interviewer asks for, narrating edge cases out loud.',
-            'Close with extensibility, concurrency, and persistence discussion even if not explicitly asked.',
+            'Optimistic locking suits rare contention; pessimistic locking suits frequent, high-value contention.',
+            'Compare-and-swap gives lock-free updates for simple counters.',
+            'Read-write locks help when reads vastly outnumber writes.',
+            'Distributed locks need a TTL/lease so a crashed holder can\'t deadlock the resource forever.',
+            'Idempotency keys are the other half of correctness — retries can double-process even with perfect locking.',
           ],
           blocks: [
             {
               type: 'list',
-              ordered: true,
               items: [
-                '**Clarify scope** — list explicit requirements and explicitly out-of-scope items. ("Should this support multiple parking floors? Multiple vehicle types? Payment? Multiple attendants concurrently?")',
-                '**Identify actors and use cases** — who interacts with the system, and how (a quick use-case list, not necessarily a formal UML diagram).',
-                '**Identify nouns → candidate classes, verbs → candidate methods.**',
-                '**Define relationships** — inheritance ("is-a"), composition ("owns, dies with parent"), aggregation ("has, survives independently"), association.',
-                '**Assign responsibilities** — apply SRP; watch for god classes.',
-                '**Draw the class diagram**, including multiplicities (1, 0..1, 1..*, *) — interviewers notice when you skip these.',
-                '**Walk through 2-3 core flows as sequence diagrams** — this is where hidden design flaws surface (e.g., you realize `ParkingSpot` needs a way to notify `Floor` when it frees up).',
-                '**Write real code for the core 20%** — usually the interviewer will ask you to implement one specific class/method fully (e.g., "now code the `allocateSpot` method"). Handle edge cases out loud: empty input, capacity exceeded, concurrent access, not-found.',
-                '**Discuss extensibility** — "how would this change if we added X?" Show OCP in action.',
-                '**Discuss concurrency/edge cases** if relevant (e.g., two users grabbing the last parking spot, double-booking the same seat).',
-                '**Discuss persistence** briefly — which fields would be columns, what would need an index, would this entity be its own table or embedded (a natural bridge to a DB-schema follow-up).',
+                '**Optimistic locking** (version column, retry on conflict) — good when contention is rare (most e-commerce inventory updates).',
+                '**Pessimistic locking** (`SELECT ... FOR UPDATE`, `synchronized`, mutex) — good when contention is frequent and retries would be wasteful (seat booking at the exact moment tickets go on sale).',
+                '**Compare-and-swap / atomic operations** — lock-free updates for simple counters (`AtomicInteger`, Redis `INCR`).',
+                '**Read-write locks** — when reads vastly outnumber writes and reads don\'t need to block each other (a config cache updated rarely, read constantly).',
+                '**Distributed locks** (Redis Redlock, Zookeeper/etcd) — when the resource is shared across multiple processes/machines, not just threads in one process. Always pair with a TTL/lease so a crashed lock-holder doesn\'t deadlock the resource forever.',
+                '**Idempotency keys** — not a lock, but the other half of correctness: even with perfect locking, retries (client timeout + resend) can cause double-processing unless the operation itself is idempotent.',
               ],
+            },
+            {
+              type: 'heading',
+              text: 'The race condition, made concrete',
+            },
+            {
+              type: 'mermaid',
+              code: `sequenceDiagram
+    participant T1 as Thread A
+    participant T2 as Thread B
+    participant Counter as shared counter (starts at 5)
+
+    T1->>Counter: read value -> 5
+    T2->>Counter: read value -> 5
+    T1->>Counter: write 5 + 1 = 6
+    T2->>Counter: write 5 + 1 = 6
+    Note over Counter: Lost update! Two increments happened,\nbut the final value is 6, not 7.`,
+            },
+            {
+              type: 'p',
+              text: 'This "read, then act, then write" shape — not any single line — is what makes an operation non-atomic. The fix is always one of: make the whole sequence atomic under a lock (pessimistic), detect the collision and retry (optimistic), or replace it with a hardware-supported atomic primitive (compare-and-swap / `INCR`) that has no read-then-write gap at all.',
+            },
+            {
+              type: 'heading',
+              text: 'Optimistic locking in action',
+            },
+            {
+              type: 'mermaid',
+              code: `sequenceDiagram
+    participant Client
+    participant DB
+
+    Client->>DB: read row (value=5, version=1)
+    Note over Client,DB: another client updates the row\nto version=2 in between
+    Client->>DB: UPDATE ... SET value=6, version=2 WHERE id=X AND version=1
+    DB-->>Client: 0 rows affected (version mismatch)
+    Client->>DB: re-read row (value=6, version=2)
+    Client->>DB: UPDATE ... SET value=7, version=3 WHERE id=X AND version=2
+    DB-->>Client: 1 row affected — success`,
             },
             {
               type: 'callout',
               kind: 'tip',
-              text: 'Run through this same eleven-step order for every LLD prompt you practice, even ones you already know cold — the process itself, narrated out loud, is a large part of what is being graded, independent of the specific design you land on.',
+              text: 'When an interviewer asks "what if two requests hit this at the same time?", first name which of these patterns fits the contention profile before writing any code — that single sentence is often worth more than the lock implementation itself.',
+            },
+          ],
+        },
+        {
+          id: 'anti-patterns',
+          title: 'Common Anti-Patterns to Call Out',
+          summary:
+            'Naming these unprompted, and proposing the fix, is one of the strongest signals you can send in an LLD interview.',
+          keyPoints: [
+            'God Class — one class doing validation, persistence, business rules, and notification.',
+            'Anemic Domain Model — entities that are pure data bags with all logic in a separate Service class.',
+            'Primitive Obsession — raw int/String for money, currency, IDs instead of small value types.',
+            'Feature Envy and Shotgun Surgery both point to a missing abstraction.',
+          ],
+          blocks: [
+            {
+              type: 'mermaid',
+              code: `classDiagram
+    class OrderGod {
+        +validate()
+        +calculateTotal()
+        +persistToDb()
+        +sendConfirmationEmail()
+        +generateInvoicePdf()
+    }
+    note for OrderGod "God Class: one class,\nfive unrelated reasons to change"`,
+            },
+            {
+              type: 'callout',
+              kind: 'pitfall',
+              text: '**God Class** — one class doing validation + persistence + business rules + notification. Fix: extract by responsibility (SRP).',
+            },
+            {
+              type: 'callout',
+              kind: 'pitfall',
+              text: '**Anemic Domain Model** — entities that are just data bags (getters/setters) with all logic living in a separate `*Service` or `*Manager` class. Sometimes fine (transaction-script style), but in an OOP-focused interview, pushing behavior into the entities themselves is usually the better answer (`Order.cancel()` instead of `OrderManager.cancelOrder(order)`).',
+            },
+            {
+              type: 'callout',
+              kind: 'pitfall',
+              text: '**Primitive Obsession** — passing raw `int`/`String` for money, currency, IDs everywhere instead of wrapping them in small value types (`Money`, `UserId`) that can enforce invariants (no negative amounts) and prevent parameter-order bugs.',
+            },
+            {
+              type: 'callout',
+              kind: 'pitfall',
+              text: '**Feature Envy** — a method that mostly operates on another object\'s data belongs on that other object.',
+            },
+            {
+              type: 'callout',
+              kind: 'pitfall',
+              text: '**Shotgun Surgery** — adding one feature requires touching a dozen classes; usually a missing abstraction (often solved by Strategy/Template Method).',
             },
           ],
         },
@@ -733,6 +1564,42 @@ def simplify_debts(net_balance: dict[str, int]) -> list[tuple[str, str, int]]:
           blocks: [
             {
               type: 'mermaid',
+              code: `classDiagram
+    class Movie {
+        -String id
+        -String title
+        -int durationMins
+    }
+    class Screen {
+        -String id
+        -List~Seat~ seats
+    }
+    class Seat {
+        -String id
+        -SeatType type
+    }
+    class Show {
+        -String id
+        -DateTime startTime
+    }
+    class Booking {
+        -String id
+        -List~Seat~ seats
+        -BookingStatus status
+    }
+    class User {
+        -String id
+        -String name
+    }
+    Show "many" --> "1" Movie
+    Show "many" --> "1" Screen
+    Screen "1" o-- "many" Seat
+    Booking "many" --> "1" Show
+    Booking "many" --> "many" Seat
+    Booking "many" --> "1" User`,
+            },
+            {
+              type: 'mermaid',
               code: `sequenceDiagram
     participant UserA
     participant UserB
@@ -765,71 +1632,6 @@ def simplify_debts(net_balance: dict[str, int]) -> list[tuple[str, str, int]]:
               type: 'callout',
               kind: 'tip',
               text: 'If the TTL expires before payment, the seat silently becomes available again — no manual cleanup process needed, which is precisely why TTL-based locks are preferred here over an explicit "release" call that a crashed client would never send.',
-            },
-          ],
-        },
-        {
-          id: 'concurrency-patterns',
-          title: 'Concurrency Patterns Every LLD Round Should Surface',
-          summary:
-            'Naming the right concurrency pattern for a given contention profile — even without full implementation — is one of the highest-signal things you can do unprompted.',
-          keyPoints: [
-            'Optimistic locking suits rare contention; pessimistic locking suits frequent, high-value contention.',
-            'Compare-and-swap gives lock-free updates for simple counters.',
-            'Read-write locks help when reads vastly outnumber writes.',
-            'Distributed locks need a TTL/lease so a crashed holder can\'t deadlock the resource forever.',
-            'Idempotency keys are the other half of correctness — retries can double-process even with perfect locking.',
-          ],
-          blocks: [
-            {
-              type: 'list',
-              items: [
-                '**Optimistic locking** (version column, retry on conflict) — good when contention is rare (most e-commerce inventory updates).',
-                '**Pessimistic locking** (`SELECT ... FOR UPDATE`, `synchronized`, mutex) — good when contention is frequent and retries would be wasteful (seat booking at the exact moment tickets go on sale).',
-                '**Compare-and-swap / atomic operations** — lock-free updates for simple counters (`AtomicInteger`, Redis `INCR`).',
-                '**Read-write locks** — when reads vastly outnumber writes and reads don\'t need to block each other (a config cache updated rarely, read constantly).',
-                '**Distributed locks** (Redis Redlock, Zookeeper/etcd) — when the resource is shared across multiple processes/machines, not just threads in one process. Always pair with a TTL/lease so a crashed lock-holder doesn\'t deadlock the resource forever.',
-                '**Idempotency keys** — not a lock, but the other half of correctness: even with perfect locking, retries (client timeout + resend) can cause double-processing unless the operation itself is idempotent.',
-              ],
-            },
-          ],
-        },
-        {
-          id: 'anti-patterns',
-          title: 'Common Anti-Patterns to Call Out',
-          summary:
-            'Naming these unprompted, and proposing the fix, is one of the strongest signals you can send in an LLD interview.',
-          keyPoints: [
-            'God Class — one class doing validation, persistence, business rules, and notification.',
-            'Anemic Domain Model — entities that are pure data bags with all logic in a separate Service class.',
-            'Primitive Obsession — raw int/String for money, currency, IDs instead of small value types.',
-            'Feature Envy and Shotgun Surgery both point to a missing abstraction.',
-          ],
-          blocks: [
-            {
-              type: 'callout',
-              kind: 'pitfall',
-              text: '**God Class** — one class doing validation + persistence + business rules + notification. Fix: extract by responsibility (SRP).',
-            },
-            {
-              type: 'callout',
-              kind: 'pitfall',
-              text: '**Anemic Domain Model** — entities that are just data bags (getters/setters) with all logic living in a separate `*Service` or `*Manager` class. Sometimes fine (transaction-script style), but in an OOP-focused interview, pushing behavior into the entities themselves is usually the better answer (`Order.cancel()` instead of `OrderManager.cancelOrder(order)`).',
-            },
-            {
-              type: 'callout',
-              kind: 'pitfall',
-              text: '**Primitive Obsession** — passing raw `int`/`String` for money, currency, IDs everywhere instead of wrapping them in small value types (`Money`, `UserId`) that can enforce invariants (no negative amounts) and prevent parameter-order bugs.',
-            },
-            {
-              type: 'callout',
-              kind: 'pitfall',
-              text: '**Feature Envy** — a method that mostly operates on another object\'s data belongs on that other object.',
-            },
-            {
-              type: 'callout',
-              kind: 'pitfall',
-              text: '**Shotgun Surgery** — adding one feature requires touching a dozen classes; usually a missing abstraction (often solved by Strategy/Template Method).',
             },
           ],
         },
@@ -878,12 +1680,27 @@ def simplify_debts(net_balance: dict[str, int]) -> list[tuple[str, str, int]]:
         {
           id: 'qa',
           title: 'Questions & Answers',
-          summary: '25 Low-Level Design interview questions with full-depth answers, spanning OOP fundamentals, patterns, and the five case studies.',
+          summary: '30 Low-Level Design interview questions with full-depth answers, spanning OOP fundamentals, UML notation, patterns, and the five case studies.',
           qa: [
             {
               question: 'What\'s the difference between aggregation and composition?',
               answer:
                 'Both are "has-a" relationships. In composition, the child\'s lifecycle is bound to the parent — if the parent is destroyed, so is the child (e.g., a `House` and its `Room`s). In aggregation, the child can exist independently (e.g., a `University` has `Department`s, but a `Department` could theoretically be reassigned; more classically, a `Car` and its `Engine` — the engine can exist without the car in inventory).',
+            },
+            {
+              question: 'What is the difference between association, aggregation, and composition, and how do you show multiplicity on a UML diagram?',
+              answer:
+                'Association is the loosest "uses/knows about" relationship — neither side owns the other\'s lifecycle (a `Driver` associated with a `Car`). Aggregation is a "has-a" whole-part relationship where the part can still exist independently of the whole (hollow diamond at the whole). Composition is a stronger "has-a" where the part\'s lifecycle is bound to the whole — destroy the whole and the parts go with it (filled diamond at the whole). Multiplicity is written at each end of the relationship line as `1`, `0..1`, `*`/`0..*`, `1..*`, or a bounded range like `2..4`, and states exactly how many instances of one class relate to one instance of the other — e.g. `Group "1" o-- "many" Expense` means one group aggregates many expenses. Always draw multiplicities explicitly; omitting them is a common tell of a rushed diagram.',
+            },
+            {
+              question: 'What is the difference between encapsulation and abstraction? People often use these interchangeably.',
+              answer:
+                'Encapsulation hides an object\'s internal **state** and bundles it with the methods that are allowed to mutate it, so invariants can\'t be violated from outside (a `BankAccount` with a private `balance` and a validating `withdraw()` method). Abstraction hides an object\'s internal **complexity** behind a simple contract, so callers depend on *what* it does, not *how* (`PaymentStrategy.pay(amount)` hides the HTTP calls and retries inside). They usually appear together but are independent: a class can expose all-public fields (not encapsulated) behind one well-named method (abstracted), or vice versa. Shorthand: encapsulation hides data, abstraction hides complexity.',
+            },
+            {
+              question: 'Explain polymorphism, and the difference between compile-time and runtime polymorphism.',
+              answer:
+                'Polymorphism lets the same method call resolve to different code depending on the actual (runtime) type of the object it\'s called on. Runtime/dynamic polymorphism — calling `shape.area()` on a variable declared as `Shape` but actually holding a `Circle` or `Rectangle`, and getting the correct implementation each time — is resolved via method dispatch (a vtable, conceptually) and is what makes Strategy, Observer, and most GoF patterns work at all. Compile-time/static polymorphism is method **overloading**: multiple methods with the same name but different parameter lists, resolved by the compiler based on the declared argument types, not the runtime object. In an LLD interview, "polymorphism" almost always means the runtime kind — that\'s the one that matters for extensibility.',
             },
             {
               question: 'Why prefer composition over inheritance?',
@@ -1004,6 +1821,16 @@ def simplify_debts(net_balance: dict[str, int]) -> list[tuple[str, str, int]]:
               question: 'What would you change about the LRU cache implementation to make it thread-safe for concurrent `get`/`put` calls?',
               answer:
                 'Wrap the critical sections (the linked-list pointer manipulation plus the dict mutation) in a single `threading.Lock` acquired for the duration of each `get`/`put` call — because both operations mutate shared structure (the list and the map together), a lock per-operation is needed rather than per-node, since `get` still needs to move a node, which is a write to the list even though it\'s conceptually a "read." At higher throughput, you\'d shard the cache into N independent LRU segments (hash the key to a segment) each with its own lock, trading strict global LRU ordering for much lower lock contention — the same idea Java\'s `ConcurrentHashMap` uses internally.',
+            },
+            {
+              question: 'What does "program to an interface, not an implementation" mean concretely when you\'re sketching a class diagram?',
+              answer:
+                'It means a dependent class should hold a reference typed as an interface/abstract type (`PaymentStrategy`), never as a concrete class (`UpiPayment`) — even if, today, there\'s only one implementation. Concretely on a diagram: the arrow from `OrderService` should point at `PaymentStrategy` (association to the interface), with a separate realization arrow from each concrete class to that same interface — never a direct association from `OrderService` straight to `UpiPayment`. The payoff is exactly DIP/OCP: new implementations can be added, and existing ones swapped (including for a test double), without touching `OrderService` at all.',
+            },
+            {
+              question: 'When would you deliberately choose an anemic domain model over a rich one, even in an OOP-focused interview?',
+              answer:
+                'When the "business logic" is really just orchestration across multiple services/external systems rather than a single entity\'s own invariant — e.g., a checkout flow that calls inventory, payment, and shipping in sequence doesn\'t belong on any one entity, so a transaction-script style service naturally owns it, with the entities themselves staying closer to data holders. It\'s also a reasonable pragmatic choice in simple CRUD-heavy systems where the "domain logic" is thin and forcing rich behavior onto entities would be over-engineering. The general rule from this guide still applies as a default, though: if a rule can be checked using only one entity\'s own state, put it on that entity first, and only fall back to a service when the logic genuinely spans multiple entities.',
             },
           ],
         },

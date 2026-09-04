@@ -1,5 +1,6 @@
 import { Link } from 'react-router-dom'
 import { getAdjacentTopics } from '../data/topics.js'
+import Markdown from './Markdown.jsx'
 
 /**
  * Standard shell every lesson page renders into: title, summary, key
@@ -22,7 +23,9 @@ export default function TopicPage({
       <header className="topic-page__header">
         <span className={`level-badge level-badge--${level}`}>{level}</span>
         <h1>{title}</h1>
-        <p className="topic-page__summary">{summary}</p>
+        <p className="topic-page__summary">
+          <Markdown text={summary} />
+        </p>
       </header>
 
       {keyPoints.length > 0 && (
@@ -30,7 +33,9 @@ export default function TopicPage({
           <h2>Key concepts</h2>
           <ul>
             {keyPoints.map((point) => (
-              <li key={point}>{point}</li>
+              <li key={point}>
+                <Markdown text={point} />
+              </li>
             ))}
           </ul>
         </section>
