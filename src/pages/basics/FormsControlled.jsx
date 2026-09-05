@@ -75,7 +75,7 @@ function SignupForm() {
 export default function FormsControlled() {
   return (
     <TopicPage
-      groupId="basics"
+      groupId="react-guide"
       topicId="forms"
       level="basics"
       title="Forms & Controlled Inputs"

@@ -103,7 +103,7 @@ function CartSummary() {
 export default function GlobalStateReducerContext() {
   return (
     <TopicPage
-      groupId="expert"
+      groupId="react-guide"
       topicId="global-state"
       level="expert"
       title="Reducer + Context (Global State)"

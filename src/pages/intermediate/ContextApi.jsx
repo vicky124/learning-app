@@ -54,7 +54,7 @@ function DeeplyNested() {
 export default function ContextApi() {
   return (
     <TopicPage
-      groupId="intermediate"
+      groupId="react-guide"
       topicId="context"
       level="intermediate"
       title="Context API"

@@ -86,7 +86,7 @@ function StrictModeDemo() {
 export default function FragmentsStrict() {
   return (
     <TopicPage
-      groupId="intermediate"
+      groupId="react-guide"
       topicId="fragments"
       level="intermediate"
       title="Fragments & Strict Mode"

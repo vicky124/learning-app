@@ -63,7 +63,7 @@ function LazyInitDemo() {
 export default function StateHooks() {
   return (
     <TopicPage
-      groupId="basics"
+      groupId="react-guide"
       topicId="state"
       level="basics"
       title="State with useState"

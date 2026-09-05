@@ -73,7 +73,7 @@ function ListsDemo() {
 export default function ListsAndKeys() {
   return (
     <TopicPage
-      groupId="basics"
+      groupId="react-guide"
       topicId="lists-keys"
       level="basics"
       title="Lists & Keys"

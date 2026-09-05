@@ -1052,17 +1052,17 @@ from . import validators              # "." = the current package`,
             {
               type: 'mermaid',
               code: `sequenceDiagram
-    participant Loop as Event Loop (single thread)
+    participant EventLoop as Event Loop, single thread
     participant A as Coroutine A
     participant B as Coroutine B
-    A->>Loop: await db.fetch() -- yields control
-    Loop->>B: resume B (it was ready)
-    B->>Loop: await http.get() -- yields control
-    Loop->>A: A's DB result is ready -- resume A
-    A->>Loop: return result -- A finishes
-    Loop->>B: B's HTTP result is ready -- resume B
-    B->>Loop: return result -- B finishes
-    Note over Loop: never two coroutines running\\nat the SAME instant -- only ever\\noverlapping WAIT time`,
+    A->>EventLoop: await db.fetch -- yields control
+    EventLoop->>B: resume B, it was ready
+    B->>EventLoop: await http.get -- yields control
+    EventLoop->>A: A's DB result is ready -- resume A
+    A->>EventLoop: return result -- A finishes
+    EventLoop->>B: B's HTTP result is ready -- resume B
+    B->>EventLoop: return result -- B finishes
+    Note over EventLoop: never two coroutines running at the SAME instant -- only ever overlapping WAIT time`,
             },
             {
               type: 'heading',
@@ -1737,15 +1737,15 @@ async def list_orders(
               type: 'mermaid',
               code: `sequenceDiagram
     participant C as Client
-    participant API as /orders endpoint
+    participant API as orders endpoint
     participant DB as Database
-    C->>API: GET /orders?limit=20
-    API->>DB: WHERE id > (none) ORDER BY id LIMIT 20
+    C->>API: GET orders, limit=20
+    API->>DB: WHERE id greater than none, ORDER BY id LIMIT 20
     DB-->>API: 20 rows
     API-->>C: items + next_cursor = last row's id
-    Note over DB: a new order is INSERTED here --\\nLIMIT/OFFSET would now skip or\\nduplicate a row on the next page;\\ncursor-based does NOT
-    C->>API: GET /orders?cursor=<next_cursor>&limit=20
-    API->>DB: WHERE id > <cursor> ORDER BY id LIMIT 20
+    Note over DB: a new order is INSERTED here -- LIMIT/OFFSET would now skip or duplicate a row on the next page, but cursor-based does NOT
+    C->>API: GET orders, cursor=next_cursor, limit=20
+    API->>DB: WHERE id greater than cursor, ORDER BY id LIMIT 20
     DB-->>API: next 20 rows, unaffected by the insert
     API-->>C: items + next_cursor`,
             },

@@ -185,7 +185,7 @@ function TodoApp() {
 export default function CapstoneTodoApp() {
   return (
     <TopicPage
-      groupId="expert"
+      groupId="react-guide"
       topicId="capstone"
       level="expert"
       title="Capstone: Todo App"

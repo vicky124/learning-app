@@ -95,7 +95,7 @@ function DataFetchingDemo() {
 export default function DataFetching() {
   return (
     <TopicPage
-      groupId="advanced"
+      groupId="react-guide"
       topicId="data-fetching"
       level="advanced"
       title="Data Fetching Patterns"

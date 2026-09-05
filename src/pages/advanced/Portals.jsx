@@ -87,7 +87,7 @@ function PortalDemo() {
 export default function Portals() {
   return (
     <TopicPage
-      groupId="advanced"
+      groupId="react-guide"
       topicId="portals"
       level="advanced"
       title="Portals"

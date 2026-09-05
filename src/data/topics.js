@@ -21,6 +21,7 @@
 // the shape to follow), import it below, and add it to this array — the
 // sidebar, routing, and prev/next pager all derive from this one array, so
 // nothing else needs to change.
+import { reactQA } from '../content/react-qa.js'
 import { pythonSection } from '../content/python.js'
 import { javascriptSection } from '../content/javascript.js'
 import { typescriptSection } from '../content/typescript.js'
@@ -32,6 +33,10 @@ import { authSection } from '../content/auth.js'
 import { langchainSection } from '../content/langchain.js'
 import { langgraphSection } from '../content/langgraph.js'
 import { ragSection } from '../content/rag.js'
+import { awsSection } from '../content/aws.js'
+import { azureSection } from '../content/azure.js'
+import { javaSection } from '../content/java.js'
+import { dsaSection } from '../content/dsa.js'
 
 export const menuSections = [
   {
@@ -40,8 +45,12 @@ export const menuSections = [
     icon: '⚛️',
     groups: [
       {
-        id: 'basics',
-        label: 'Basics',
+        // A single combined group, like every other subject — the old
+        // Basics/Intermediate/Advanced/Expert split lives on only as each
+        // lesson's `level` badge (still basics/intermediate/advanced/expert,
+        // set per-page), not as separate sidebar sub-drawers.
+        id: 'react-guide',
+        label: 'Guide',
         topics: [
           { id: 'jsx', title: 'JSX & Rendering' },
           { id: 'components-props', title: 'Components & Props' },
@@ -50,24 +59,14 @@ export const menuSections = [
           { id: 'conditional-rendering', title: 'Conditional Rendering' },
           { id: 'lists-keys', title: 'Lists & Keys' },
           { id: 'forms', title: 'Forms & Controlled Inputs' },
-        ],
-      },
-      {
-        id: 'intermediate',
-        label: 'Intermediate',
-        topics: [
+          { id: 'controlled-uncontrolled', title: 'Controlled vs Uncontrolled Components' },
           { id: 'effects', title: 'useEffect & Lifecycle' },
           { id: 'refs', title: 'useRef & the DOM' },
           { id: 'context', title: 'Context API' },
           { id: 'reducer', title: 'useReducer' },
           { id: 'custom-hooks', title: 'Custom Hooks' },
           { id: 'fragments', title: 'Fragments & Strict Mode' },
-        ],
-      },
-      {
-        id: 'advanced',
-        label: 'Advanced',
-        topics: [
+          { id: 'a11y', title: 'Accessibility (a11y) Patterns' },
           { id: 'performance', title: 'memo, useMemo & useCallback' },
           { id: 'hoc', title: 'Higher-Order Components' },
           { id: 'render-props', title: 'Render Props' },
@@ -75,19 +74,29 @@ export const menuSections = [
           { id: 'portals', title: 'Portals' },
           { id: 'forward-ref', title: 'forwardRef & useImperativeHandle' },
           { id: 'code-splitting', title: 'Lazy Loading & Suspense' },
+          { id: 'suspense-boundaries', title: 'Suspense Boundary Placement Patterns' },
           { id: 'data-fetching', title: 'Data Fetching Patterns' },
           { id: 'routing', title: 'Routing Deep Dive' },
-        ],
-      },
-      {
-        id: 'expert',
-        label: 'Expert',
-        topics: [
+          { id: 'animation', title: 'Animating with CSS Transitions & the View Transitions API' },
+          { id: 'testing', title: 'Testing Components with React Testing Library' },
           { id: 'global-state', title: 'Reducer + Context (Global State)' },
           { id: 'concurrent', title: 'Concurrent Features' },
           { id: 'react19', title: 'React 19: Actions & use()' },
           { id: 'hook-library', title: 'Custom Hook Library' },
+          { id: 'devtools-profiler', title: 'Profiling with React DevTools' },
           { id: 'capstone', title: 'Capstone: Todo App' },
+        ],
+      },
+      {
+        id: 'react-qa',
+        label: 'Interview Q&A',
+        topics: [
+          {
+            id: 'qa',
+            title: 'Questions & Answers',
+            summary: 'React interview questions spanning the whole curriculum above, with the reasoning interviewers are actually listening for.',
+            qa: reactQA,
+          },
         ],
       },
     ],
@@ -103,6 +112,10 @@ export const menuSections = [
   langchainSection,
   langgraphSection,
   ragSection,
+  awsSection,
+  azureSection,
+  javaSection,
+  dsaSection,
 ]
 
 // Flattened, backward-compatible view: one entry per group, tagged with

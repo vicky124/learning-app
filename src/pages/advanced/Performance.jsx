@@ -94,7 +94,7 @@ function MemoDemo() {
 export default function Performance() {
   return (
     <TopicPage
-      groupId="advanced"
+      groupId="react-guide"
       topicId="performance"
       level="advanced"
       title="memo, useMemo & useCallback"

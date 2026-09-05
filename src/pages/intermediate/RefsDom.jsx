@@ -52,7 +52,7 @@ function RenderCounter() {
 export default function RefsDom() {
   return (
     <TopicPage
-      groupId="intermediate"
+      groupId="react-guide"
       topicId="refs"
       level="intermediate"
       title="useRef & the DOM"

@@ -84,7 +84,7 @@ function Counter() {
 export default function ReducerState() {
   return (
     <TopicPage
-      groupId="intermediate"
+      groupId="react-guide"
       topicId="reducer"
       level="intermediate"
       title="useReducer"

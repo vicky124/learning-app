@@ -66,7 +66,7 @@ function ToggleDemo() {
 export default function CustomHooks() {
   return (
     <TopicPage
-      groupId="intermediate"
+      groupId="react-guide"
       topicId="custom-hooks"
       level="intermediate"
       title="Custom Hooks"
@@ -95,7 +95,7 @@ export default function CustomHooks() {
       </div>
 
       <Callout kind="tip">
-        See the <Link to="/expert/hook-library">Custom Hook Library</Link> lesson for more
+        See the <Link to="/react-guide/hook-library">Custom Hook Library</Link> lesson for more
         production-ready examples: <code>useLocalStorage</code>, <code>useDebounce</code>, and{' '}
         <code>useFetch</code>.
       </Callout>

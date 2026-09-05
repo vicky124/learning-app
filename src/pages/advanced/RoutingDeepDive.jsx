@@ -104,7 +104,7 @@ function RoutingIndex() {
 export default function RoutingDeepDive() {
   return (
     <TopicPage
-      groupId="advanced"
+      groupId="react-guide"
       topicId="routing"
       level="advanced"
       title="Routing Deep Dive"

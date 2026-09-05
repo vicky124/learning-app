@@ -119,7 +119,7 @@ function PreviousDemo() {
 export default function CustomHookLibrary() {
   return (
     <TopicPage
-      groupId="expert"
+      groupId="react-guide"
       topicId="hook-library"
       level="expert"
       title="Custom Hook Library"

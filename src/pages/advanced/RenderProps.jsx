@@ -47,7 +47,7 @@ function MouseTracker({ children }) {
 export default function RenderProps() {
   return (
     <TopicPage
-      groupId="advanced"
+      groupId="react-guide"
       topicId="render-props"
       level="advanced"
       title="Render Props"

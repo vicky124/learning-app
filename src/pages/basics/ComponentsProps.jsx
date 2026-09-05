@@ -36,7 +36,7 @@ function UserCard({ name, role, children }) {
 export default function ComponentsProps() {
   return (
     <TopicPage
-      groupId="basics"
+      groupId="react-guide"
       topicId="components-props"
       level="basics"
       title="Components & Props"

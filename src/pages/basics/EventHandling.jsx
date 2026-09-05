@@ -83,7 +83,7 @@ function StopPropagationDemo() {
 export default function EventHandling() {
   return (
     <TopicPage
-      groupId="basics"
+      groupId="react-guide"
       topicId="events"
       level="basics"
       title="Event Handling"

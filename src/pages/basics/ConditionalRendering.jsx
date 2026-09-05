@@ -59,7 +59,7 @@ function ConditionalDemo() {
 export default function ConditionalRendering() {
   return (
     <TopicPage
-      groupId="basics"
+      groupId="react-guide"
       topicId="conditional-rendering"
       level="basics"
       title="Conditional Rendering"

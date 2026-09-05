@@ -79,7 +79,7 @@ function ErrorBoundaryDemo() {
 export default function ErrorBoundaries() {
   return (
     <TopicPage
-      groupId="advanced"
+      groupId="react-guide"
       topicId="error-boundaries"
       level="advanced"
       title="Error Boundaries"

@@ -63,7 +63,7 @@ function HOCDemo() {
 export default function HOC() {
   return (
     <TopicPage
-      groupId="advanced"
+      groupId="react-guide"
       topicId="hoc"
       level="advanced"
       title="Higher-Order Components"
@@ -85,8 +85,8 @@ export default function HOC() {
       </div>
 
       <Callout kind="tip">
-        Compare this to the <Link to="/advanced/render-props">Render Props</Link> and{' '}
-        <Link to="/intermediate/custom-hooks">Custom Hooks</Link> lessons — all three solve "share
+        Compare this to the <Link to="/react-guide/render-props">Render Props</Link> and{' '}
+        <Link to="/react-guide/custom-hooks">Custom Hooks</Link> lessons — all three solve "share
         logic between components", just with different ergonomics and trade-offs.
       </Callout>
     </TopicPage>

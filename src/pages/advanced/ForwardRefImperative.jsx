@@ -75,7 +75,7 @@ function ForwardRefDemo() {
 export default function ForwardRefImperative() {
   return (
     <TopicPage
-      groupId="advanced"
+      groupId="react-guide"
       topicId="forward-ref"
       level="advanced"
       title="forwardRef & useImperativeHandle"

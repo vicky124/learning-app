@@ -18,31 +18,31 @@ same sidebar, the same lesson-page shell, and the same navigation data structure
 1. [Purpose & how to use this app](#1-purpose--how-to-use-this-app)
 2. [Getting started](#2-getting-started)
 3. [Architecture](#3-architecture)
-4. [Concept guide — React Basics](#4-concept-guide--react-basics)
-5. [Concept guide — React Intermediate](#5-concept-guide--react-intermediate)
-6. [Concept guide — React Advanced](#6-concept-guide--react-advanced)
-7. [Concept guide — React Expert](#7-concept-guide--react-expert)
-8. [Other subjects](#8-other-subjects)
-9. [Design decisions](#9-design-decisions)
-10. [Extending the app](#10-extending-the-app)
-11. [Verifying the app](#11-verifying-the-app)
-12. [Further resources](#12-further-resources)
+4. [Concept guide — React](#4-concept-guide--react)
+5. [Other subjects](#5-other-subjects)
+6. [Design decisions](#6-design-decisions)
+7. [Extending the app](#7-extending-the-app)
+8. [Verifying the app](#8-verifying-the-app)
+9. [Further resources](#9-further-resources)
 
 ---
 
 ## 1. Purpose & how to use this app
 
 This project is a **teaching and interview-prep tool**, not a template for a production app. The
-React section makes 25 React concepts — from "what is JSX" to React 19's `useOptimistic`/`use()`
+React section makes 33 React concepts — from "what is JSX" to React 19's `useOptimistic`/`use()`
 — tangible, by pairing a short explanation with a demo you can actually interact with and the
 exact source code that powers it. Every other subject trades the live demo for a thorough
 written guide (diagrams included, rendered live via Mermaid) plus a self-quiz Interview Q&A
-list, sourced from the user's own interview-prep notes and restructured into the app.
+list, sourced from the user's own interview-prep notes (or, for subjects with no existing notes,
+written from scratch) and restructured into the app.
 
 **Recommended path:** open the sidebar drawer for a subject (e.g. "React" or "Python"), then
-work its sub-drawers top to bottom. For React that's Basics → Intermediate → Advanced → Expert;
-for every other subject it's Guide → Interview Q&A. Each lesson page also has Previous/Next
-links at the bottom that follow the same order.
+work its two sub-drawers — **Guide** (the lessons, ordered basic → advanced) then **Interview
+Q&A** (a self-quiz once you've read the Guide). This is the same shape for every subject,
+including React — its four old Basics/Intermediate/Advanced/Expert sidebar groups are now one
+combined Guide, with each lesson's difficulty still shown as its page badge. Each lesson page
+also has Previous/Next links at the bottom that follow the same order.
 
 **Recommended way to read a lesson:**
 1. Read the summary and "Key concepts" list first — that's the *distilled* version.
@@ -89,8 +89,8 @@ menuSections            (a subject, e.g. "React", "Python" — a collapsible dra
 ```js
 export const menuSections = [
   { id: 'react', label: 'React', icon: '⚛️', groups: [
-      { id: 'basics', label: 'Basics', topics: [{ id: 'jsx', title: 'JSX & Rendering' }, ...] },
-      ...
+      { id: 'react-guide', label: 'Guide', topics: [{ id: 'jsx', title: 'JSX & Rendering' }, ...] },
+      { id: 'react-qa', label: 'Interview Q&A', topics: [{ id: 'qa', ..., qa: reactQA }] },
   ]},
   pythonSection,   // imported from src/content/python.js
   gitSection,      // imported from src/content/git.js
@@ -98,11 +98,15 @@ export const menuSections = [
 ]
 ```
 
-React's four groups (Basics/Intermediate/Advanced/Expert) are defined inline in `topics.js`,
-since React's topic entries only need `{ id, title }` — their real content lives in hand-built
-page components (§3.4). Every other subject is imported as a ready-made **section object** from
-its own file under `src/content/` (e.g. `pythonSection`, `gitSection`, `authSection`) and simply
-appended to the array — see §10 for the exact steps to add a new one.
+React's two groups (`react-guide` and `react-qa`) are defined inline in `topics.js` — every
+other subject arrives as one ready-made group pair from its own `src/content/` file — but
+React's `react-guide` topic entries only need `{ id, title }`, since their real content lives in
+hand-built page components (§3.2), not in the topic object itself. `react-qa`'s `qa` array is the
+one exception: it's imported from `src/content/react-qa.js` and embedded directly, since that one
+topic is content-driven like every other subject's Q&A, not a hand-built page. Every other
+subject is imported as a ready-made **section object** from its own file under `src/content/`
+(e.g. `pythonSection`, `gitSection`, `authSection`) and simply appended to the array — see §7 for
+the exact steps to add a new one.
 
 Everything else derives from this one array:
 - `topicGroups` flattens it to one entry per group (tagged with its owning section) — what
@@ -112,10 +116,10 @@ Everything else derives from this one array:
 - `getAdjacentTopics(groupId, topicId)` looks up a lesson's neighbors in that flattened order.
 - `findContentTopic(groupId, topicId)` walks the tree directly to find one topic's *full*
   content (including its `blocks`/`qa`) plus its owning group/section — used by
-  `GenericTopicPage` (§3.4).
+  `GenericTopicPage` (§3.3).
 - [`src/components/Sidebar.jsx`](./src/components/Sidebar.jsx) renders the nav by mapping over
   `menuSections`, one collapsible drawer per section, nesting one collapsible sub-drawer per
-  group inside it (§3.5).
+  group inside it (§3.6).
 - [`src/App.jsx`](./src/App.jsx) declares one explicit `<Route>` per React lesson, plus a single
   generic `<Route path="/:groupId/:topicId">` that serves every other subject.
 
@@ -230,22 +234,31 @@ doesn't apply at the current viewport width is simply inert CSS.
 
 ---
 
-## 4. Concept guide — React Basics
+## 4. Concept guide — React
 
-### 4.1 JSX & Rendering — `src/pages/basics/JsxBasics.jsx`
+All 33 React lessons now live in one merged sidebar group (`react-guide` — see §3.6's note on
+the sidebar, and §6's design-decisions entry on why), plus a separate Interview Q&A group
+(`react-qa`, `src/content/react-qa.js`, 20 questions). The four-level structure below
+(Basics/Intermediate/Advanced/Expert) is preserved here purely as this document's own
+organization — and as each lesson's `level` badge, still shown on the page — not as separate
+sidebar drawers.
+
+### React Basics
+
+### JSX & Rendering — `src/pages/basics/JsxBasics.jsx`
 JSX compiles (via Babel/SWC, at build time — Vite uses `@vitejs/plugin-react`) to
 `React.createElement(...)` calls. Practically that means: it's an *expression*, so it can be
 assigned, returned, or passed around; `{ }` embeds arbitrary JS; and a JSX element must have one
 root (a real tag or a Fragment). Component names must be capitalized so the compiler treats them
 as component references rather than literal DOM tag names.
 
-### 4.2 Components & Props — `src/pages/basics/ComponentsProps.jsx`
+### Components & Props — `src/pages/basics/ComponentsProps.jsx`
 A component is a function returning JSX. Props are its read-only inputs, destructured in the
 signature (`function Card({ title, children })`). Data flows one way, parent → child; a child
 communicates upward only via a callback prop the parent supplies. `children` is the special prop
 populated by whatever JSX was nested between a component's opening/closing tags.
 
-### 4.3 State with `useState` — `src/pages/basics/StateHooks.jsx`
+### State with `useState` — `src/pages/basics/StateHooks.jsx`
 `const [value, setValue] = useState(initial)`. Calling the setter **schedules** a re-render — it
 does not mutate `value` synchronously in the current render's closure. Two patterns matter:
 - **Functional updates** — `setCount(c => c + 1)` — required whenever the next value depends on
@@ -253,37 +266,42 @@ does not mutate `value` synchronously in the current render's closure. Two patte
 - **Lazy initialization** — `useState(() => expensiveCompute())` — the initializer function runs
   exactly once, on mount, not on every re-render.
 
-### 4.4 Event Handling — `src/pages/basics/EventHandling.jsx`
+### Event Handling — `src/pages/basics/EventHandling.jsx`
 React wires DOM events with camelCase props (`onClick`, `onKeyDown`) and wraps the native event
 in a cross-browser `SyntheticEvent`. Pass a function *reference*, not a call
 (`onClick={handleClick}`, never `onClick={handleClick()}`). Events bubble by default;
 `event.stopPropagation()` stops an inner handler's event from also firing an ancestor's handler.
 
-### 4.5 Conditional Rendering — `src/pages/basics/ConditionalRendering.jsx`
+### Conditional Rendering — `src/pages/basics/ConditionalRendering.jsx`
 Because JSX is JavaScript, conditionals are just JavaScript: an early `return` for a whole
 different tree, `condition ? <A/> : <B/>` for either/or, `condition && <A/>` for
 render-or-nothing. The `&&` pitfall: if `condition` is `0` (or any falsy-but-not-boolean value),
 React renders that literal value — guard with `condition > 0 && ...` instead of `count && ...`.
 
-### 4.6 Lists & Keys — `src/pages/basics/ListsAndKeys.jsx`
+### Lists & Keys — `src/pages/basics/ListsAndKeys.jsx`
 `array.map()` turns data into elements; each needs a `key` prop that is **stable** (same item →
 same key across renders) and **unique among siblings**. Keys let React match elements across
 re-renders instead of rebuilding the DOM. Using the array index as a key is only safe for lists
 that are never reordered/filtered/spliced — otherwise it causes state (focus, input values,
 animation) to "stick" to the wrong row when order changes.
 
-### 4.7 Forms & Controlled Inputs — `src/pages/basics/FormsControlled.jsx`
+### Forms & Controlled Inputs — `src/pages/basics/FormsControlled.jsx`
 A controlled input's value is always driven by React state (`value={state}` +
 `onChange={updateState}`) — the DOM node never holds its own separate value. One `handleChange`
 keyed off `event.target.name` can drive many fields when state is a single object. Checkboxes
 read `event.target.checked` (boolean), not `.value`. Always `event.preventDefault()` in
 `onSubmit` — the browser default is a full-page navigation.
 
----
+### Controlled vs Uncontrolled Components — `src/pages/basics/ControlledUncontrolled.jsx`
+A controlled input's value lives in React state (`value` + `onChange`); an uncontrolled input's
+value lives in the DOM and is read on demand via a `ref` (`defaultValue`, not `value`).
+Controlled makes live validation/formatting trivial since every keystroke is visible; uncontrolled
+avoids a re-render per keystroke, which matters for large or performance-sensitive forms. File
+inputs are always uncontrolled — the browser refuses to let JavaScript set their value.
 
-## 5. Concept guide — React Intermediate
+### React Intermediate
 
-### 5.1 `useEffect` & Lifecycle — `src/pages/intermediate/EffectsLifecycle.jsx`
+### `useEffect` & Lifecycle — `src/pages/intermediate/EffectsLifecycle.jsx`
 `useEffect` synchronizes a component with something *outside* React — the DOM, a timer, a
 subscription — after the browser has painted. The dependency array controls when it re-runs:
 omitted = every render, `[]` = once on mount, `[a, b]` = whenever `a` or `b` changes. Whatever
@@ -291,7 +309,7 @@ function the effect *returns* is its cleanup, run before the next execution and 
 this is how you cancel intervals, remove listeners, and abort in-flight requests. Prefer
 thinking "keep X in sync with Y" over mapping to old class lifecycle names.
 
-### 5.2 `useRef` & the DOM — `src/pages/intermediate/RefsDom.jsx`
+### `useRef` & the DOM — `src/pages/intermediate/RefsDom.jsx`
 `useRef(initial)` returns a mutable `{ current }` box that persists across renders **without**
 causing a re-render when mutated. Two uses: (a) `ref={domRef}` on an element gives you the actual
 DOM node for imperative access (`.focus()`, scroll position); (b) a general mutable "instance
@@ -299,7 +317,7 @@ variable" for values that shouldn't trigger rendering (a timer id, a render coun
 already fetched?"). Rule of thumb: if a value should appear on screen, it's state; if it's
 purely an implementation detail, it's a ref.
 
-### 5.3 Context API — `src/pages/intermediate/ContextApi.jsx`
+### Context API — `src/pages/intermediate/ContextApi.jsx`
 `createContext(default)` + `<Context.Provider value={...}>` shares a value with an entire
 subtree without threading it through every intermediate component's props ("prop drilling").
 `useContext(Context)` reads the nearest Provider above the calling component. Every consumer
@@ -308,21 +326,21 @@ re-renders when the Provider's value changes — so for a large tree, memoize th
 render. A common idiom: wrap `useContext` in your own hook (`useTheme()`) that throws a clear
 error when called outside its Provider.
 
-### 5.4 `useReducer` — `src/pages/intermediate/ReducerState.jsx`
+### `useReducer` — `src/pages/intermediate/ReducerState.jsx`
 A reducer is a pure function `(state, action) => newState`. `dispatch({ type, payload })` is the
 only way to request a change; the reducer alone decides what happens. Reach for `useReducer`
 over several `useState` calls once state fields update together, or the next state depends on
 *which action* fired rather than just the previous value — it centralizes the transition logic,
 which is easier to test and to reason about than updates scattered across event handlers.
 
-### 5.5 Custom Hooks — `src/pages/intermediate/CustomHooks.jsx`
+### Custom Hooks — `src/pages/intermediate/CustomHooks.jsx`
 Any function whose name starts with `use` and calls other hooks is a custom hook — React's
 primary mechanism for sharing *stateful logic* (not state itself — each caller gets independent
 state) between components. The `use` prefix lets the linter enforce the Rules of Hooks on your
-own hooks too. See §7.4 for a library of more production-flavored examples
+own hooks too. See the Custom Hook Library lesson for a library of more production-flavored examples
 (`useLocalStorage`, `useDebounce`, `usePrevious`).
 
-### 5.6 Fragments & Strict Mode — `src/pages/intermediate/FragmentsStrict.jsx`
+### Fragments & Strict Mode — `src/pages/intermediate/FragmentsStrict.jsx`
 `<>...</>` (shorthand for `<Fragment>...</Fragment>`) groups multiple elements with zero extra
 DOM nodes — necessary when a parent tag requires specific direct children (`<dl><dt/><dd/></dl>`,
 `<table><tr/></table>`). Use the explicit `<Fragment key={...}>` form when a key is needed, e.g.
@@ -330,11 +348,17 @@ inside a `.map()`. `<StrictMode>` adds no UI; in development only, it intentiona
 mounts→unmounts→remounts components and double-invokes certain functions to surface effects and
 state updates that aren't idempotent/pure. It has zero effect in production builds.
 
----
+### Accessibility (a11y) Patterns — `src/pages/intermediate/Accessibility.jsx`
+Most React accessibility bugs come from re-implementing an interactive element that native HTML
+already provides for free (a `<div>` styled as a button loses keyboard operability and screen-reader
+semantics that a real `<button>` gets automatically). When a native element cannot express the
+needed UI, add back what was lost explicitly: a `role`, `tabIndex={0}` plus an `onKeyDown` handler
+for Enter/Space, and the relevant `aria-*` state attributes. `aria-live="polite"` announces dynamic
+content changes to screen readers, which a purely visual update never does on its own.
 
-## 6. Concept guide — React Advanced
+### React Advanced
 
-### 6.1 `memo`, `useMemo` & `useCallback` — `src/pages/advanced/Performance.jsx`
+### `memo`, `useMemo` & `useCallback` — `src/pages/advanced/Performance.jsx`
 All three fight the same problem — unnecessary re-renders/recomputation — by letting React
 **skip** work rather than making any single render faster:
 - `React.memo(Component)` skips re-rendering when props are shallow-equal to last time.
@@ -346,21 +370,21 @@ All three fight the same problem — unnecessary re-renders/recomputation — by
 render (`style={{...}}`) still looks "new" even if its contents are identical. Profile before
 reaching for these; they add their own overhead and complexity.
 
-### 6.2 Higher-Order Components — `src/pages/advanced/HOC.jsx`
+### Higher-Order Components — `src/pages/advanced/HOC.jsx`
 A HOC is a function `Component => EnhancedComponent`, conventionally named `withX`
 (`withLoading`, `withAuth`). It layers behavior around a component from the outside. Spread
 pass-through props (`{...rest}`) so the wrapped component still gets what it needs. Custom hooks
 have replaced most HOC use cases in modern React; HOCs remain useful specifically when you need
 to wrap or replace the *returned element* itself, not just share logic.
 
-### 6.3 Render Props — `src/pages/advanced/RenderProps.jsx`
+### Render Props — `src/pages/advanced/RenderProps.jsx`
 A component whose `children` (or a `render` prop) is a *function* that returns JSX — the
 component owns state/logic and calls `children(state)`, letting the caller decide exactly what
 to render. Cleanly separates "who owns the logic" from "who decides the markup," at the cost of
 nesting when several are composed. Custom hooks cover most of the same ground today with less
 nesting.
 
-### 6.4 Error Boundaries — `src/pages/advanced/ErrorBoundaries.jsx`, `src/components/ErrorBoundary.jsx`
+### Error Boundaries — `src/pages/advanced/ErrorBoundaries.jsx`, `src/components/ErrorBoundary.jsx`
 A class component implementing `static getDerivedStateFromError` (to switch to a fallback UI) and
 `componentDidCatch` (to log the error) catches JS errors thrown anywhere in its child tree
 **during rendering** — but *not* inside event handlers, async callbacks, or its own render. There
@@ -368,14 +392,14 @@ is still no hook equivalent — this is one of the few places a class component 
 modern React (`react-error-boundary` on npm wraps this same mechanism). This app wraps its entire
 route tree in one at the top of `App.jsx`, in addition to the lesson's own local demo boundary.
 
-### 6.5 Portals — `src/pages/advanced/Portals.jsx`
+### Portals — `src/pages/advanced/Portals.jsx`
 `createPortal(children, domNode)` renders children into a DOM node outside the parent's DOM
 position — typically `document.body` — while keeping them in the same React tree: context still
 flows through, and events still bubble as if the content were rendered in place. The standard use
 case is anything that needs to visually escape a parent with `overflow: hidden` or a constrained
 `z-index` — modals, tooltips, dropdowns.
 
-### 6.6 `forwardRef` & `useImperativeHandle` — `src/pages/advanced/ForwardRefImperative.jsx`
+### `forwardRef` & `useImperativeHandle` — `src/pages/advanced/ForwardRefImperative.jsx`
 Refs normally only attach to DOM elements/class components. In React 19, function components can
 declare `ref` as an ordinary destructured prop (React 18 and earlier require wrapping with
 `forwardRef((props, ref) => ...)`). `useImperativeHandle(ref, () => ({...}))` replaces what the
@@ -383,14 +407,41 @@ parent's `ref.current` sees with a curated object (e.g. `{ focus, clear }`) inst
 node — an intentional escape hatch for imperative needs (focus management, media control), not a
 general substitute for props/state communication.
 
-### 6.7 Lazy Loading & Suspense — `src/pages/advanced/CodeSplitting.jsx`, `src/pages/advanced/HeavyPanel.jsx`
+### Lazy Loading & Suspense — `src/pages/advanced/CodeSplitting.jsx`, `src/pages/advanced/HeavyPanel.jsx`
 `lazy(() => import('./Component.jsx'))` plus `<Suspense fallback={...}>` splits a component into
 its own bundle chunk, fetched only when it first renders. Confirmed for real in this project: run
 `npm run build` and `dist/assets/HeavyPanel-*.js` appears as its own chunk, separate from the main
 bundle. A single `<Suspense>` boundary can cover several lazy children at once. Route-level code
 splitting (one chunk per page) is the highest-impact application of this technique in a real app.
 
-### 6.8 Data Fetching Patterns — `src/pages/advanced/DataFetching.jsx`
+### Suspense Boundary Placement Patterns — `src/pages/advanced/SuspenseBoundaries.jsx`
+Where a `<Suspense>` boundary sits in the tree is a real UX decision, not just plumbing: one
+shared boundary around several async children shows a single fallback until the *slowest* child
+resolves; giving each child its own boundary lets each pop in independently as soon as it's ready.
+Choose a shared boundary when staggered rendering would look broken (parts of one coherent card);
+choose separate boundaries when the pieces are genuinely independent (a dashboard's widgets). The
+demo uses `use(promise)` with artificially staggered delays (400/900/1500ms) to make the
+difference directly visible.
+
+### Animating with CSS Transitions & the View Transitions API — `src/pages/advanced/Animation.jsx`
+Most React animation is just CSS reacting to a state-driven class or inline style — React's job
+is only to flip a boolean; the browser's compositor does the actual animating. Animate
+`transform`/`opacity` where possible (compositor-only, no layout/paint per frame). A CSS
+transition needs an actual before/after state change to animate — an element mounted already in
+its "final" class shows no transition. The View Transitions API
+(`document.startViewTransition(updateCallback)`) lets the browser auto-capture before/after
+snapshots of a DOM change and cross-fade between them; feature-detect
+(`'startViewTransition' in document`) since support isn't universal.
+
+### Testing Components with React Testing Library — `src/pages/advanced/Testing.jsx`
+RTL queries the rendered DOM the way a user or screen reader would — by role, label, or visible
+text (`getByRole('button', { name: /submit/i })`) — rather than by implementation details like
+class names or component internals, which is what makes tests survive safe refactors.
+`userEvent` (not the lower-level `fireEvent`) simulates real user interaction. RTL itself runs in
+Node via a test runner (Vitest/Jest), not in the browser, so this lesson's demo simulates what a
+passing test's assertions look like rather than literally executing one.
+
+### Data Fetching Patterns — `src/pages/advanced/DataFetching.jsx`
 Fetching in an effect means tracking three states together — `{ data, error, loading }` — and
 guarding against race conditions: if the input (e.g. a user id) changes while a request is still
 in flight, an `AbortController` cancelled in the effect's cleanup function stops a stale response
@@ -399,18 +450,16 @@ production, a dedicated library (TanStack Query, SWR, RTK Query) handles caching
 deduplication far more robustly than hand-rolled effects — this lesson teaches the underlying
 mechanics those libraries automate.
 
-### 6.9 Routing Deep Dive — `src/pages/advanced/RoutingDeepDive.jsx`
+### Routing Deep Dive — `src/pages/advanced/RoutingDeepDive.jsx`
 Beyond the app's own top-level routing (§3.4), this lesson embeds a second, working nested router
 directly in the page: an index route, a `products` list, and a `products/:productId` detail route
-reachable via real URLs like `/advanced/routing/products/kb-01`. It demonstrates `useParams()`
+reachable via real URLs like `/react-guide/routing/products/kb-01`. It demonstrates `useParams()`
 (reading the `:productId` segment), `<Link to="…">` (relative navigation without a full reload),
 and `useNavigate()` (programmatic navigation, including `navigate(-1)` to go back).
 
----
+### React Expert
 
-## 7. Concept guide — React Expert
-
-### 7.1 Reducer + Context (Global State) — `src/pages/expert/GlobalStateReducerContext.jsx`
+### Reducer + Context (Global State) — `src/pages/expert/GlobalStateReducerContext.jsx`
 Combining `useReducer` (predictable transitions) with Context (tree-wide access) produces a
 small, dependency-free global store: the reducer owns the logic, the Provider exposes
 `{ state, dispatch }`, and a guarded custom hook (`useCart()`) is the only access point. This is
@@ -419,7 +468,7 @@ Context has no partial-subscription mechanism, so *every* consumer re-renders on
 change, unlike a selector-based store. Reach for a real state library once that becomes a
 measured problem in a large tree.
 
-### 7.2 Concurrent Features — `src/pages/expert/ConcurrentFeatures.jsx`
+### Concurrent Features — `src/pages/expert/ConcurrentFeatures.jsx`
 `useTransition()` returns `[isPending, startTransition]` — wrapping a state update in
 `startTransition` marks it as interruptible/low-priority, so an urgent update (a keystroke) can
 preempt it. `useDeferredValue(value)` achieves a similar goal without a separate setter: it
@@ -428,7 +477,7 @@ don't control where the value originates (e.g. it arrives as a prop). Neither ho
 underlying computation faster — they change *scheduling*. The lesson's demo deliberately
 throttles a 4,000-item filter so the responsiveness difference is visible while typing.
 
-### 7.3 React 19: Actions & `use()` — `src/pages/expert/React19Features.jsx`
+### React 19: Actions & `use()` — `src/pages/expert/React19Features.jsx`
 Three additions this project's installed React version (19) provides:
 - **`useActionState(action, initialState)`** wires a `<form action={fn}>` to React: `action`
   receives `(previousState, formData)`, can be async, and React tracks `isPending` plus
@@ -443,7 +492,7 @@ Three additions this project's installed React version (19) provides:
   `<Suspense>` ancestor) until it resolves; `use(context)` can also replace `useContext`. Unlike
   every other hook, `use()` may be called conditionally.
 
-### 7.4 Custom Hook Library — `src/pages/expert/CustomHookLibrary.jsx`
+### Custom Hook Library — `src/pages/expert/CustomHookLibrary.jsx`
 Three more hand-rolled hooks, each following the same shape (wrap some state, add a
 `useEffect`, return whatever's useful):
 - **`useLocalStorage(key, initial)`** — mirrors `useState`, but persists to
@@ -458,7 +507,16 @@ Three more hand-rolled hooks, each following the same shape (wrap some state, ad
   compiler-optimized (React Compiler) code; it remains correct and safe for regular
   (non-compiled) React apps like this one.
 
-### 7.5 Capstone: Todo App — `src/pages/expert/CapstoneTodoApp.jsx`
+### Profiling with React DevTools — `src/pages/expert/DevToolsProfiler.jsx`
+The React DevTools Profiler records a real interaction and shows a flame graph — one bar per
+component that rendered in that commit, bar width = render duration, so wide bars are where time
+is actually going. Its "why did this render?" panel names the specific prop/state/hook/context
+that changed, which should be checked *before* reaching for `memo`/`useMemo`/`useCallback`
+speculatively. This lesson's demo measures a component's real render duration with
+`performance.now()` (the same primitive the Profiler itself uses internally) since the actual
+browser extension can't be embedded inline.
+
+### Capstone: Todo App — `src/pages/expert/CapstoneTodoApp.jsx`
 Ties nearly everything together in one feature: `todosReducer` owns every transition (add,
 toggle, remove, edit, clearCompleted); `TodosProvider` + `useTodos()` expose it via Context;
 `AddTodoForm` and each `TodoRow`'s inline edit field are controlled inputs; the todo list uses
@@ -468,9 +526,19 @@ load. The active filter (`all`/`active`/`completed`) deliberately stays as **loc
 `TodoApp` rather than in the shared store, because no other component needs it — a small but
 real example of *not* over-centralizing state.
 
+### Interview Q&A — `src/content/react-qa.js`
+20 questions spanning the whole curriculum above (re-render triggers, keys, functional state
+updates, the `useEffect` dependency array, Context's re-render limitation, `useReducer` vs
+`useState`, `memo`/`useMemo`/`useCallback`, error boundaries, portals, React 19's `ref`-as-prop
+and `useOptimistic`, `useTransition` vs `useDeferredValue`, RTL's philosophy, accessibility,
+animation timing, controlled vs uncontrolled, Suspense boundary placement, profiling, and more),
+rendered through the same generic `GenericTopicPage` + `QAAccordion` pipeline as every other
+subject's Q&A — the only React content that isn't a hand-built interactive page, since a Q&A
+list has no demo of its own to build.
+
 ---
 
-## 8. Other subjects
+## 5. Other subjects
 
 Every subject below follows the pipeline described in §3.2-3.3: a single **Guide** group of
 written lessons (`src/content/<subject>.js`), ordered basic → advanced within that one group
@@ -494,8 +562,12 @@ notes. Counts are guide-topics / Q&A pairs / Mermaid diagrams.
 | LangChain | `src/content/langchain.js` | 8 | 8 | 6 | The chain abstraction as a mental model, core building blocks (prompts/models/parsers/retrievers), LCEL in practice, LCEL composition patterns, memory/conversation history, tool/function-calling integration, classic ReAct agents, where LangChain earns criticism |
 | LangGraph | `src/content/langgraph.js` | 9 | 11 | 8 | The graph mental model (nodes/edges/state), why LangGraph exists beyond LangChain's agents, StateGraph core primitives, the Model Context Protocol (MCP), human-in-the-loop patterns, multi-agent/supervisor patterns, a hand-rolled agentic tool-use loop, agent architectures beyond ReAct |
 | RAG | `src/content/rag.js` | 13 | 13 | 9 | Vector embeddings & semantic similarity, the basic RAG loop, LLM fundamentals, chunking, embeddings & vector search, vector index tradeoffs (HNSW vs IVF), hybrid search & re-ranking, RAG evaluation, RAG failure modes, advanced/agentic RAG patterns, fine-tuning vs RAG vs prompt engineering, an enterprise-assistant case study |
+| AWS | `src/content/aws.js` | 26 | 26 | 31 | Cloud computing & AWS basics, global infrastructure, shared responsibility, IAM, EC2, Auto Scaling/ELB, Lambda, ECS/EKS/Fargate, S3, EBS/EFS/S3 comparison, RDS/Aurora, DynamoDB, ElastiCache, VPC, security groups vs NACLs, Route 53/CloudFront, SQS/SNS/EventBridge/Kinesis/Step Functions, the Well-Architected Framework, HA/DR, IaC, cost optimization, KMS/Secrets, CloudWatch/CloudTrail/X-Ray, Organizations, Bedrock/SageMaker, a three-tier case study |
+| Azure | `src/content/azure.js` | 24 | 21 | 24+ | Azure & the resource model, ARM, Entra ID, VMs, App Service, Functions, AKS/Container Apps, Storage redundancy, Azure SQL, Cosmos DB consistency levels, VNets, load balancer/App Gateway/Front Door, the Well-Architected Framework, Bicep/ARM IaC, cost management, Key Vault, Monitor/Log Analytics, RBAC vs Entra ID identity, governance/landing zones, a three-tier case study |
+| Java | `src/content/java.js` | 24 | 24 | 14 | WORA & the JVM/bytecode model, primitives/autoboxing, OOP's four pillars, interfaces vs abstract classes, `equals`/`hashCode`/`toString`, generics & type erasure, checked vs unchecked exceptions, the Collections Framework, lambdas & the Streams API, `Optional`, records & sealed classes, JVM memory & garbage collection, class loading, the Java Memory Model & `volatile`, threads & `java.util.concurrent`, deadlock, JUnit 5 & Mockito, Maven vs Gradle |
+| DSA | `src/content/dsa.js` | 28 | 31 | 25 | Algorithmic complexity & Big-O/Θ/Ω precisely, space-time tradeoffs, arrays vs linked lists, stacks/queues, hashing, two-pointer/sliding-window, recursion, binary trees & traversal, BSTs & self-balancing trees, heaps, tries, graph representations, BFS/DFS, Dijkstra's, MST/Union-Find, topological sort, merge/quicksort, counting/radix sort, binary search variants, dynamic programming (fundamentals + framework), greedy algorithms, backtracking, bit manipulation, an interview-approach capstone |
 
-**Totals: 12 subjects, 26 groups, 207 topics, 206 Q&A pairs, 161 Mermaid diagrams.**
+**Totals: 16 subjects, 32 groups, 320 topics, 329 Q&A pairs, 248+ Mermaid diagrams.**
 
 Most of these lessons include a live-rendered **Mermaid diagram** — architecture flowcharts,
 sequence diagrams, the Raft leader-election state machine, consistent-hashing rings, UML class
@@ -512,13 +584,13 @@ separate volumes.
 
 ---
 
-## 9. Design decisions
+## 6. Design decisions
 
 - **React 19, not an older version.** The project installs whatever `npm create vite@latest`
   currently scaffolds (React 19 at the time of writing), which made it possible to cover
   `useActionState`, `useOptimistic`, and `use()` as *working* demos rather than descriptions of
-  future API. If you're learning React 18, everything except the Expert §7.3 lesson applies
-  unchanged.
+  future API. If you're learning React 18, everything except the "React 19: Actions & `use()`"
+  lesson applies unchanged.
 - **Plain CSS, no UI framework.** So that every visual element in a demo maps directly back to
   readable JSX/CSS in that lesson's own file — no framework class names or component library
   internals stand between "what you see" and "what you read".
@@ -531,15 +603,18 @@ separate volumes.
 - **A real class-based `ErrorBoundary`,** because that's still what React requires in 2025+ — the
   app doesn't pretend a hook-based alternative exists.
 
-## 10. Extending the app
+## 7. Extending the app
 
-**To add a new React lesson** (say, "Suspense for Data") — the hand-built, interactive kind:
+**To add a new React lesson** (say, "Server Components") — the hand-built, interactive kind:
 
-1. Create `src/pages/<group>/YourLesson.jsx`, following an existing lesson in the same group as a
-   template — export a component that renders `<TopicPage groupId=... topicId=... level=...>`.
-2. Add `{ id: 'your-lesson', title: 'Your Lesson' }` to the matching group inside the `react`
-   entry of `menuSections` in `src/data/topics.js`.
-3. Add `<Route path="/<group>/your-lesson" element={<YourLesson />} />` in `src/App.jsx`.
+1. Create `src/pages/<level>/YourLesson.jsx` (the folder is just organizational, by difficulty —
+   `basics`/`intermediate`/`advanced`/`expert` — it no longer maps to a sidebar group), following
+   an existing lesson as a template — export a component that renders
+   `<TopicPage groupId="react-guide" topicId="your-lesson" level="advanced" ...>` (`level` still
+   picks the page's difficulty badge).
+2. Add `{ id: 'your-lesson', title: 'Your Lesson' }` to the `react-guide` group's `topics` array
+   in `src/data/topics.js`, positioned where it belongs in the basic-to-advanced order.
+3. Add `<Route path="/react-guide/your-lesson" element={<YourLesson />} />` in `src/App.jsx`.
 
 **To add a new lesson to an existing content-driven subject** (say, another Python topic) — no
 component, no route, just data:
@@ -563,7 +638,7 @@ component, no route, just data:
 In every case, the sidebar, the Previous/Next pager, and the URL structure update automatically
 — nothing else needs to change.
 
-## 11. Verifying the app
+## 8. Verifying the app
 
 This project was verified, not just written:
 
@@ -575,31 +650,43 @@ This project was verified, not just written:
   deliberately read a ref during render *because that's the concept being taught*;
   `DataFetching.jsx` calls `setState` inside an effect because that's the canonical
   data-fetching-in-an-effect pattern).
-- A programmatic check that every group id is unique across all 12 sections and every
-  `groupId/topicId` pair is unique — required for the flat `/:groupId/:topicId` routing scheme
-  to work with no subject segment in the URL.
+- A programmatic check that every group id is unique across all 16 sections and every
+  `groupId/topicId` pair is unique (320 topics, zero collisions) — required for the flat
+  `/:groupId/:topicId` routing scheme to work with no subject segment in the URL.
 - Manual, in-browser testing of the trickiest interactive demos (Error Boundaries actually
   catching and resetting, Portals actually escaping a clipped container, nested routing actually
   reading URL params, the Capstone app actually persisting to `localStorage`, React 19's
   `useOptimistic` actually reconciling, mermaid diagrams actually rendering across multiple
   diagram types — flowchart, sequence, and state diagrams). This process caught and fixed two
   real bugs: the `useOptimistic` demo originally called its setter outside a transition, which
-  React 19 rejects at runtime (§7.3); and the inline-markdown renderer initially didn't support
+  React 19 rejects at runtime (in "React 19: Actions & `use()`"); and the inline-markdown renderer initially didn't support
   `*italic*` text, leaving literal asterisks in some content-driven lessons.
-- The 9 content-driven subjects beyond Git and Authentication & Authorization were drafted by
+- The 13 content-driven subjects beyond Git and Authentication & Authorization were drafted by
   parallel agents against a shared schema and the same two worked examples (`git.js`, `auth.js`),
   then spot-checked in-browser across subjects for rendering correctness (tables, code blocks,
   diagrams, Q&A accordions) and checked programmatically for structural/id correctness.
+- **Every one of the app's 257 Mermaid diagrams is parsed programmatically**, not just eyeballed
+  — a small Node script imports the `mermaid` package directly and calls `mermaid.parse()` on
+  every diagram string extracted from every `src/content/*.js` file, since a diagram that visually
+  renders fine 99% of the time can still contain a genuine grammar error that only a real parse
+  catches. This caught and fixed real bugs invisible to a casual read: a plain `[Label]` node
+  containing unquoted parentheses (`Data Center(s)`) that Mermaid's flowchart grammar
+  misinterprets as a shape delimiter; a `Note over X: ...` line broken across two physical lines
+  in the source (Mermaid sequence-diagram notes must be single-line); a semicolon inside a
+  `Note over X:` line, which Mermaid treats as a statement separator; and, most subtly, a
+  sequence-diagram participant literally named `Loop` — `loop` is a reserved keyword in Mermaid's
+  sequence-diagram grammar (it opens a `loop ... end` block), so naming a participant that
+  collides with it silently breaks parsing even though nothing about it looks wrong to a reader.
 
-## 12. Further resources
+## 9. Further resources
 
 - [react.dev](https://react.dev) — the official docs; every React concept in this app maps to a
   page there, usually linked to directly from within each lesson.
 - [react.dev/reference/react](https://react.dev/reference/react) — the hooks API reference used
   throughout the Intermediate/Advanced/Expert sections.
-- [reactrouter.com](https://reactrouter.com) — full `react-router-dom` API used in §6.9.
+- [reactrouter.com](https://reactrouter.com) — full `react-router-dom` API used in the Routing Deep Dive lesson.
 - [TanStack Query](https://tanstack.com/query) — the production-grade evolution of the manual
-  `useFetch` pattern in §6.8.
+  `useFetch` pattern in the Data Fetching Patterns lesson.
 - [mermaid.js.org](https://mermaid.js.org) — the diagram syntax used throughout the
   content-driven subjects' `mermaid` blocks.
 - [Refactoring.Guru](https://refactoring.guru/design-patterns) — a deeper reference for every

@@ -52,7 +52,7 @@ function CodeSplittingDemo() {
 export default function CodeSplitting() {
   return (
     <TopicPage
-      groupId="advanced"
+      groupId="react-guide"
       topicId="code-splitting"
       level="advanced"
       title="Lazy Loading & Suspense"

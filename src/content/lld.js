@@ -1152,7 +1152,7 @@ class Order:
     T2->>Counter: read value -> 5
     T1->>Counter: write 5 + 1 = 6
     T2->>Counter: write 5 + 1 = 6
-    Note over Counter: Lost update! Two increments happened,\nbut the final value is 6, not 7.`,
+    Note over Counter: Lost update! Two increments happened, but the final value is 6, not 7.`,
             },
             {
               type: 'p',
@@ -1169,7 +1169,7 @@ class Order:
     participant DB
 
     Client->>DB: read row (value=5, version=1)
-    Note over Client,DB: another client updates the row\nto version=2 in between
+    Note over Client,DB: another client updates the row to version=2 in between
     Client->>DB: UPDATE ... SET value=6, version=2 WHERE id=X AND version=1
     DB-->>Client: 0 rows affected (version mismatch)
     Client->>DB: re-read row (value=6, version=2)

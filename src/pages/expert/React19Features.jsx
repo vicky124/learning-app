@@ -145,7 +145,7 @@ function UseHookDemo() {
 export default function React19Features() {
   return (
     <TopicPage
-      groupId="expert"
+      groupId="react-guide"
       topicId="react19"
       level="expert"
       title="React 19: Actions & use()"

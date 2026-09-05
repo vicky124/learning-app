@@ -93,7 +93,7 @@ function DeferredValueDemo() {
 export default function ConcurrentFeatures() {
   return (
     <TopicPage
-      groupId="expert"
+      groupId="react-guide"
       topicId="concurrent"
       level="expert"
       title="Concurrent Features"

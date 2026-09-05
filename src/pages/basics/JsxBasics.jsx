@@ -31,7 +31,7 @@ function Greeting() {
 export default function JsxBasics() {
   return (
     <TopicPage
-      groupId="basics"
+      groupId="react-guide"
       topicId="jsx"
       level="basics"
       title="JSX & Rendering"

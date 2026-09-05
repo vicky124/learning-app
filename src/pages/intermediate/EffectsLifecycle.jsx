@@ -73,7 +73,7 @@ function Timer() {
 export default function EffectsLifecycle() {
   return (
     <TopicPage
-      groupId="intermediate"
+      groupId="react-guide"
       topicId="effects"
       level="intermediate"
       title="useEffect & Lifecycle"
