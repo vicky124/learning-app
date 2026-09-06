@@ -562,12 +562,15 @@ notes. Counts are guide-topics / Q&A pairs / Mermaid diagrams.
 | LangChain | `src/content/langchain.js` | 8 | 8 | 6 | The chain abstraction as a mental model, core building blocks (prompts/models/parsers/retrievers), LCEL in practice, LCEL composition patterns, memory/conversation history, tool/function-calling integration, classic ReAct agents, where LangChain earns criticism |
 | LangGraph | `src/content/langgraph.js` | 9 | 11 | 8 | The graph mental model (nodes/edges/state), why LangGraph exists beyond LangChain's agents, StateGraph core primitives, the Model Context Protocol (MCP), human-in-the-loop patterns, multi-agent/supervisor patterns, a hand-rolled agentic tool-use loop, agent architectures beyond ReAct |
 | RAG | `src/content/rag.js` | 13 | 13 | 9 | Vector embeddings & semantic similarity, the basic RAG loop, LLM fundamentals, chunking, embeddings & vector search, vector index tradeoffs (HNSW vs IVF), hybrid search & re-ranking, RAG evaluation, RAG failure modes, advanced/agentic RAG patterns, fine-tuning vs RAG vs prompt engineering, an enterprise-assistant case study |
+| Machine Learning | `src/content/machine-learning.js` | 32 | 30 | 31 | What ML is vs. traditional programming, supervised/unsupervised/reinforcement learning, bias-variance tradeoff, train/val/test splits, over/underfitting, linear/logistic regression, decision trees & random forests, gradient boosting, SVMs, k-NN, k-means, PCA, feature engineering & scaling, classification/regression metrics, class imbalance, the perceptron & backpropagation, activation functions, gradient descent variants, regularization & dropout, batch norm, CNNs, RNNs/LSTMs, the Transformer's self-attention mechanism precisely, the ML lifecycle, deployment patterns, drift detection, A/B testing, interpretability (SHAP/LIME), bias & fairness |
+| Generative AI | `src/content/generative-ai.js` | 24 | 22 | 21 | The AI/ML/DL/GenAI hierarchy precisely, a history of the path to LLMs, tokenization (BPE) & its failure modes, autoregressive generation & sampling (temperature/top-k/top-p), context windows & attention cost, the pretrain→SFT→RLHF pipeline, reward modeling & DPO, LoRA/QLoRA parameter-efficient fine-tuning, few-shot & chain-of-thought prompting, structured output & prompt injection, LLM evaluation & LLM-as-judge, hallucination explained precisely, red-teaming & alignment, GANs, VAEs, diffusion models, multimodal vision-language models — deliberately non-overlapping with LangChain/LangGraph/RAG's application-building focus |
 | AWS | `src/content/aws.js` | 26 | 26 | 31 | Cloud computing & AWS basics, global infrastructure, shared responsibility, IAM, EC2, Auto Scaling/ELB, Lambda, ECS/EKS/Fargate, S3, EBS/EFS/S3 comparison, RDS/Aurora, DynamoDB, ElastiCache, VPC, security groups vs NACLs, Route 53/CloudFront, SQS/SNS/EventBridge/Kinesis/Step Functions, the Well-Architected Framework, HA/DR, IaC, cost optimization, KMS/Secrets, CloudWatch/CloudTrail/X-Ray, Organizations, Bedrock/SageMaker, a three-tier case study |
 | Azure | `src/content/azure.js` | 24 | 21 | 24+ | Azure & the resource model, ARM, Entra ID, VMs, App Service, Functions, AKS/Container Apps, Storage redundancy, Azure SQL, Cosmos DB consistency levels, VNets, load balancer/App Gateway/Front Door, the Well-Architected Framework, Bicep/ARM IaC, cost management, Key Vault, Monitor/Log Analytics, RBAC vs Entra ID identity, governance/landing zones, a three-tier case study |
 | Java | `src/content/java.js` | 24 | 24 | 14 | WORA & the JVM/bytecode model, primitives/autoboxing, OOP's four pillars, interfaces vs abstract classes, `equals`/`hashCode`/`toString`, generics & type erasure, checked vs unchecked exceptions, the Collections Framework, lambdas & the Streams API, `Optional`, records & sealed classes, JVM memory & garbage collection, class loading, the Java Memory Model & `volatile`, threads & `java.util.concurrent`, deadlock, JUnit 5 & Mockito, Maven vs Gradle |
 | DSA | `src/content/dsa.js` | 28 | 31 | 25 | Algorithmic complexity & Big-O/Θ/Ω precisely, space-time tradeoffs, arrays vs linked lists, stacks/queues, hashing, two-pointer/sliding-window, recursion, binary trees & traversal, BSTs & self-balancing trees, heaps, tries, graph representations, BFS/DFS, Dijkstra's, MST/Union-Find, topological sort, merge/quicksort, counting/radix sort, binary search variants, dynamic programming (fundamentals + framework), greedy algorithms, backtracking, bit manipulation, an interview-approach capstone |
 
-**Totals: 16 subjects, 32 groups, 320 topics, 329 Q&A pairs, 248+ Mermaid diagrams.**
+**Totals: 18 subjects, 36 groups, 378 topics, 381 Q&A pairs, 309 Mermaid diagrams — every one
+parsed programmatically, see §8.**
 
 Most of these lessons include a live-rendered **Mermaid diagram** — architecture flowcharts,
 sequence diagrams, the Raft leader-election state machine, consistent-hashing rings, UML class
@@ -650,8 +653,8 @@ This project was verified, not just written:
   deliberately read a ref during render *because that's the concept being taught*;
   `DataFetching.jsx` calls `setState` inside an effect because that's the canonical
   data-fetching-in-an-effect pattern).
-- A programmatic check that every group id is unique across all 16 sections and every
-  `groupId/topicId` pair is unique (320 topics, zero collisions) — required for the flat
+- A programmatic check that every group id is unique across all 18 sections and every
+  `groupId/topicId` pair is unique (378 topics, zero collisions) — required for the flat
   `/:groupId/:topicId` routing scheme to work with no subject segment in the URL.
 - Manual, in-browser testing of the trickiest interactive demos (Error Boundaries actually
   catching and resetting, Portals actually escaping a clipped container, nested routing actually
@@ -661,11 +664,15 @@ This project was verified, not just written:
   real bugs: the `useOptimistic` demo originally called its setter outside a transition, which
   React 19 rejects at runtime (in "React 19: Actions & `use()`"); and the inline-markdown renderer initially didn't support
   `*italic*` text, leaving literal asterisks in some content-driven lessons.
-- The 13 content-driven subjects beyond Git and Authentication & Authorization were drafted by
-  parallel agents against a shared schema and the same two worked examples (`git.js`, `auth.js`),
+- The 15 content-driven subjects beyond Git and Authentication & Authorization were drafted by
+  parallel agents against a shared schema and the same two worked examples (`git.js`, `auth.js`);
+  the Machine Learning and Generative AI agents specifically were briefed to read the existing
+  LangChain/LangGraph/RAG content first and avoid duplicating it (RAG's own "fine-tuning vs RAG
+  vs prompt engineering" topic deliberately stays high-level, for exactly this reason — Generative
+  AI's fine-tuning/RLHF/LoRA topics go deep on the mechanics that comparison only names). All were
   then spot-checked in-browser across subjects for rendering correctness (tables, code blocks,
   diagrams, Q&A accordions) and checked programmatically for structural/id correctness.
-- **Every one of the app's 257 Mermaid diagrams is parsed programmatically**, not just eyeballed
+- **Every one of the app's 309 Mermaid diagrams is parsed programmatically**, not just eyeballed
   — a small Node script imports the `mermaid` package directly and calls `mermaid.parse()` on
   every diagram string extracted from every `src/content/*.js` file, since a diagram that visually
   renders fine 99% of the time can still contain a genuine grammar error that only a real parse

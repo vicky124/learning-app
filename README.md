@@ -5,12 +5,12 @@
 **🔗 Live demo: [vicky124.github.io/learning-app](https://vicky124.github.io/learning-app/)**
 
 An interactive, single-page app for learning React live and studying for technical interviews
-across 16 subjects — React, Python, JavaScript, TypeScript, Git, Low-Level Design, High-Level
-Design, System Design Patterns, Authentication & Authorization, LangChain, LangGraph, RAG, AWS,
-Azure, Java, and DSA. React gets **live, working demos** you can click and type into; every other
-subject gets a thorough written guide (with rendered Mermaid diagrams) plus a dedicated, self-quiz
-**Interview Q&A** section. 320 lessons, 329 Q&A pairs, 257 diagrams in total. Built with React 19,
-Vite, and React Router.
+across 18 subjects — React, Python, JavaScript, TypeScript, Git, Low-Level Design, High-Level
+Design, System Design Patterns, Authentication & Authorization, LangChain, LangGraph, RAG,
+Machine Learning, Generative AI, AWS, Azure, Java, and DSA. React gets **live, working demos** you
+can click and type into; every other subject gets a thorough written guide (with rendered Mermaid
+diagrams) plus a dedicated, self-quiz **Interview Q&A** section. 378 lessons, 381 Q&A pairs, 309
+diagrams in total. Built with React 19, Vite, and React Router.
 
 For the full written guide to how this app itself is built — the architecture, the content
 pipeline, every React concept explained — see **[DOCUMENTATION.md](./DOCUMENTATION.md)**.
@@ -50,7 +50,8 @@ or more **live demos** you can actually click/type into, the demo's source code 
 code block, and a callout with a tip, warning, or common pitfall.
 
 **Every other subject** — Python, JavaScript, TypeScript, Git, LLD, HLD, System Design Patterns,
-Authentication & Authorization, LangChain, LangGraph, RAG, AWS, Azure, Java, and DSA — follows a
+Authentication & Authorization, LangChain, LangGraph, RAG, Machine Learning, Generative AI, AWS,
+Azure, Java, and DSA — follows a
 **Guide** + **Interview Q&A** shape instead: 13–28 written lessons per subject (with tables, code
 samples, and Mermaid diagrams), ordered basic → advanced, plus a click-to-reveal Q&A accordion
 you can quiz yourself against. Content for Git and Authentication & Authorization started from the
@@ -71,7 +72,7 @@ src/
     git.js, auth.js, python.js, javascript.js, typescript.js,   # one file per non-React subject —
     lld.js, hld.js, system-design-patterns.js,                  # each exports a { id, label, icon, groups }
     langchain.js, langgraph.js, rag.js,                         # "section" object plugged into topics.js
-    aws.js, azure.js, java.js, dsa.js,
+    aws.js, azure.js, java.js, dsa.js, machine-learning.js, generative-ai.js,
     react-qa.js                                                 # React's own Interview Q&A data (only
                                                                  # non-React-shaped content in src/content/)
   components/
@@ -139,6 +140,6 @@ a new lesson or a whole new subject.
 - The **Testing Components with React Testing Library** lesson's demo simulates a passing test's
   assertions rather than literally executing RTL — a real RTL suite runs in Node via a test
   runner (Vitest/Jest), not in this browser page.
-- Every Mermaid diagram in the app (257 of them) is parsed programmatically as part of
+- Every Mermaid diagram in the app (309 of them) is parsed programmatically as part of
   verification, not just eyeballed — see [DOCUMENTATION.md §8](./DOCUMENTATION.md) for how, and
   the real bugs it caught.

@@ -37,6 +37,8 @@ import { awsSection } from '../content/aws.js'
 import { azureSection } from '../content/azure.js'
 import { javaSection } from '../content/java.js'
 import { dsaSection } from '../content/dsa.js'
+import { machineLearningSection } from '../content/machine-learning.js'
+import { generativeAiSection } from '../content/generative-ai.js'
 
 export const menuSections = [
   {
@@ -112,6 +114,8 @@ export const menuSections = [
   langchainSection,
   langgraphSection,
   ragSection,
+  machineLearningSection,
+  generativeAiSection,
   awsSection,
   azureSection,
   javaSection,
