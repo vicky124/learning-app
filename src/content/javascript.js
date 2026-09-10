@@ -135,6 +135,13 @@ console.log(obj1.x); // 2 — obj1 and obj2 point at the same underlying object`
           ],
           blocks: [
             {
+              type: 'mermaid',
+              code: `flowchart TD
+    Value["a value used as an if(...) condition"] --> Check{"Is it exactly one of:<br/>false, 0, -0, 0n, '', null,<br/>undefined, or NaN?"}
+    Check -->|Yes| Falsy["falsy — the else branch runs"]
+    Check -->|No| Truthy["truthy — the if branch runs<br/>(includes '0', [], {}, and 'false')"]`,
+            },
+            {
               type: 'code',
               language: 'js',
               title: '`||` vs `??`, and optional chaining',
@@ -240,6 +247,13 @@ const paidTotal = orders
   .reduce((sum, total) => sum + total, 0);     // fold into one number
 
 console.log(paidTotal); // 40`,
+            },
+            {
+              type: 'mermaid',
+              code: `flowchart LR
+    Orders["orders<br/>(3 order objects)"] -->|".filter(status === 'paid')"| Filtered["2 paid orders"]
+    Filtered -->|".map(o => o.total)"| Totals["[25, 15]"]
+    Totals -->|".reduce((sum, t) => sum + t, 0)"| Result["40"]`,
             },
             {
               type: 'table',
@@ -565,6 +579,26 @@ console.log(Object.getPrototypeOf(Dog.prototype) === Animal.prototype); // true`
           ],
           blocks: [
             {
+              type: 'p',
+              text: 'When you compare two values with `==`, JavaScript first checks whether they are already the same type. If they are, `==` behaves exactly like `===` — no coercion happens. If the types differ, `==` tries to convert one or both sides so they *can* be compared, following a fixed set of rules (for example: a string compared to a number gets converted to a number first). `===` skips all of that — if the types differ, the answer is simply `false`, full stop. That is the entire reason `===` is easier to reason about: there is no hidden conversion step to keep track of.',
+            },
+            {
+              type: 'mermaid',
+              code: `flowchart TD
+    Start["a == b"] --> SameType{"Are a and b<br/>already the same type?"}
+    SameType -->|Yes| StrictCompare["Compare exactly like ===<br/>(no coercion happens)"]
+    SameType -->|No| NullCheck{"Is one of them<br/>null or undefined?"}
+    NullCheck -->|"both are null/undefined"| True1["true"]
+    NullCheck -->|"only one is"| False1["false — null/undefined only equal each other"]
+    NullCheck -->|No| NumStr{"Is one a number<br/>and the other a string?"}
+    NumStr -->|Yes| ConvertStr["convert the string to a number,<br/>then compare"]
+    NumStr -->|No| BoolCheck{"Is either one a boolean?"}
+    BoolCheck -->|Yes| ConvertBool["convert the boolean to a number<br/>(true to 1, false to 0), then re-run"]
+    BoolCheck -->|No| ObjCheck{"Is one an object and<br/>the other a primitive?"}
+    ObjCheck -->|Yes| ToPrimitive["convert the object to a primitive<br/>(via valueOf/toString), then re-run"]
+    ObjCheck -->|No| False2["false"]`,
+            },
+            {
               type: 'table',
               headers: ['Expression', 'Result', 'Why'],
               rows: [
@@ -574,6 +608,30 @@ console.log(Object.getPrototypeOf(Dog.prototype) === Animal.prototype); // true`
                 ['`NaN === NaN`', '`false`', 'Use `Number.isNaN()` or `Object.is()` to actually test for `NaN`.'],
                 ['`typeof null`', "`'object'`", 'A long-standing language bug baked in for backwards compatibility.'],
               ],
+            },
+            {
+              type: 'code',
+              language: 'js',
+              title: 'a real `==` bug, and the `===` fix',
+              code: `// Common mistake: using == to check "is this value empty/falsy"
+// lets in far more values than intended.
+function isEmptyMistake(value) {
+  return value == false; // BUG: coercion makes this match way more than "empty"
+}
+
+isEmptyMistake('');    // true  — okay, that was the intent
+isEmptyMistake(0);     // true  — okay, that was the intent
+isEmptyMistake('0');   // true  — WRONG: '0' is a non-empty string the user typed
+isEmptyMistake([]);    // true  — WRONG: an empty array is not "false"
+
+// Fix: name the exact conditions you mean, and compare with ===
+// so nothing gets coerced into matching by accident.
+function isEmptyFixed(value) {
+  return value === '' || value === null || value === undefined;
+}
+
+isEmptyFixed('0'); // false — correctly treated as real input
+isEmptyFixed([]);  // false — correctly not treated as "empty"`,
             },
             {
               type: 'callout',

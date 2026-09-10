@@ -727,6 +727,10 @@ print(pca.explained_variance_ratio_)      # variance explained by each component
           ],
           blocks: [
             {
+              type: 'p',
+              text: 'A concrete illustration of why this matters: suppose two features are "age" (range roughly 18-80) and "income" (range roughly 20,000-200,000). The raw Euclidean distance between two people who differ by 10 years in age and $5,000 in income is dominated almost entirely by the income term, simply because its numbers are thousands of times larger — not because income is thousands of times more predictive. After standardizing both features to zero mean and unit variance, a 10-year age gap and a $5,000 income gap can finally be compared on the same footing, each contributing to the distance in proportion to how unusual that gap actually is, not how large its raw units happen to be.',
+            },
+            {
               type: 'table',
               headers: ['Algorithm family', 'Needs scaling?', 'Why'],
               rows: [
@@ -890,6 +894,14 @@ X[['age', 'income']] = imputer.fit_transform(X[['age', 'income']])`,
             {
               type: 'p',
               text: 'A concrete precision/recall tradeoff: an email spam filter that optimizes purely for recall will catch nearly every spam email, but at the cost of also flagging a fair number of legitimate emails as spam (low precision) — annoying, and potentially costly if an important email is buried in the spam folder. A cancer-screening model that optimizes purely for precision will rarely raise a false alarm, but at the cost of missing some actual cancer cases (low recall) — which can be the more dangerous failure mode. Which one to prioritize is a business/domain decision the metric alone cannot make; it dictates where you set the classification threshold.',
+            },
+            {
+              type: 'heading',
+              text: 'A worked example with real numbers',
+            },
+            {
+              type: 'p',
+              text: 'Say a spam filter is tested on 100 emails, 20 of which are truly spam. It flags 25 emails as spam, and 18 of those 25 are correctly spam (2 flagged emails were actually legitimate — false positives), while it missed 2 real spam emails (they landed in the inbox — false negatives). That gives TP = 18, FP = 2, FN = 2, TN = 78. Precision = 18 / (18 + 2) = 0.90 (90% of what it flagged really was spam). Recall = 18 / (18 + 2) = 0.90 (it caught 90% of the real spam). F1 = 2 × (0.90 × 0.90) / (0.90 + 0.90) = 0.90. In this particular case precision and recall happen to be equal, but they move independently — a filter that flags everything as spam would push recall toward 1.0 while precision collapses toward 0.20 (the true spam rate), which is exactly the tradeoff the threshold controls.',
             },
             {
               type: 'code',
@@ -1221,6 +1233,14 @@ def sigmoid_deriv(z):
                 ['SGD + Momentum', 'Mini-batch, with velocity term', 'Reduced oscillation', 'Vision models, when tuned carefully'],
                 ['Adam', 'Mini-batch, with adaptive per-parameter rates', 'Reduced, fast convergence', 'Default choice for most deep learning tasks'],
               ],
+            },
+            {
+              type: 'heading',
+              text: 'One gradient descent step, by hand',
+            },
+            {
+              type: 'p',
+              text: 'Say a model has a single weight `w = 4.0`, and at that value the gradient of the loss with respect to `w` works out to `6.0` (the loss increases steeply as `w` increases, so the gradient points strongly in the positive direction). With a learning rate of `0.1`, plain gradient descent updates `w = w - learning_rate * gradient = 4.0 - 0.1 * 6.0 = 3.4`. The weight moved *against* the gradient, toward lower loss, by an amount proportional to both the learning rate and how steep the slope was at that point. Momentum changes only what gets multiplied by the learning rate: instead of using `6.0` directly, it blends in the previous step\'s velocity (say the running velocity was `2.0`, with `beta = 0.9`) into `velocity = 0.9 * 2.0 + 0.1 * 6.0 = 2.4`, then updates `w = 4.0 - 0.1 * 2.4 = 3.76` — a smaller, smoothed move than plain gradient descent would have taken on this one noisy gradient.',
             },
             {
               type: 'code',

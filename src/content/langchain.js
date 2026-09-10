@@ -435,6 +435,18 @@ executor.invoke({
               ],
             },
             {
+              type: 'mermaid',
+              code: `flowchart TD
+    Task["New LLM feature to build"] --> Simple{"Single prompt-and-parse call,<br/>one model, no retrieval/memory/tools?"}
+    Simple -->|Yes| Raw["Call the provider SDK directly<br/>a few lines, nothing to gain from LCEL"]
+    Simple -->|No| Complex{"Real orchestration complexity:<br/>multi-step chains, swappable backends,<br/>memory, or tool use?"}
+    Complex -->|Yes| LC["Use LangChain<br/>Runnables + LCEL composition"]
+    Complex -->|No| Raw
+    LC --> Agentic{"Needs agentic control flow:<br/>branching, human approval,<br/>multi-agent handoffs?"}
+    Agentic -->|Yes| LG["Reach for LangGraph<br/>explicit, controllable graph"]
+    Agentic -->|No| LC`,
+            },
+            {
               type: 'callout',
               kind: 'tip',
               text: 'The honest, senior answer to "should we use LangChain": it\'s worth it once you have real orchestration complexity (multi-step chains, several swappable retrieval/model backends, memory across turns, tool use); for a single prompt-and-parse call, call the provider\'s SDK directly. And for anything agentic beyond the simplest tool loop, reach for LangGraph rather than classic LangChain agents — it is the actively developed answer for controllable agent orchestration.',

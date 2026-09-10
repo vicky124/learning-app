@@ -40,6 +40,53 @@ export const dsaSection = {
               ],
             },
             {
+              type: 'heading',
+              text: 'Seeing the difference with real numbers',
+            },
+            {
+              type: 'p',
+              text: 'Take that same idea and put actual numbers on it. Checking every item one by one (**linear search**) needs, in the worst case, one comparison per element — on a sorted list of 1,000,000 items, that is up to 1,000,000 comparisons. Repeatedly cutting the search space in half (**binary search**) needs roughly log₂(1,000,000) ≈ 20 comparisons, because each comparison throws away half of what is left. The code below counts the comparisons each approach actually makes, so the difference is not just asserted, it is measured.',
+            },
+            {
+              type: 'code',
+              language: 'python',
+              title: 'counting comparisons: linear search vs binary search',
+              code: `def linear_search(nums, target):
+    steps = 0
+    for i, val in enumerate(nums):
+        steps += 1                # one comparison per element checked
+        if val == target:
+            return i, steps
+    return -1, steps
+
+def binary_search(nums, target):
+    steps = 0
+    left, right = 0, len(nums) - 1
+    while left <= right:
+        steps += 1                # one comparison per halving of the search space
+        mid = (left + right) // 2
+        if nums[mid] == target:
+            return mid, steps
+        elif nums[mid] < target:
+            left = mid + 1
+        else:
+            right = mid - 1
+    return -1, steps
+
+# On a sorted list of 1,000,000 items, searching for a value near the very end:
+# linear_search(nums, target)  -> up to  1,000,000 steps  (O(n))
+# binary_search(nums, target)  -> at most        20 steps  (O(log n))`,
+            },
+            {
+              type: 'mermaid',
+              code: `flowchart TB
+    N0["1,000,000 items to search"] --> N1["step 1: 500,000 items remain"]
+    N1 --> N2["step 2: 250,000 items remain"]
+    N2 --> N3["step 3: 125,000 items remain"]
+    N3 --> Dots["... halves again every step ..."]
+    Dots --> N20["step 20: 1 item remains -- found or done"]`,
+            },
+            {
               type: 'callout',
               kind: 'tip',
               text: 'When thinking about complexity, always ask two separate questions: "how much **time** does this take as input grows?" and "how much extra **memory** does this use as input grows?" They are independent axes, and a good solution is explicit about both, not just time.',
@@ -156,6 +203,16 @@ def sum_recursive(n):
     if n == 0:
         return 0
     return n + sum_recursive(n - 1)`,
+            },
+            {
+              type: 'mermaid',
+              code: `flowchart TB
+    Call5["sum_recursive(5)"] --> Call4["sum_recursive(4)"]
+    Call4 --> Call3["sum_recursive(3)"]
+    Call3 --> Call2["sum_recursive(2)"]
+    Call2 --> Call1["sum_recursive(1)"]
+    Call1 --> Call0["sum_recursive(0) -- base case, returns 0"]
+    Note["all 6 calls sit on the stack at once,\\nwaiting for the one below to return -- O(n) space"]`,
             },
             {
               type: 'list',

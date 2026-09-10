@@ -583,6 +583,14 @@ Table: posts
               code: 'flowchart LR\n    ClientA[Client A] <-->|WebSocket| GWA[Connection Gateway 1]\n    ClientB[Client B] <-->|WebSocket| GWB[Connection Gateway 2]\n    GWA --> PresenceSvc[Presence Service]\n    GWA --> MsgSvc[Message Service]\n    GWB --> MsgSvc\n    MsgSvc --> MsgQueue[[Message Queue / Log]]\n    MsgQueue --> MsgStore[(Message Store<br/>partitioned by conversation_id)]\n    MsgSvc --> Router{Recipient online?}\n    Router -->|Yes, on GW2| GWB\n    Router -->|No| PushSvc[Push Notification Service]\n    MsgStore --> SyncSvc[Sync Service<br/>for offline delivery on reconnect]',
             },
             {
+              type: 'p',
+              text: 'The architecture diagram above shows what the pieces are; the sequence below shows what actually happens, in order, for two of the cases that matter most: the recipient is online (delivered straight through), and the recipient is offline (durably stored, then synced on reconnect).',
+            },
+            {
+              type: 'mermaid',
+              code: 'sequenceDiagram\n    participant Sender\n    participant GWSender as Sender\'s Gateway\n    participant MsgSvc as Message Service\n    participant Store as Message Store\n    participant GWRecipient as Recipient\'s Gateway\n    participant Recipient\n\n    Sender->>GWSender: send message (conversation_id, body)\n    GWSender->>MsgSvc: forward\n    MsgSvc->>Store: persist message, assign per-conversation seq number\n    Store-->>MsgSvc: ack\n    MsgSvc-->>GWSender: ack (message durably stored)\n    GWSender-->>Sender: delivery receipt: sent\n\n    alt recipient currently online\n        MsgSvc->>GWRecipient: push message (found via user_id -> gateway map)\n        GWRecipient->>Recipient: deliver over open WebSocket\n        Recipient-->>GWRecipient: ack\n        GWRecipient-->>MsgSvc: delivered\n        MsgSvc-->>GWSender: delivery receipt: delivered\n    else recipient offline\n        Note over MsgSvc,Store: message already durably stored above - nothing extra to do now\n        MsgSvc->>Recipient: push notification (APNs/FCM) as a hint to open the app\n        Recipient->>MsgSvc: reconnects later, requests sync since last seq number\n        MsgSvc->>Store: fetch messages after last acked seq\n        Store-->>MsgSvc: missed messages\n        MsgSvc-->>Recipient: deliver missed messages in order\n    end',
+            },
+            {
               type: 'heading',
               text: 'Key design decisions',
             },
@@ -771,7 +779,76 @@ Table: posts
           blocks: [
             {
               type: 'p',
-              text: 'URL shortener, news feed, chat system (WhatsApp/Slack), rate limiter, notification system, ride-sharing dispatch (Uber), video streaming (YouTube/Netflix), e-commerce checkout/inventory, distributed cache, search autocomplete/typeahead, web crawler, payment processing system, collaborative document editing (Google Docs — OT/CRDT), distributed job scheduler, API rate-limited third-party integration proxy, ad click aggregation/analytics pipeline.',
+              text: 'Most prompts an interviewer hands you are really one of a small number of recurring shapes wearing a different costume. Once you recognize the shape, the estimation numbers, the building blocks, and even the deep-dive talking points mostly transfer over from a case study you already know.',
+            },
+            {
+              type: 'heading',
+              text: 'Read-heavy key lookup',
+            },
+            {
+              type: 'list',
+              items: [
+                'URL shortener — same shape as the case study above: near-instant key → value lookup, cache the hot keys.',
+                'Distributed cache (design Redis/Memcached itself) — the lookup problem turned inside-out: now *you* are building the key-value store, not just using one.',
+                'Search autocomplete / typeahead — a lookup by prefix instead of by exact key (a trie), but still "precompute once, serve reads fast."',
+              ],
+            },
+            {
+              type: 'heading',
+              text: 'Feed, ranking & aggregation',
+            },
+            {
+              type: 'list',
+              items: [
+                'News feed — the fan-out-on-write vs fan-out-on-read tradeoff from the case study above.',
+                'Ad click aggregation / analytics pipeline — same read-optimization instinct, but the hard part is counting correctly at volume, not ranking.',
+              ],
+            },
+            {
+              type: 'heading',
+              text: 'Real-time & collaborative',
+            },
+            {
+              type: 'list',
+              items: [
+                'Chat system (WhatsApp/Slack) — the case study above: stateful connections, per-conversation ordering, offline delivery.',
+                'Notification system (email/SMS/push) — a simpler cousin of chat: fan-out to multiple channels instead of maintaining a live connection.',
+                'Collaborative document editing (Google Docs) — the hardest of this group; the core challenge is merging concurrent edits (OT or CRDTs), not just delivering messages.',
+              ],
+            },
+            {
+              type: 'heading',
+              text: 'Geospatial & matching',
+            },
+            {
+              type: 'list',
+              items: [
+                'Ride-sharing dispatch (Uber/Lyft) — the case study above: geo-indexing plus a race against a tight matching deadline.',
+              ],
+            },
+            {
+              type: 'heading',
+              text: 'Heavy async pipelines',
+            },
+            {
+              type: 'list',
+              items: [
+                'Video streaming (YouTube/Netflix) — the case study above: upload/transcode fully decoupled from playback.',
+                'Web crawler — a queue-driven pipeline (URL frontier → fetch workers → dedupe → store), constrained by politeness/rate limits per domain rather than by a user-facing latency budget.',
+                'Distributed job scheduler — reliably running work at a future time or on a recurring cadence, at scale — the interesting part is exactly-once-ish execution despite worker crashes.',
+                'E-commerce checkout / inventory, and payment processing — a strongly-consistent core (never oversell, never double-charge) wrapped in mostly-async supporting flows (confirmation emails, analytics).',
+                'API rate-limited third-party integration proxy — your system fronting a flaky, rate-limited external API: queueing, backoff, and circuit breaking dominate the design.',
+              ],
+            },
+            {
+              type: 'heading',
+              text: 'A building-block component, not a full system',
+            },
+            {
+              type: 'list',
+              items: [
+                'Rate limiter — covered at HLD level in the case study above (where does the shared counter live); the LLD guide covers the algorithm itself (token bucket, sliding window) in depth.',
+              ],
             },
             {
               type: 'callout',

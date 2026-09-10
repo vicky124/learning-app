@@ -269,6 +269,14 @@ export const systemDesignPatternsSection = {
               text: '(used by Postgres, MySQL/InnoDB): balanced tree structure, each node holds sorted keys and pointers; reads and writes are O(log n) with a small constant (few disk seeks due to high fan-out). Writes are in-place, which makes B-trees great for read-heavy, moderate-write workloads but means a single write can touch multiple pages (write amplification from page splits).',
             },
             {
+              type: 'mermaid',
+              code: 'flowchart TB\n    Root["Root node<br/>sorted keys + pointers"] --> N1["Node: keys 1-100"]\n    Root --> N2["Node: keys 101-200"]\n    Root --> N3["Node: keys 201-300"]\n    N1 --> L1["Leaf: rows for keys 1-33"]\n    N1 --> L2["Leaf: rows for keys 34-66"]\n    N1 --> L3["Leaf: rows for keys 67-100"]\n    Write["Write key=45"] -.->|"in-place update,<br/>may split a full page"| L2\n    Read["Read key=45"] -.->|"O(log n): Root -> N1 -> L2"| L2',
+            },
+            {
+              type: 'p',
+              text: 'The shape to notice: a read for one key walks straight down from the root to one leaf — a handful of pointer hops regardless of how many rows the table has, which is exactly what "O(log n) with a small constant" means in practice. A write to an existing key updates that same leaf page in place; the cost only shows up when a page is full and has to split, which is where the "write amplification" mentioned above comes from.',
+            },
+            {
               type: 'heading',
               text: 'LSM Trees (Log-Structured Merge Trees)',
             },
@@ -655,18 +663,22 @@ export const systemDesignPatternsSection = {
           ],
           blocks: [
             {
+              type: 'p',
+              text: 'For each of these, the weak answer names a technology ("I\'d use Redis"). The strong answer names the mechanism that technology relies on — which is exactly what the rest of this guide equips you to do. A one-line pointer to the relevant mechanism is included below; cover it up and see if you can supply it yourself before reading it.',
+            },
+            {
               type: 'list',
               items: [
-                'Design a distributed cache (like Redis) from scratch.',
-                'Design a distributed job scheduler (like Airflow/Quartz at scale).',
-                'Design a config management system.',
-                'Design a service mesh\'s core routing/observability behavior.',
-                'Design a multi-tenant SaaS architecture (data isolation strategies).',
-                'Design a CI/CD pipeline architecture.',
-                'Design a metrics/monitoring pipeline (like Prometheus/Datadog).',
-                'Design a feature flag system.',
-                'Design a distributed lock manager.',
-                'Design an API gateway.',
+                'Design a distributed cache (like Redis) from scratch. — *Mechanism:* consistent hashing to place keys, an eviction policy per node, and a replication strategy so a node failure doesn\'t lose the cached data outright.',
+                'Design a distributed job scheduler (like Airflow/Quartz at scale). — *Mechanism:* leader election (Raft) so only one scheduler instance dispatches a given job at a time, plus idempotent job execution so a retried/duplicated dispatch is safe.',
+                'Design a config management system. — *Mechanism:* a small, strongly-consistent store (etcd/ZooKeeper, backed by consensus) as the source of truth, with local caching at each service and a push/watch mechanism to propagate changes.',
+                'Design a service mesh\'s core routing/observability behavior. — *Mechanism:* a sidecar proxy per service instance doing L7 load balancing, retries, and circuit breaking, with a control plane pushing routing config to every sidecar.',
+                'Design a multi-tenant SaaS architecture (data isolation strategies). — *Mechanism:* pick a point on the isolation spectrum — shared tables with a `tenant_id` column (cheapest, weakest isolation) vs. schema-per-tenant vs. database-per-tenant (most isolation, most operational overhead) — and justify it by the compliance/noisy-neighbor requirements, not by default.',
+                'Design a CI/CD pipeline architecture. — *Mechanism:* an event-driven pipeline (push triggers a build event), with build/test/deploy stages as independently scalable workers consuming from a queue, and idempotent deploy steps so a retried deployment doesn\'t double-apply.',
+                'Design a metrics/monitoring pipeline (like Prometheus/Datadog). — *Mechanism:* high-volume time-series writes favor an LSM-tree-style storage engine; the pipeline itself is a stream-processing/aggregation problem much like the ad-click pipeline in the HLD guide.',
+                'Design a feature flag system. — *Mechanism:* the same read-heavy, low-latency shape as config management — cache flag evaluations locally at each service and push updates, rather than making every request block on a network round trip to check a flag.',
+                'Design a distributed lock manager. — *Mechanism:* consensus underneath (Raft/ZooKeeper), or a quorum-based approach (Redlock-style) if you\'re willing to accept its known edge cases — either way, always pair the lock with a TTL/lease so a crashed holder can\'t deadlock the resource forever.',
+                'Design an API gateway. — *Mechanism:* L7 load balancing plus the cross-cutting concerns centralized at the edge — authentication (see the case study above), rate limiting, and request routing — so downstream services don\'t each reimplement them.',
               ],
             },
           ],

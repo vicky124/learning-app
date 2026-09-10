@@ -133,6 +133,21 @@ az group delete --name rg-app-a-web --yes             # deletes EVERYTHING insid
               ],
             },
             {
+              type: 'code',
+              language: 'bash',
+              title: 'checking zone support and spreading VMs across zones',
+              code: `# not every region has availability zones -- check before designing around them
+az vm list-skus --location eastus --size Standard_D2s_v5 --zone --output table
+
+# create three VMs, each explicitly pinned to a different zone
+az vm create --resource-group rg-app-a-web --name web-vm-1 \\
+  --image Ubuntu2204 --size Standard_D2s_v5 --zone 1 --generate-ssh-keys
+az vm create --resource-group rg-app-a-web --name web-vm-2 \\
+  --image Ubuntu2204 --size Standard_D2s_v5 --zone 2 --generate-ssh-keys
+az vm create --resource-group rg-app-a-web --name web-vm-3 \\
+  --image Ubuntu2204 --size Standard_D2s_v5 --zone 3 --generate-ssh-keys`,
+            },
+            {
               type: 'callout',
               kind: 'pitfall',
               text: "Putting all VMs of a highly-available app in one availability set but a single availability zone still leaves you exposed to a full datacenter/zone outage. For the strongest single-region resilience, spread critical resources across **multiple availability zones**, not just fault domains within one.",
@@ -658,6 +673,25 @@ az sql elastic-pool create --resource-group rg-app-a-data --server sql-app-a \\
               ],
             },
             {
+              type: 'code',
+              language: 'bash',
+              title: 'provisioning a container with a well-chosen partition key',
+              code: `az cosmosdb create --name cosmos-app-a --resource-group rg-app-a-data \\
+  --default-consistency-level Session --locations regionName=eastus failoverPriority=0
+
+az cosmosdb sql database create --account-name cosmos-app-a \\
+  --resource-group rg-app-a-data --name OrdersDb
+
+# GOOD: high-cardinality key, spreads both storage and RU/s evenly
+az cosmosdb sql container create --account-name cosmos-app-a \\
+  --resource-group rg-app-a-data --database-name OrdersDb \\
+  --name Orders --partition-key-path /tenantId --throughput 400
+
+# BAD (don't do this): "/orderStatus" has only a handful of distinct values --
+# nearly all "pending" orders would hash to the same physical partition and
+# throttle with HTTP 429, no matter how much RU/s the container has overall`,
+            },
+            {
               type: 'callout',
               kind: 'pitfall',
               text: 'Choosing a low-cardinality partition key is the single most common Cosmos DB design mistake — it creates a hot physical partition that gets throttled (HTTP 429 "Request rate too large") long before the container\'s aggregate throughput is actually used up, since RU/s is allocated per physical partition, not shared freely across all of them.',
@@ -960,6 +994,23 @@ az deployment group create \\
               ],
             },
             {
+              type: 'code',
+              language: 'bash',
+              title: 'a budget with an alert at 80% of the monthly threshold',
+              code: `az consumption budget create --budget-name monthly-app-a-budget \\
+  --amount 5000 --time-grain Monthly \\
+  --start-date 2026-01-01 --end-date 2026-12-31 \\
+  --category cost --scope "/subscriptions/<sub-id>/resourceGroups/rg-app-a-web" \\
+  --notifications '{
+    "Alert80Pct": {
+      "enabled": true,
+      "operator": "GreaterThan",
+      "threshold": 80,
+      "contactEmails": ["team-lead@contoso.com"]
+    }
+  }'`,
+            },
+            {
               type: 'callout',
               kind: 'pitfall',
               text: 'Buying a 3-year Reservation for a workload whose future is genuinely uncertain locks in cost even if that workload is decommissioned early (reservation exchanges/cancellations exist but have restrictions and fees). Reserve capacity you are confident is steady-state; leave genuinely uncertain or fast-changing workloads on pay-as-you-go or Savings Plans instead.',
@@ -980,7 +1031,7 @@ az deployment group create \\
           blocks: [
             {
               type: 'mermaid',
-              code: 'flowchart LR\n  App["App Service\\n(managed identity)"] -->|1. request token\\nfor Key Vault| Entra["Entra ID"]\n  Entra -->|2. token| App\n  App -->|3. GET secret\\n(token attached)| KV["Key Vault"]\n  KV -->|4. RBAC check| KV\n  KV -->|5. secret value| App\n  KV -.audit log.-> LA[("Log Analytics")]',
+              code: 'flowchart LR\n  App["App Service\\n(managed identity)"] -->|1. request token\\nfor Key Vault| Entra["Entra ID"]\n  Entra -->|2. token| App\n  App -->|"3. GET secret\\n(token attached)"| KV["Key Vault"]\n  KV -->|4. RBAC check| KV\n  KV -->|5. secret value| App\n  KV -.audit log.-> LA[("Log Analytics")]',
             },
             {
               type: 'code',
