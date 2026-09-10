@@ -97,6 +97,10 @@ System.out.println(p == q);   // false -- outside the cache, two distinct Intege
 System.out.println(p.equals(q)); // true -- always compare wrapper VALUES with .equals()`,
             },
             {
+              type: 'mermaid',
+              code: 'flowchart TD\n  Box["Integer x = 100;\\n(autoboxing)"] --> Check{"value between\\n-128 and 127?"}\n  Check -->|"yes"| Cached["Integer.valueOf() returns a\\nSHARED cached object"]\n  Check -->|"no"| NewObj["a brand-new Integer\\nobject is allocated"]\n  Cached --> SameRef["two cached Integers with the\\nsame value ARE == equal\\n(same object, by coincidence)"]\n  NewObj --> DiffRef["two new Integers with the\\nsame value are NOT == equal\\n(different objects)"]',
+            },
+            {
               type: 'callout',
               kind: 'pitfall',
               text: 'Always compare boxed wrapper types with `.equals()`, never `==` — `==` on reference types compares object identity, and the small-integer cache makes `==` appear to work correctly for small values while silently breaking for larger ones. This is one of the most common real-world Java bugs.',
@@ -150,6 +154,10 @@ Rectangle square = new Rectangle(5);  // area 25, via chained constructor`,
             {
               type: 'p',
               text: 'When a class extends another, the subclass constructor must ensure the superclass is initialized first — either implicitly (Java inserts a call to the parent\'s no-arg constructor automatically) or explicitly via `super(...)` as the very first statement. This guarantees an object is never observed in a state where its inherited fields haven\'t been set up yet.',
+            },
+            {
+              type: 'mermaid',
+              code: 'flowchart TD\n  New["new Circle(\'red\', 2.0)"] --> SuperCall["1. super(color) runs FIRST\\nShape must be initialized before Circle"]\n  SuperCall --> ShapeFields["2. Shape\'s field initializers run"]\n  ShapeFields --> ShapeBody["3. Shape constructor body runs"]\n  ShapeBody --> CircleFields["4. Circle\'s field initializers run"]\n  CircleFields --> CircleBody["5. Circle constructor body runs\\nthis.radius = radius"]\n  CircleBody --> Ready["object is now fully\\nand safely constructed"]',
             },
             {
               type: 'callout',
@@ -268,6 +276,10 @@ System.out.println(g.greet());                        // Hello, Ada! -- uses the
               type: 'callout',
               kind: 'pitfall',
               text: 'If a class implements two interfaces that both define the *same* default method signature, the class is forced to override it explicitly (calling `Interface.super.method()` if it wants one of the originals) — the compiler refuses to silently pick one, which is exactly the diamond-problem ambiguity that abstract-class multiple inheritance would otherwise cause.',
+            },
+            {
+              type: 'mermaid',
+              code: 'flowchart TD\n  A["interface A { default String hi() ... }"] --> C["class C implements A, B"]\n  B["interface B { default String hi() ... }"] --> C\n  C --> Conflict{"both A and B supply\\na default hi() -- ambiguous!"}\n  Conflict --> ErrorState["compiler ERROR:\\nC must override hi() itself"]\n  ErrorState --> FixState["fix: @Override String hi()\\ncall A.super.hi() or B.super.hi()\\nto pick one explicitly"]',
             },
           ],
         },
@@ -537,6 +549,10 @@ Runnable r = () -> System.out.println(counter);  // captured value must be effec
               kind: 'note',
               text: 'Lambdas capture by **value**, not by reference — a lambda sees a snapshot of the captured variable at the time it was created, which is exactly why Java requires captured local variables to be effectively final (there is no way to observe a "later" mutation, so the language forbids the ambiguity entirely).',
             },
+            {
+              type: 'mermaid',
+              code: 'flowchart LR\n  Enclosing["enclosing scope:\\nint threshold = 10;"] -.->|"captured BY VALUE\\nat creation time"| Lambda["lambda: n -> n > threshold"]\n  Lambda -->|"compiled to implement"| FI["functional interface\\nPredicate&lt;Integer&gt;"]\n  FI --> Method["its one abstract method:\\nboolean test(Integer n)"]',
+            },
           ],
         },
         {
@@ -628,6 +644,10 @@ findById("u42").ifPresentOrElse(
     u -> System.out.println("found: " + u.name()),
     () -> System.out.println("not found")
 );`,
+            },
+            {
+              type: 'mermaid',
+              code: 'flowchart LR\n  Find["findById(\'u42\')"] --> Opt{"Optional&lt;User&gt;"}\n  Opt -->|"present"| Map1[".map(User::name)"]\n  Map1 --> Map2[".map(String::toUpperCase)"]\n  Map2 --> Merge(("join"))\n  Opt -->|"empty -- skips\\nthe map steps entirely"| Merge\n  Merge --> OrElse[".orElse(\'UNKNOWN USER\')"]',
             },
             {
               type: 'callout',
@@ -749,6 +769,10 @@ for (String word : words) {
 String result2 = sb.toString();`,
             },
             {
+              type: 'mermaid',
+              code: 'flowchart TB\n  S1["String s1 = \'abc\'"] --> Pool[("String Constant Pool")]\n  S2["String s2 = \'abc\'"] --> Pool\n  S3["String s3 = new String(\'abc\')"] --> Heap[("regular Heap\\n(separate object)")]\n  Pool -.->|"s1 == s2 -> true\\nsame pooled object"| EqTrue["=="]\n  Heap -.->|"s1 == s3 -> false\\ndifferent objects,\\nsame content"| EqFalse["=="]',
+            },
+            {
               type: 'callout',
               kind: 'pitfall',
               text: 'Always compare `String`s with `.equals()`, never `==` — literal interning makes `==` appear to "work" for string literals specifically, and that habit then silently breaks for any string built at runtime (from user input, concatenation, `new String(...)`, etc.).',
@@ -818,6 +842,35 @@ String result2 = sb.toString();`,
               ],
             },
             {
+              type: 'code',
+              language: 'java',
+              title: 'GC only reclaims UNREACHABLE objects -- a "live" reference is still a leak',
+              code: `// MISTAKE: a static cache that never removes entries keeps every value
+// reachable forever. The GC is working correctly -- these objects are
+// NOT unreachable, even though the application is logically "done" with
+// them. This is the classic Java "memory leak" (a reachability leak,
+// not a C-style leak): no one forgot to free anything, a live reference
+// simply still points at data nobody needs anymore.
+public class SessionCache {
+    private static final Map<String, Session> cache = new HashMap<>();
+
+    public static void store(String id, Session session) {
+        cache.put(id, session);   // entries are NEVER removed
+    }
+}
+
+// FIX 1: remove entries once you know you're done with them
+public static void invalidate(String id) {
+    cache.remove(id);
+}
+
+// FIX 2: let entries become collectible automatically once nothing else
+// in the application still references the key -- WeakHashMap holds its
+// keys with weak references, so the GC is free to reclaim an entry the
+// moment the key becomes otherwise unreachable
+private static final Map<String, Session> cache = new WeakHashMap<>();`,
+            },
+            {
               type: 'callout',
               kind: 'tip',
               text: 'A GC pause "matters" specifically when it is visible to a user or violates an SLA — a batch job that runs for hours generally cares about total throughput, not a 50ms pause; a low-latency trading system or an interactive API with a strict p99 latency target cares a great deal, which is exactly the case ZGC/Shenandoah are built for.',
@@ -849,6 +902,37 @@ String result2 = sb.toString();`,
             {
               type: 'p',
               text: 'Loading a class actually happens lazily — the JVM does not load every class up front, only when a class is first actively used (instantiated, statically referenced, or its static initializers need to run). At that point, the request goes to a classloader, which (per the delegation model) asks its parent first, all the way up to the bootstrap loader, before attempting to find and define the class itself.',
+            },
+            {
+              type: 'code',
+              language: 'java',
+              title: 'inspecting the delegation chain, and the classic plugin-system bug',
+              code: `System.out.println(String.class.getClassLoader());
+// null -- core JDK classes are loaded by the native bootstrap loader,
+// which Java represents as "null" since it isn't a real Java object
+
+System.out.println(MyApp.class.getClassLoader());
+// jdk.internal.loader.ClassLoaders$AppClassLoader@... -- loaded from your classpath
+
+System.out.println(MyApp.class.getClassLoader().getParent());
+// the platform classloader, one level up the delegation chain
+
+// MISTAKE: assuming "the same class name" means "the same class"
+Class<?> pluginClassA = pluginLoaderA.loadClass("com.example.Plugin");
+Class<?> pluginClassB = pluginLoaderB.loadClass("com.example.Plugin");
+
+System.out.println(pluginClassA == pluginClassB);
+// false! Same fully-qualified name, but two DIFFERENT classloaders
+// loaded it independently -- the JVM treats these as distinct types
+
+Object instanceFromA = pluginClassA.getDeclaredConstructor().newInstance();
+// pluginClassB.cast(instanceFromA);
+// throws ClassCastException -- "com.example.Plugin cannot be cast to
+// com.example.Plugin" (same-looking message, different classloaders)
+
+// FIX: share the type across plugins by loading it with a COMMON
+// ancestor classloader (e.g. a shared "API" classloader both plugin
+// loaders delegate to), so every plugin sees the identical Class object`,
             },
             {
               type: 'callout',
@@ -953,6 +1037,10 @@ void safeUpdate() {
         lock.unlock();   // MUST be in finally -- an exception must not leave the lock held
     }
 }`,
+            },
+            {
+              type: 'mermaid',
+              code: 'stateDiagram-v2\n  [*] --> New : new Thread(task)\n  New --> Runnable : start()\n  Runnable --> Running : scheduler assigns a CPU\n  Running --> Runnable : time slice ends / yield()\n  Running --> Blocked : waiting to enter a\\nsynchronized block\n  Blocked --> Runnable : lock acquired\n  Running --> Waiting : wait() / join() / park()\n  Waiting --> Runnable : notify() / notifyAll() / unpark()\n  Running --> Terminated : run() completes\\n(normally or via exception)\n  Terminated --> [*]',
             },
             {
               type: 'callout',
@@ -1133,6 +1221,10 @@ void transferMoneySafe(Account a, Account b, double amount) {
 }`,
             },
             {
+              type: 'mermaid',
+              code: 'flowchart LR\n  BA["@BeforeAll\\n(once, static)"] --> BE1["@BeforeEach"]\n  BE1 --> T1["@Test method 1"]\n  T1 --> AE1["@AfterEach"]\n  AE1 --> BE2["@BeforeEach"]\n  BE2 --> T2["@Test method 2"]\n  T2 --> AE2["@AfterEach"]\n  AE2 --> AA["@AfterAll\\n(once, static)"]',
+            },
+            {
               type: 'callout',
               kind: 'tip',
               text: 'Keep each test focused on one behavior and independent of test execution order — `@BeforeEach` resetting shared fixture state (rather than reusing mutated state across tests) is what makes tests reliable regardless of the order the runner happens to execute them in.',
@@ -1183,6 +1275,10 @@ class OrderServiceTest {
         assertThrows(OrderServiceException.class, () -> service.placeOrder(new Order("item-1", 2)));
     }
 }`,
+            },
+            {
+              type: 'mermaid',
+              code: 'sequenceDiagram\n  participant TestCase as OrderServiceTest\n  participant Service as OrderService (real)\n  participant MockRepo as OrderRepository (mock)\n  TestCase->>MockRepo: when(save(any())).thenReturn(order)\n  TestCase->>Service: placeOrder(order)\n  Service->>MockRepo: save(order)\n  MockRepo-->>Service: order (the stubbed return value)\n  Service-->>TestCase: result\n  TestCase->>MockRepo: verify(save(order))\n  Note over TestCase,MockRepo: no real database was ever touched',
             },
             {
               type: 'callout',
@@ -1241,6 +1337,10 @@ class OrderServiceTest {
     implementation 'org.springframework.boot:spring-boot-starter-web:3.2.0'
     testImplementation 'org.junit.jupiter:junit-jupiter:5.10.0'
 }`,
+            },
+            {
+              type: 'mermaid',
+              code: 'flowchart LR\n  Validate["validate"] --> Compile["compile"]\n  Compile --> TestPhase["test"]\n  TestPhase --> Package["package\\n(JAR / WAR)"]\n  Package --> Verify["verify"]\n  Verify --> Install["install\\n(local repo)"]\n  Install --> Deploy["deploy\\n(remote repo)"]',
             },
             {
               type: 'callout',

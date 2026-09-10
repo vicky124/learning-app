@@ -1464,6 +1464,44 @@ class Floor:
                 'Concurrency: multiple `Elevator` instances run independently; the controller only needs a lock around request assignment, not around each elevator\'s internal movement loop, since each elevator owns its own state exclusively — an important "where do I even need a lock" observation.',
               ],
             },
+            {
+              type: 'heading',
+              text: 'Walking through the scenario that breaks naive designs',
+            },
+            {
+              type: 'p',
+              text: 'A design that only handles "one request at a time" collapses the moment three people press the call button on three different floors, heading different directions, within the same second. The sequence below shows how `assignBestElevator` resolves that without the elevators stepping on each other.',
+            },
+            {
+              type: 'mermaid',
+              code: `sequenceDiagram
+    participant P1 as Person (Floor 2, wants UP)
+    participant P2 as Person (Floor 8, wants DOWN)
+    participant P3 as Person (Floor 5, wants UP)
+    participant Ctrl as ElevatorController
+    participant E1 as Elevator 1 (at floor 1, idle)
+    participant E2 as Elevator 2 (at floor 9, idle)
+
+    P1->>Ctrl: requestElevator(floor=2, UP)
+    Ctrl->>Ctrl: assignBestElevator - E1 closer and idle
+    Ctrl->>E1: addStop(2, UP)
+
+    P2->>Ctrl: requestElevator(floor=8, DOWN)
+    Ctrl->>Ctrl: assignBestElevator - E2 closer and idle
+    Ctrl->>E2: addStop(8, DOWN)
+
+    P3->>Ctrl: requestElevator(floor=5, UP)
+    Ctrl->>Ctrl: assignBestElevator - E1 already heading UP and will pass floor 5
+    Ctrl->>E1: addStop(5, UP)
+
+    Note over E1: upStops = {2, 5} - services both<br/>on the way up, no reversal needed
+    Note over E2: downStops = {8} - independent,<br/>never contends with E1's state`,
+            },
+            {
+              type: 'callout',
+              kind: 'tip',
+              text: 'Notice `assignBestElevator` gave Elevator 1 the third request even though Elevator 2 is numerically closer to floor 5 — Elevator 2 is heading **down**, so serving an **up** request would mean reversing direction and backtracking, which real elevator dispatch avoids. Picking the elevator already moving the right direction and about to pass the requested floor is what a "why not just pick nearest" follow-up is really probing for.',
+            },
           ],
         },
         {
@@ -1648,6 +1686,14 @@ def simplify_debts(net_balance: dict[str, int]) -> list[tuple[str, str, int]]:
           ],
           blocks: [
             {
+              type: 'p',
+              text: 'Grouped the same way the key points above group them — practicing one prompt from each row builds broader pattern coverage than doing five prompts that all lean on the same two or three patterns.',
+            },
+            {
+              type: 'heading',
+              text: 'Asked constantly — practice these first',
+            },
+            {
               type: 'list',
               items: [
                 'Splitwise / expense sharing',
@@ -1656,16 +1702,43 @@ def simplify_debts(net_balance: dict[str, int]) -> list[tuple[str, str, int]]:
                 'Library management system',
                 'Vending machine',
                 'LRU / LFU cache',
+              ],
+            },
+            {
+              type: 'heading',
+              text: 'Same Strategy/Observer/locking ideas, from a different angle',
+            },
+            {
+              type: 'list',
+              items: [
                 'Notification system (multi-channel)',
                 'URL shortener (LLD depth, not just HLD)',
-                'Movie ticket booking (BookMyShow)',
+                'Movie ticket booking (BookMyShow) — worth re-deriving from scratch, unaided, even after reading the case study above',
+              ],
+            },
+            {
+              type: 'heading',
+              text: 'Command + Memento territory',
+            },
+            {
+              type: 'list',
+              items: [
                 'Logging framework',
                 'In-memory key-value store with TTL',
+                'Text editor with undo/redo (Command + Memento)',
+              ],
+            },
+            {
+              type: 'heading',
+              text: 'Also worth practicing',
+            },
+            {
+              type: 'list',
+              items: [
                 'Food delivery order lifecycle',
                 'ATM machine',
                 'Hotel booking system',
                 'Ride-sharing matching (LLD depth)',
-                'Text editor with undo/redo (Command + Memento)',
                 'Traffic light controller',
               ],
             },

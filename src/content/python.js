@@ -48,6 +48,24 @@ export const pythonSection = {
               text: 'Typing `import this` in any Python interpreter prints the **Zen of Python** — 19 aphorisms that genuinely shape the language\'s design and the community\'s code-review norms, not just a joke Easter egg. A few worth internalizing: **"Explicit is better than implicit"** (why Python avoids hidden magic like implicit type coercion between very different types), **"Simple is better than complex"** and **"There should be one — and preferably only one — obvious way to do it"** (why Python resists adding many overlapping syntaxes for the same operation), and **"Readability counts"** (why significant whitespace and minimal punctuation are a deliberate choice, not an accident).',
             },
             {
+              type: 'code',
+              language: 'python',
+              title: 'seeing the bytecode a function actually compiles to',
+              code: `import dis
+
+def add(a, b):
+    return a + b
+
+dis.dis(add)
+#   2           0 RESUME                   0
+#               2 LOAD_FAST                0 (a)
+#               4 LOAD_FAST                1 (b)
+#               6 BINARY_OP                0 (+)
+#              10 RETURN_VALUE
+# This is what actually runs, one instruction at a time, inside the
+# Python Virtual Machine -- the .py source is never executed directly.`,
+            },
+            {
               type: 'callout',
               kind: 'note',
               text: 'CPython is the reference implementation and what \'Python\' means by default. PyPy uses JIT compilation for large CPU-bound speedups on long-running programs; Jython/IronPython target the JVM/.NET; MicroPython targets embedded/microcontroller environments. Interviews almost always mean CPython unless stated otherwise — its GIL, memory model, and bytecode are CPython-specific, not guaranteed by the language spec itself.',
@@ -178,6 +196,14 @@ print(active - admins)          # {1} -- difference`,
             {
               type: 'p',
               text: 'A `dict`/`set` is backed by a **hash table**: inserting a key computes `hash(key)` to pick a bucket, so lookup is O(1) average instead of scanning every entry. That only works if a key\'s hash never changes for as long as it lives in the table — which is why only **hashable** objects (immutable ones: `int`, `str`, `tuple` of hashables, `frozenset`) can be keys. `list`, `dict`, and `set` are unhashable precisely because they\'re mutable — if you mutated a list after using it as a key, its hash would change and the table would no longer be able to find it, silently corrupting lookups. Python enforces this by raising `TypeError: unhashable type` upfront rather than allowing that corruption.',
+            },
+            {
+              type: 'mermaid',
+              code: `flowchart LR
+    Key["key: 'alice'"] -->|"hash('alice')"| HashVal["hash value, e.g. 4821...92"]
+    HashVal -->|"mod table size"| Bucket["bucket #4"]
+    Bucket --> Lookup["found in one step —\\nno scanning other buckets"]
+    Mutation["if the key could change\\nafter insertion..."] -.->|"hash would change too"| Broken["table looks in the OLD bucket,\\nkey is gone — corrupted lookup"]`,
             },
             {
               type: 'callout',
@@ -1030,6 +1056,35 @@ from . import validators              # "." = the current package`,
         Asyncio[Asyncio] -->|cooperative, no thread overhead| Concurrency2[Best concurrency/resource ratio]
     end`,
             },
+            {
+              type: 'code',
+              language: 'python',
+              title: 'threads don\'t help a CPU-bound loop — processes do',
+              code: `import time
+from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor
+
+def count_to(n):
+    total = 0
+    for i in range(n):
+        total += i
+    return total
+
+# MISLEADING FIX: throwing threads at pure computation.
+# The GIL means only one thread runs Python bytecode at a time, so this
+# takes roughly the SAME time as running count_to(50_000_000) twice in a row --
+# sometimes slightly WORSE, once you add the thread overhead.
+start = time.perf_counter()
+with ThreadPoolExecutor(max_workers=2) as pool:
+    list(pool.map(count_to, [25_000_000, 25_000_000]))
+print("threads:", time.perf_counter() - start)
+
+# ACTUAL FIX: separate processes, each with its own interpreter and GIL --
+# they genuinely run on different CPU cores at the same time.
+start = time.perf_counter()
+with ProcessPoolExecutor(max_workers=2) as pool:
+    list(pool.map(count_to, [25_000_000, 25_000_000]))
+print("processes:", time.perf_counter() - start)  # meaningfully faster on a multi-core machine`,
+            },
           ],
         },
         {
@@ -1630,6 +1685,32 @@ async def read_orders(
             {
               type: 'p',
               text: 'Flask uses a **context-local** pattern (`current_app`, `request`, `g`) — global-looking proxy objects that actually resolve to the correct object for the current request/thread under the hood, implemented via Python\'s `contextvars` (or, historically, thread-locals). This lets code deep in a call stack access `request.args` without the request object being explicitly threaded through every function call — convenient, but it\'s genuine implicit global-like state that can make testing and reasoning about a function\'s actual dependencies harder than FastAPI\'s explicit `Depends()` injection, which is the core philosophical difference between the two frameworks worth naming when asked to compare them.',
+            },
+            {
+              type: 'code',
+              language: 'python',
+              title: 'implicit context-locals vs explicit parameters',
+              code: `from flask import Flask, request, g
+
+app = Flask(__name__)
+
+# Implicit: nothing in the signature says this function needs a request
+# at all -- you have to read the BODY to discover the hidden dependency.
+# Calling this outside of a real request (e.g. directly from a unit test)
+# raises "Working outside of request context" unless you fake one up.
+def get_current_user_flask():
+    token = request.headers.get("Authorization")
+    return load_user_from_token(token)
+
+@app.route("/me")
+def read_current_user():
+    g.user = get_current_user_flask()   # stashed on 'g', another implicit global
+    return {"name": g.user.name}
+
+# Compare with FastAPI's explicit version: the dependency is a normal
+# function parameter, testable by just calling it with a plain string --
+# no request context needs to exist at all.
+# def get_current_user(authorization: str = Header(...)) -> User: ...`,
             },
             {
               type: 'heading',

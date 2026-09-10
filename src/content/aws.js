@@ -98,7 +98,7 @@ export const awsSection = {
           blocks: [
             {
               type: 'mermaid',
-              code: 'flowchart TB\n  subgraph Customer["Customer responsibility: Security IN the cloud"]\n    direction TB\n    CU1[Customer data]\n    CU2[Platform, applications, IAM]\n    CU3[Operating system, network & firewall config]\n    CU4[Client-side / server-side data encryption]\n  end\n  subgraph AWSResp["AWS responsibility: Security OF the cloud"]\n    direction TB\n    A1[AWS-managed software\\n(for managed services)]\n    A2[Compute, storage, database, networking hardware]\n    A3[AWS global infrastructure:\\nRegions, AZs, edge locations]\n  end\n  Customer --> AWSResp',
+              code: 'flowchart TB\n  subgraph Customer["Customer responsibility: Security IN the cloud"]\n    direction TB\n    CU1[Customer data]\n    CU2[Platform, applications, IAM]\n    CU3[Operating system, network & firewall config]\n    CU4[Client-side / server-side data encryption]\n  end\n  subgraph AWSResp["AWS responsibility: Security OF the cloud"]\n    direction TB\n    A1["AWS-managed software\\n(for managed services)"]\n    A2[Compute, storage, database, networking hardware]\n    A3[AWS global infrastructure:\\nRegions, AZs, edge locations]\n  end\n  Customer --> AWSResp',
             },
             {
               type: 'table',
@@ -212,6 +212,28 @@ export const awsSection = {
               code: 'flowchart LR\n  AMI[AMI: OS + software\\nsnapshot] -->|launch| Instance[EC2 Instance]\n  Instance --> Type{Instance Type}\n  Type -->|M-series| General[General purpose]\n  Type -->|C-series| Compute[Compute-optimized]\n  Type -->|R-series| Memory[Memory-optimized]\n  Type -->|I/D-series| StorageOpt[Storage-optimized]\n  Type -->|P/G/Trn/Inf| Accel[GPU / ML accelerators]',
             },
             {
+              type: 'code',
+              language: 'bash',
+              title: 'launching an instance and checking its state with the AWS CLI',
+              code: `# launch a small general-purpose instance in a specific subnet/security group
+aws ec2 run-instances \\
+  --image-id ami-0abcdef1234567890 \\
+  --instance-type t3.micro \\
+  --key-name my-key-pair \\
+  --subnet-id subnet-0123456789abcdef0 \\
+  --security-group-ids sg-0123456789abcdef0 \\
+  --count 1
+
+# check what state it's in (pending -> running)
+aws ec2 describe-instances \\
+  --instance-ids i-0123456789abcdef0 \\
+  --query "Reservations[].Instances[].State.Name"
+
+# stop it (keeps the EBS root volume) vs terminate it (deletes it by default)
+aws ec2 stop-instances --instance-ids i-0123456789abcdef0
+aws ec2 terminate-instances --instance-ids i-0123456789abcdef0`,
+            },
+            {
               type: 'callout',
               kind: 'warning',
               text: 'Spot Instances can be reclaimed by AWS with only a 2-minute termination warning whenever AWS needs the capacity back. Never use Spot for a stateful, single-instance, hard-to-restart workload (a single primary database) — it is a fit only when the workload is horizontally scaled, stateless, and can gracefully drain or checkpoint within that window.',
@@ -242,6 +264,25 @@ export const awsSection = {
             {
               type: 'mermaid',
               code: 'sequenceDiagram\n  participant Client\n  participant ALB as Application Load Balancer\n  participant EC2 as EC2 Instance (app tier)\n  participant RDS as RDS (Multi-AZ)\n  Client->>ALB: HTTPS request\n  ALB->>ALB: TLS termination, health-check-aware routing\n  ALB->>EC2: forward to a healthy target\n  EC2->>RDS: query via connection pool\n  RDS-->>EC2: result\n  EC2-->>ALB: response\n  ALB-->>Client: response',
+            },
+            {
+              type: 'code',
+              language: 'bash',
+              title: 'creating a target-tracking scaling policy with the AWS CLI',
+              code: `# an Auto Scaling Group that already exists, given a target-tracking policy:
+# "keep average CPU utilization near 60% across the fleet"
+aws autoscaling put-scaling-policy \\
+  --auto-scaling-group-name my-app-asg \\
+  --policy-name cpu-target-tracking \\
+  --policy-type TargetTrackingScaling \\
+  --target-tracking-configuration '{
+    "PredefinedMetricSpecification": {
+      "PredefinedMetricType": "ASGAverageCPUUtilization"
+    },
+    "TargetValue": 60.0
+  }'
+
+# AWS now computes add/remove decisions on its own -- no manual thresholds to tune`,
             },
             {
               type: 'callout',
@@ -324,6 +365,35 @@ def handler(event, context):
             {
               type: 'mermaid',
               code: 'flowchart TB\n  Decision{Need containers on AWS} --> Q1{Existing Kubernetes\\nexpertise/tooling, or\\nmulti-cloud requirement?}\n  Q1 -->|Yes| EKS[EKS: managed\\nKubernetes control plane]\n  Q1 -->|No| ECS[ECS: AWS-native\\norchestrator]\n  EKS --> Q2{Want to manage\\nunderlying EC2 instances?}\n  ECS --> Q2\n  Q2 -->|No, minimize ops| Fargate[Launch type: Fargate\\nserverless containers]\n  Q2 -->|Yes, need control\\nor Spot cost savings at scale| EC2LT[Launch type: EC2\\nyou manage instances]',
+            },
+            {
+              type: 'code',
+              language: 'json',
+              title: 'a minimal ECS task definition on Fargate',
+              code: `{
+  "family": "orders-api",
+  "requiresCompatibilities": ["FARGATE"],
+  "networkMode": "awsvpc",
+  "cpu": "512",
+  "memory": "1024",
+  "containerDefinitions": [
+    {
+      "name": "orders-api",
+      "image": "123456789012.dkr.ecr.us-east-1.amazonaws.com/orders-api:latest",
+      "portMappings": [{ "containerPort": 8080, "protocol": "tcp" }],
+      "logConfiguration": {
+        "logDriver": "awslogs",
+        "options": {
+          "awslogs-group": "/ecs/orders-api",
+          "awslogs-region": "us-east-1",
+          "awslogs-stream-prefix": "ecs"
+        }
+      }
+    }
+  ]
+}
+// no EC2 instances to patch: "requiresCompatibilities": ["FARGATE"] tells ECS
+// to run this task on AWS-managed compute, not a self-managed EC2 fleet`,
             },
             {
               type: 'callout',
@@ -559,6 +629,26 @@ def handler(event, context):
               ],
             },
             {
+              type: 'code',
+              language: 'bash',
+              title: 'building the public/private subnet split with the AWS CLI',
+              code: `# a VPC, plus one public and one private subnet inside it
+aws ec2 create-vpc --cidr-block 10.0.0.0/16
+aws ec2 create-subnet --vpc-id vpc-0123456789abcdef0 --cidr-block 10.0.1.0/24  # public
+aws ec2 create-subnet --vpc-id vpc-0123456789abcdef0 --cidr-block 10.0.2.0/24  # private
+
+# an Internet Gateway, attached to the VPC, with a route from the public subnet
+aws ec2 create-internet-gateway
+aws ec2 attach-internet-gateway --vpc-id vpc-0123456789abcdef0 --internet-gateway-id igw-0123456789abcdef0
+aws ec2 create-route --route-table-id rtb-public \\
+  --destination-cidr-block 0.0.0.0/0 --gateway-id igw-0123456789abcdef0
+
+# a NAT Gateway (in the PUBLIC subnet) so the PRIVATE subnet gets outbound-only access
+aws ec2 create-nat-gateway --subnet-id subnet-public --allocation-id eipalloc-0123456789abcdef0
+aws ec2 create-route --route-table-id rtb-private \\
+  --destination-cidr-block 0.0.0.0/0 --nat-gateway-id nat-0123456789abcdef0`,
+            },
+            {
               type: 'callout',
               kind: 'tip',
               text: 'A VPC Endpoint (Gateway type for S3/DynamoDB, Interface type via PrivateLink for most other services) lets a private subnet reach AWS services directly over AWS\'s private network, without needing a NAT Gateway or Internet Gateway at all — cheaper and more secure than routing that traffic out to the public internet and back.',
@@ -629,6 +719,39 @@ def handler(event, context):
               ],
             },
             {
+              type: 'code',
+              language: 'json',
+              title: 'a weighted Route 53 record set: 5% canary traffic to v2',
+              code: `{
+  "Changes": [
+    {
+      "Action": "UPSERT",
+      "ResourceRecordSet": {
+        "Name": "api.example.com",
+        "Type": "A",
+        "SetIdentifier": "v1-stable",
+        "Weight": 95,
+        "TTL": 60,
+        "ResourceRecords": [{ "Value": "203.0.113.10" }]
+      }
+    },
+    {
+      "Action": "UPSERT",
+      "ResourceRecordSet": {
+        "Name": "api.example.com",
+        "Type": "A",
+        "SetIdentifier": "v2-canary",
+        "Weight": 5,
+        "TTL": 60,
+        "ResourceRecords": [{ "Value": "203.0.113.20" }]
+      }
+    }
+  ]
+}
+// applied with: aws route53 change-resource-record-sets --hosted-zone-id Z123... --change-batch file://this.json
+// raise "v2-canary"'s Weight gradually as CloudWatch metrics confirm it's healthy`,
+            },
+            {
               type: 'callout',
               kind: 'tip',
               text: 'A **weighted** routing policy is the standard way to implement a canary release at the DNS layer: send 5% of traffic to a new version\'s endpoint, watch CloudWatch metrics/error rates, and ramp the weight up gradually — no application-level feature-flagging required.',
@@ -670,6 +793,40 @@ def handler(event, context):
                 ['Kinesis Data Streams', 'Ordered, replayable stream, consumer-managed position', 'Custom real-time stream processing, multiple independent readers replaying history'],
                 ['Step Functions', 'Explicit state machine / workflow', 'Multi-step orchestration with retries, branching, compensations'],
               ],
+            },
+            {
+              type: 'code',
+              language: 'json',
+              title: 'the Saga above as a Step Functions state machine (Amazon States Language)',
+              code: `{
+  "StartAt": "ReserveInventory",
+  "States": {
+    "ReserveInventory": {
+      "Type": "Task",
+      "Resource": "arn:aws:lambda:us-east-1:123456789012:function:reserveInventory",
+      "Retry": [{ "ErrorEquals": ["States.TaskFailed"], "MaxAttempts": 2 }],
+      "Catch": [{ "ErrorEquals": ["States.ALL"], "Next": "Failed" }],
+      "Next": "ChargePayment"
+    },
+    "ChargePayment": {
+      "Type": "Task",
+      "Resource": "arn:aws:lambda:us-east-1:123456789012:function:chargePayment",
+      "Catch": [{ "ErrorEquals": ["States.ALL"], "Next": "CompensateInventory" }],
+      "Next": "ShipOrder"
+    },
+    "CompensateInventory": {
+      "Type": "Task",
+      "Resource": "arn:aws:lambda:us-east-1:123456789012:function:releaseInventory",
+      "Next": "Failed"
+    },
+    "ShipOrder": {
+      "Type": "Task",
+      "Resource": "arn:aws:lambda:us-east-1:123456789012:function:shipOrder",
+      "End": true
+    },
+    "Failed": { "Type": "Fail" }
+  }
+}`,
             },
             {
               type: 'callout',
@@ -854,6 +1011,26 @@ def handler(event, context):
               ],
             },
             {
+              type: 'code',
+              language: 'bash',
+              title: 'KMS envelope encryption and Secrets Manager, from the CLI',
+              code: `# ask KMS to generate a data key: a PLAINTEXT copy to use locally, and an
+# ENCRYPTED copy (safe to store) that only KMS can decrypt back
+aws kms generate-data-key \\
+  --key-id alias/my-app-key \\
+  --key-spec AES_256
+# -> { "Plaintext": "<base64, use then discard>", "CiphertextBlob": "<base64, store this>" }
+
+# store a rotating database credential in Secrets Manager
+aws secretsmanager create-secret \\
+  --name prod/orders-db/password \\
+  --secret-string '{"username":"admin","password":"<generated>"}'
+
+# an application fetches it at runtime -- never hardcoded, never in source control
+aws secretsmanager get-secret-value --secret-id prod/orders-db/password \\
+  --query SecretString --output text`,
+            },
+            {
               type: 'callout',
               kind: 'tip',
               text: '"Why not just use one service for everything" is a common follow-up — the honest answer is cost and purpose-fit: Secrets Manager\'s automatic rotation is genuinely valuable for credentials but is overkill (and more expensive) for a hundred simple config values that never rotate, which is exactly Parameter Store\'s niche.',
@@ -882,6 +1059,16 @@ def handler(event, context):
               code: 'sequenceDiagram\n  participant Client\n  participant APIGW as API Gateway\n  participant Lambda1 as Lambda: Order Service\n  participant Lambda2 as Lambda: Inventory Service\n  participant DDB as DynamoDB\n  Client->>APIGW: request (X-Ray trace started)\n  APIGW->>Lambda1: invoke (trace segment)\n  Lambda1->>Lambda2: invoke (subsegment)\n  Lambda2->>DDB: query (subsegment)\n  DDB-->>Lambda2: result\n  Lambda2-->>Lambda1: result\n  Lambda1-->>APIGW: response\n  APIGW-->>Client: response\n  Note over Client,DDB: X-Ray assembles all segments into\\none trace, showing latency per hop',
             },
             {
+              type: 'code',
+              language: 'text',
+              title: 'a CloudWatch Logs Insights query: p95 latency by endpoint, last 24h',
+              code: `fields @timestamp, @message
+| filter @message like /duration_ms/
+| stats pct(duration_ms, 95) as p95_duration by endpoint
+| sort p95_duration desc
+| limit 10`,
+            },
+            {
               type: 'callout',
               kind: 'note',
               text: 'CloudTrail logs are themselves a security-sensitive asset — a common attacker move after gaining access is to disable or tamper with logging to cover tracks. Storing CloudTrail logs in a separate, restricted-access S3 bucket (ideally in a different account) with log file integrity validation enabled is a standard hardening step worth naming.',
@@ -904,6 +1091,33 @@ def handler(event, context):
             {
               type: 'mermaid',
               code: 'flowchart TB\n  Mgmt[Management Account\\nconsolidated billing] --> OU1[OU: Production]\n  Mgmt --> OU2[OU: Non-Production]\n  Mgmt --> OU3[OU: Security/Audit]\n  OU1 --> ProdApp[Account: prod-app]\n  OU1 --> ProdData[Account: prod-data]\n  OU2 --> Dev[Account: dev]\n  OU2 --> Staging[Account: staging]\n  OU3 --> LogArchive[Account: log-archive\\ncentralized CloudTrail]\n  SCP[Service Control Policy:\\nDeny leaving certain Regions,\\nDeny disabling CloudTrail] -.->|applies to| OU1\n  SCP -.-> OU2',
+            },
+            {
+              type: 'code',
+              language: 'json',
+              title: 'a Service Control Policy: deny leaving approved Regions, deny disabling CloudTrail',
+              code: `{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "DenyOutsideApprovedRegions",
+      "Effect": "Deny",
+      "NotAction": ["iam:*", "organizations:*", "route53:*", "support:*"],
+      "Resource": "*",
+      "Condition": {
+        "StringNotEquals": { "aws:RequestedRegion": ["us-east-1", "eu-west-1"] }
+      }
+    },
+    {
+      "Sid": "DenyDisablingCloudTrail",
+      "Effect": "Deny",
+      "Action": ["cloudtrail:StopLogging", "cloudtrail:DeleteTrail"],
+      "Resource": "*"
+    }
+  ]
+}
+// attached at an OU: no account (or its admin) underneath can exceed this,
+// even with a full-access IAM policy of their own`,
             },
             {
               type: 'callout',

@@ -423,6 +423,19 @@ const link = makeElement('a');   // typed as HTMLAnchorElement, not just HTMLEle
 const img = makeElement('img');  // typed as HTMLImageElement`,
             },
             {
+              type: 'mermaid',
+              code: `flowchart TD
+    Call["makeElement('a')"] --> Check1{"Does 'a' match\\noverload 1: (tag: 'a')?"}
+    Check1 -->|Yes| Use1["use overload 1's return type:\\nHTMLAnchorElement"]
+    Check1 -->|No| Check2{"Does 'a' match\\noverload 2: (tag: 'img')?"}
+    Check2 -->|Yes| Use2["use overload 2's return type:\\nHTMLImageElement"]
+    Check2 -->|No| Check3{"Does 'a' match\\noverload 3: (tag: string)?"}
+    Check3 -->|Yes| Use3["use overload 3's return type:\\nHTMLElement"]
+    Use1 -.->|"the broad implementation\\nsignature itself is never\\nvisible to callers"| Impl["actual function body runs"]
+    Use2 -.-> Impl
+    Use3 -.-> Impl`,
+            },
+            {
               type: 'callout',
               kind: 'tip',
               text: 'Reach for overloads only when different input shapes genuinely produce different, more specific return types (as with `makeElement` above) — if one general signature with a union parameter type can express the same contract, prefer that; it is simpler to read and to maintain than several overload declarations that all point at one implementation.',

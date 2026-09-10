@@ -341,12 +341,56 @@ app = graph.compile(checkpointer=memory_saver)`,
               ],
             },
             {
+              type: 'mermaid',
+              code: `flowchart TB
+    subgraph Server["What one MCP server can expose"]
+        Tools["Tools<br/>e.g. create_issue(...)"]
+        Resources["Resources<br/>e.g. a file's contents"]
+        Prompts["Prompts<br/>e.g. a vetted prompt template"]
+    end
+    Tools -.control locus.-> ModelDecides["The MODEL decides<br/>when to call it"]
+    Resources -.control locus.-> HostDecides["The HOST APP decides<br/>when to attach it"]
+    Prompts -.control locus.-> UserDecides["A USER or the host<br/>invokes it directly"]`,
+            },
+            {
+              type: 'code',
+              language: 'python',
+              title: 'the control-locus distinction, made concrete',
+              code: `from mcp.server.fastmcp import FastMCP
+
+mcp = FastMCP("internal-tools")
+
+@mcp.tool()
+def create_ticket(title: str, description: str, priority: str = "normal") -> str:
+    """Create a support ticket. The MODEL decides when this is needed,
+    based on the conversation — exactly like standard function calling."""
+    ticket_id = ticketing_api.create(title, description, priority)
+    return f"Created ticket {ticket_id}"
+
+@mcp.resource("docs://runbook/{name}")
+def get_runbook(name: str) -> str:
+    """A read-only resource. The HOST APPLICATION decides when to
+    attach this — e.g. because the user opened this exact runbook in
+    the UI — not the model choosing to 'call' it mid-conversation."""
+    return read_runbook_file(name)`,
+            },
+            {
               type: 'heading',
               text: 'Transports',
             },
             {
               type: 'p',
               text: '**stdio** (the server runs as a local subprocess, communicating over standard input/output — simplest, used for local tools with no network hop, e.g., a local filesystem or git server) and **Streamable HTTP** (the server runs remotely, communicating over HTTP with support for streaming responses — used for remote/shared/multi-user servers, e.g., a company\'s internal API exposed as an MCP server for many users\' AI assistants to share).',
+            },
+            {
+              type: 'mermaid',
+              code: `flowchart LR
+    subgraph Local["stdio transport"]
+        HostA["Host application"] <-->|"stdin / stdout,<br/>local subprocess, no network hop"| ServerA["MCP Server<br/>e.g. local filesystem or git"]
+    end
+    subgraph Remote["Streamable HTTP transport"]
+        HostB["Host application"] <-->|"HTTP, streaming responses,<br/>a real network hop"| ServerB["MCP Server<br/>e.g. a shared company API"]
+    end`,
             },
             {
               type: 'callout',

@@ -109,6 +109,37 @@ export const generativeAiSection = {
               text: 'A useful test: does the model\'s output already exist before you ran it, or did the model create it? A fraud-detection model scores a transaction that already happened — discriminative. A model asked to write a plausible fraudulent transaction for a red-teaming exercise creates something new — generative. The underlying deep learning machinery (layers, backpropagation, gradient descent) is often identical; what differs is the objective the model was trained toward and what its output represents.',
             },
             {
+              type: 'mermaid',
+              code: `flowchart LR
+    subgraph Discriminative["Discriminative: input already exists"]
+        In1["Email that was already sent"] --> Model1["Model estimates\\nP(label given input)"]
+        Model1 --> Out1["Output: a label\\n'spam' or 'not spam'"]
+    end
+    subgraph Generative["Generative: output did not exist before"]
+        In2["Prompt: 'write a marketing email'"] --> Model2["Model estimates\\nP(next token given prior tokens)"]
+        Model2 --> Out2["Output: brand-new text,\\ntoken by token"]
+    end`,
+            },
+            {
+              type: 'code',
+              language: 'python',
+              title: 'the same underlying idea, stated as two different objectives',
+              code: `# Discriminative: map an existing input to a label/score.
+# Conceptually learns P(label | input).
+def classify_email(email_text) -> str:
+    features = extract_features(email_text)
+    return model.predict(features)   # -> "spam" or "not spam"
+
+# Generative: produce new content, one piece at a time.
+# Conceptually learns P(next_token | previous_tokens), applied repeatedly.
+def generate_email(prompt) -> str:
+    tokens = tokenize(prompt)
+    while not_finished(tokens):
+        next_token = model.predict_next_token(tokens)   # samples from a distribution
+        tokens.append(next_token)                        # nothing here existed before this loop ran
+    return detokenize(tokens)`,
+            },
+            {
               type: 'table',
               headers: ['Discriminative task', 'Generative counterpart'],
               rows: [
@@ -482,6 +513,15 @@ def forward(x, W, A, B):
           ],
           blocks: [
             {
+              type: 'mermaid',
+              code: `flowchart TB
+    Start["Need to fine-tune a model"] --> Q1{"Have you tried PEFT\\nand measured a real\\ncapacity shortfall?"}
+    Q1 -->|"No -- haven't tried yet"| PEFT["Start with PEFT (LoRA / QLoRA)\\ncheap, fast, low forgetting risk"]
+    Q1 -->|"Yes, and it under-performs"| Q2{"Do you have the budget for\\nfull gradients + optimizer state\\nover every parameter?"}
+    Q2 -->|"Yes"| Full["Full fine-tuning\\nhighest ceiling, highest cost"]
+    Q2 -->|"No"| PEFT2["Stay with PEFT, accept the\\nslightly lower ceiling"]`,
+            },
+            {
               type: 'table',
               headers: ['Dimension', 'Full fine-tuning', 'PEFT (LoRA / QLoRA)'],
               rows: [
@@ -495,6 +535,28 @@ def forward(x, W, A, B):
             {
               type: 'p',
               text: 'In practice, the decision is rarely close: PEFT\'s cost advantage is so large that it is the reasonable starting point for nearly any fine-tuning project, with full fine-tuning reserved for cases where a team has already tried PEFT, measured a real capacity shortfall, and has the budget to justify the jump.',
+            },
+            {
+              type: 'code',
+              language: 'python',
+              title: 'putting real numbers on the parameter-count gap, for a 7-billion-parameter model',
+              code: `total_params = 7_000_000_000
+
+# Full fine-tuning: every parameter is trainable, plus Adam optimizer state
+# (roughly 2 extra copies of the parameters, for the running mean and variance).
+full_finetune_trainable = total_params
+full_finetune_optimizer_state = total_params * 2
+print(full_finetune_trainable, full_finetune_optimizer_state)
+# -> 7,000,000,000 trainable params, ~14,000,000,000 extra optimizer-state values
+
+# LoRA: only adapter matrices A (d x r) and B (r x d) are trainable, applied to
+# the attention projection matrices. A typical 7B model has hidden size d=4096,
+# with 4 projection matrices per layer across 32 layers = 128 matrices total.
+d, r, num_matrices = 4096, 8, 128
+lora_trainable = num_matrices * 2 * d * r
+print(lora_trainable)
+# -> 8,388,608 trainable params -- about 0.12% of the full 7,000,000,000,
+#    roughly an 830x reduction, with the frozen base weights left untouched`,
             },
             {
               type: 'callout',
@@ -617,6 +679,23 @@ Think through this step by step before giving your final answer."
           ],
           blocks: [
             {
+              type: 'mermaid',
+              code: `flowchart TB
+    Model["Candidate model / prompt version"] --> Bench["Benchmark suites\\nfast, cheap, reproducible"]
+    Model --> Human["Human evaluation\\nslow, expensive, catches nuance"]
+    Model --> Judge["LLM-as-judge\\nscales well, has its own biases"]
+    Bench --> Decision["Combined picture:\\nis this good enough to ship?"]
+    Human --> Decision
+    Judge --> Decision
+    Human -.->|"periodic spot-check"| Calibrate["Does the judge still agree\\nwith human labelers?"]
+    Judge -.-> Calibrate
+    Calibrate -->|"drifted"| Judge`,
+            },
+            {
+              type: 'p',
+              text: 'A small worked example of why LLM-as-judge needs recalibration: say a team runs 200 prompts through both a human labeler and an LLM judge, each picking which of two candidate responses is better. If the judge and the humans agree on 150 of the 200 (75% agreement) that is a reasonable, usable correlation. If a later prompt-template change or model swap drops that agreement to 110 of 200 (55%, barely better than a coin flip) the judge has silently drifted out of step with actual human preference, and every score it has produced since the drift started is now suspect until the judge prompt or model is fixed and re-checked.',
+            },
+            {
               type: 'table',
               headers: ['Method', 'Strength', 'Key limit'],
               rows: [
@@ -624,6 +703,26 @@ Think through this step by step before giving your final answer."
                 ['Human evaluation', 'Captures nuance benchmarks miss — tone, subtle correctness, helpfulness', 'Slow, expensive, inconsistent across labelers'],
                 ['LLM-as-judge', 'Scales far better than human evaluation; reasonable correlation with human judgment', 'Inherits its own biases — verbosity, position, self-similarity'],
               ],
+            },
+            {
+              type: 'code',
+              language: 'text',
+              title: 'a minimal LLM-as-judge prompt, with the position-bias mitigation built in',
+              code: `You are comparing two responses to the same user prompt.
+Judge ONLY on accuracy, clarity, and how well the response follows
+the user's request. Do NOT prefer a response for being longer.
+
+User prompt: {prompt}
+
+Response A: {response_a}
+Response B: {response_b}
+
+Which response is better: A, B, or Tie? Answer with one word, then a
+one-sentence reason.
+
+# Run this twice per pair, swapping which response is labeled A vs B.
+# If the verdict flips only because of the swap, that is position bias
+# showing up directly, not a genuine quality difference.`,
             },
             {
               type: 'callout',

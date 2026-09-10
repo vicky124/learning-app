@@ -127,6 +127,37 @@ export const ragSection = {
               ],
             },
             {
+              type: 'heading',
+              text: 'Autoregressive generation, visually',
+            },
+            {
+              type: 'mermaid',
+              code: `flowchart LR
+    P["Prompt tokens (fixed context)"] --> T1["Predict token 1"]
+    T1 --> T2["Predict token 2<br/>conditioned on prompt + token 1"]
+    T2 --> T3["Predict token 3<br/>conditioned on prompt + tokens 1-2"]
+    T3 --> Tn["...continues until a stop token<br/>or max_tokens is reached"]`,
+            },
+            {
+              type: 'code',
+              language: 'text',
+              title: 'why chain-of-thought helps a token-by-token predictor',
+              code: `# Direct prompt — the model must land on the right number in one leap,
+# with no intermediate tokens to "show its work" through:
+"A store had 23 apples, sold 8, then received 15 more. How many now?"
+
+# Chain-of-thought prompt — explicitly invites intermediate reasoning
+# tokens before the final answer:
+"A store had 23 apples, sold 8, then received 15 more. How many now?
+Think step by step, then give the final answer as 'Answer: N'."
+
+# Because generation is autoregressive (each token conditions on every
+# token before it, including ones the model itself just produced), the
+# reasoning tokens the model writes ("23 - 8 = 15, 15 + 15 = 30") become
+# part of what the final "Answer: 30" token is conditioned on — the
+# model is effectively reading its own scratch work before committing.`,
+            },
+            {
               type: 'callout',
               kind: 'note',
               text: 'Mitigations for hallucination worth naming (not just "use RAG"): grounding in retrieved sources with citations, lower temperature for factual tasks, explicit "say you don\'t know if unsure" instructions, structured output validation, and a verification/self-critique pass.',
@@ -205,6 +236,39 @@ export const ragSection = {
               ],
             },
             {
+              type: 'code',
+              language: 'python',
+              title: 'fixed-size vs. structure-aware chunking on the same document',
+              code: `text = """Refund Policy
+
+Annual plans are refundable within 30 days of purchase. After 30 days,
+no refunds are issued, but customers can downgrade to a monthly plan
+at any time.
+
+Monthly plans are billed month-to-month and are not eligible for
+refunds under any circumstances."""
+
+# Fixed-size, no awareness of structure — cuts wherever the character
+# count runs out, with no regard for words or paragraphs:
+fixed_chunks = [text[i:i+120] for i in range(0, len(text), 120)]
+# chunk 1 ends:   "...no refunds are issued, but customers can down"
+# chunk 2 starts: "grade to a monthly plan at any time. ..."
+#   -> the word "downgrade" itself is split in half across two chunks;
+#      a query embedding either chunk alone never sees the whole word
+
+# Recursive/semantic splitter — tries paragraph breaks first, and only
+# falls back to sentence/word breaks if a paragraph is still too big:
+from langchain_text_splitters import RecursiveCharacterTextSplitter
+
+splitter = RecursiveCharacterTextSplitter(
+    chunk_size=120, chunk_overlap=20,
+    separators=["\\n\\n", "\\n", ". ", " "],
+)
+semantic_chunks = splitter.split_text(text)
+# chunk 1: the whole "Annual plans..." paragraph, intact
+# chunk 2: the whole "Monthly plans..." paragraph, intact`,
+            },
+            {
               type: 'callout',
               kind: 'tip',
               text: 'There\'s no universal correct chunk size. Start with a size aligned to the document\'s natural structure (a paragraph, a subsection) rather than an arbitrary token count, then evaluate retrieval quality (context precision/recall) empirically on a representative query set.',
@@ -232,12 +296,46 @@ export const ragSection = {
               text: 'Production vector databases instead use **Approximate Nearest Neighbor (ANN)** algorithms — most commonly **HNSW** (Hierarchical Navigable Small World graphs) or **IVF** (Inverted File Index) — which trade a small amount of recall for a massive speed improvement, the right trade for nearly all real applications given how imprecise "relevance" itself already is. The next topic goes inside these two algorithms in detail.',
             },
             {
+              type: 'mermaid',
+              code: `flowchart LR
+    subgraph Exact["Exact k-NN (brute force)"]
+        Q1["Query vector"] --> Scan["Compare against<br/>every single stored vector"]
+        Scan --> SlowResult["Perfectly accurate,<br/>but O(n) — too slow past<br/>roughly a million vectors"]
+    end
+    subgraph Approx["Approximate Nearest Neighbor"]
+        Q2["Query vector"] --> Idx["Search a pre-built index<br/>HNSW graph or IVF clusters"]
+        Idx --> FastResult["Small recall trade-off,<br/>sub-linear query time"]
+    end`,
+            },
+            {
               type: 'heading',
               text: 'Vector database options',
             },
             {
               type: 'p',
               text: 'A frequent "which one" question: **purpose-built** (Pinecone, Weaviate, Qdrant, Milvus — managed or self-hosted, built specifically around vector search with rich filtering), or **vector-search-as-a-feature** bolted onto an existing database (pgvector for Postgres, Elasticsearch/OpenSearch\'s vector engine, Redis, MongoDB Atlas Vector Search).',
+            },
+            {
+              type: 'code',
+              language: 'sql',
+              title: 'bolt-on (pgvector) vs. purpose-built — the same query, two ways',
+              code: `-- pgvector: vector search bolted onto a Postgres table you already have
+SELECT id, content
+FROM documents
+ORDER BY embedding <=> '[0.012, -0.034, 0.101, ...]'::vector  -- cosine distance operator
+LIMIT 5;`,
+            },
+            {
+              type: 'code',
+              language: 'python',
+              title: 'the same idea against a purpose-built vector database',
+              code: `# Pinecone (or Weaviate/Qdrant/Milvus): a dedicated API instead of SQL,
+# with metadata filtering and multi-tenancy built in as first-class features
+results = index.query(
+    vector=query_embedding,
+    top_k=5,
+    filter={"tenant_id": "acme-corp"},   # scoped to one customer's documents only
+)`,
             },
             {
               type: 'callout',
@@ -437,8 +535,47 @@ export const ragSection = {
               ],
             },
             {
+              type: 'mermaid',
+              code: `flowchart LR
+    Question --> Retrieval["Retrieval stage"]
+    Retrieval -->|"retrieved chunks vs.<br/>ground-truth relevant chunks"| RMetrics["Context Precision<br/>Context Recall<br/>MRR / NDCG"]
+    Retrieval --> Context["Assembled context"]
+    Context --> Generation["Generation stage"]
+    Generation -->|"answer vs. context"| GMetrics["Faithfulness / Groundedness"]
+    Generation -->|"answer vs. question"| GMetrics2["Answer Relevance"]
+    RMetrics --> Judge["LLM-as-judge scores each<br/>metric against a rubric"]
+    GMetrics --> Judge
+    GMetrics2 --> Judge`,
+            },
+            {
               type: 'p',
               text: '**LLM-as-judge** is increasingly the standard way to score faithfulness/relevance at scale — prompt a strong LLM to evaluate a (question, context, answer) triple against a rubric, since these qualities are semantic and don\'t reduce to exact-match string comparison.',
+            },
+            {
+              type: 'code',
+              language: 'python',
+              title: 'a runnable evaluation harness with RAGAS',
+              code: `from ragas import evaluate
+from ragas.metrics import faithfulness, answer_relevancy, context_precision, context_recall
+from datasets import Dataset
+
+# One row per test question: what was asked, what your RAG pipeline
+# actually retrieved and answered, and (for recall) the ideal answer
+eval_set = Dataset.from_dict({
+    "question": ["What's our refund policy for annual plans?"],
+    "contexts": [["Annual plans are refundable within 30 days of purchase..."]],
+    "answer": ["Annual plans can be refunded within 30 days of purchase."],
+    "ground_truth": ["Annual plans are refundable within 30 days of purchase."],
+})
+
+results = evaluate(
+    eval_set,
+    metrics=[faithfulness, answer_relevancy, context_precision, context_recall],
+)
+# results -> {'faithfulness': 0.95, 'answer_relevancy': 0.91,
+#             'context_precision': 0.87, 'context_recall': 0.93}
+# Re-run this same eval_set after every prompt/retrieval change —
+# a drop in any one metric tells you which pipeline stage regressed.`,
             },
             {
               type: 'callout',
@@ -522,6 +659,18 @@ export const ragSection = {
                 ['**RAG**', 'Injecting current/proprietary/large knowledge bases; needs citeable, updatable facts; reducing hallucination on knowledge-grounded questions', 'Doesn\'t change the model\'s underlying behavior/style/reasoning ability; adds retrieval infra and latency'],
                 ['**Fine-tuning**', 'Teaching a consistent output format/style/tone at scale; specializing behavior on a narrow task; reducing prompt length (baking instructions into weights)', 'Expensive and slow to iterate on; doesn\'t reliably inject *new factual knowledge* the way people assume; needs meaningful, well-curated training data'],
               ],
+            },
+            {
+              type: 'mermaid',
+              code: `flowchart TD
+    Start["Does the model need to know<br/>something it wasn't trained on?"] -->|"No — just needs<br/>guidance or formatting"| Prompt["Try prompt engineering first<br/>fast, no infra, easy to update"]
+    Start -->|"Yes — new, current,<br/>or proprietary facts"| RAGCheck["Is the knowledge large,<br/>changing, or in need of citations?"]
+    RAGCheck -->|Yes| RAGBox["Use RAG<br/>retrieve the relevant facts at query time"]
+    RAGCheck -->|"No — small and static"| Prompt
+    Prompt --> Sufficient{"Good enough?"}
+    RAGBox --> Sufficient
+    Sufficient -->|Yes| Done["Ship it"]
+    Sufficient -->|"No — needs consistent<br/>format/style/tone at scale"| FineTune["Consider fine-tuning<br/>only after prompting + RAG fall short"]`,
             },
             {
               type: 'callout',
