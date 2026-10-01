@@ -6,7 +6,7 @@ behind every concept and every subject it covers. Read this alongside the runnin
 
 The app started as a single-subject React tutorial and grew into a multi-subject learning /
 interview-prep hub: React still gets hand-built, live interactive lessons; every other subject
-(Python, JavaScript, TypeScript, Git, LLD, HLD, System Design Patterns, Authentication &
+(Python, JavaScript, TypeScript, Angular, Git, LLD, HLD, System Design Patterns, Authentication &
 Authorization, LangChain, LangGraph, RAG) is a content-driven written guide plus a dedicated
 Interview Q&A section, rendered by one shared, generic page component. Both models share the
 same sidebar, the same lesson-page shell, and the same navigation data structure — see §3.
@@ -554,6 +554,7 @@ notes. Counts are guide-topics / Q&A pairs / Mermaid diagrams.
 | Python | `src/content/python.js` | 22 | 20 | 18 | What Python is, variables/objects, core data structures, control flow, functions & LEGB scope, comprehensions, the mutable-default-argument trap, decorators, context managers, generators/iterators, type hints & dataclasses, exceptions, modules, the GIL, asyncio, metaclasses & descriptors, memory management/GC, testing with pytest, FastAPI validation & DI, Flask, a paginated-API case study |
 | JavaScript | `src/content/javascript.js` | 18 | 12 | 15 | Values/types, `var`/`let`/`const` & scoping, operators/coercion, functions, arrays/objects, closures, `this` binding, prototypal inheritance, destructuring/spread, ES modules, the event loop precisely, promises & async/await, generators/iterators, the Proxy/Reflect API, memory leaks, debounce/throttle & Web APIs, performance patterns |
 | TypeScript | `src/content/typescript.js` | 17 | 12 | 15 | What TypeScript is, basic types, interfaces vs type aliases, structural typing, generics, union/intersection/discriminated unions, utility types, `unknown` vs `any`, conditional types & `infer`, mapped types, template literal types, `satisfies`, decorators, `tsconfig.json`'s consequential options |
+| Angular | `src/content/angular.js` | 24 | 21 | 16 | What Angular is (vs. React and AngularJS), the CLI & project structure, standalone components, template binding, `@if`/`@for`/`@switch` control flow, `input()`/`output()`/`model()`, signals (`computed`, `effect`, `linkedSignal`), hierarchical DI & `inject()`, lifecycle hooks & `afterNextRender`, attribute/structural/host directives, pipes, routing with lazy loading & functional guards, template-driven vs typed reactive forms, `HttpClient`, interceptors & `httpResource`, RxJS flattening operators, Zone.js vs OnPush vs zoneless change detection, content projection & `ng-template`, signal services vs NgRx, `@defer` & performance, SSR & incremental hydration, testing with TestBed, architecture at scale, a React→Angular concept map, a product-catalog case study |
 | Git | `src/content/git.js` | 13 | 13 | 12 | What version control is, the core add/commit/status workflow, basic branching, how Git models history (three trees), `.gitignore`/stashing/tags, merging vs rebasing, undoing things, remote collaboration, Git internals (objects/refs/packfiles), interactive rebase & history rewriting, hooks, submodules vs monorepos, debugging with bisect/blame |
 | LLD | `src/content/lld.js` | 17 | 30 | 34 (28 classDiagrams) | What LLD is, OOP fundamentals, UML notation literacy, interfaces vs abstract classes, SOLID (each principle with a violation/fix classDiagram), the LLD interview process, creational/structural/behavioral design patterns (each with a classDiagram), concurrency patterns, anti-patterns, five full case studies (Parking Lot, Rate Limiter, Elevator, Splitwise, BookMyShow) each with a classDiagram |
 | HLD | `src/content/hld.js` | 19 | 30 | 18 | HLD vs LLD, the client-server model, single-server starting point, vertical vs horizontal scaling, what HLD interviews test, the repeatable framework, interview time-budgeting, estimation, core building blocks, CDNs & edge caching, five case studies (URL Shortener, News Feed, Chat, Ride-Sharing Dispatch, Video Streaming), consistency/availability tradeoffs, a distributed rate limiter, failure modes & observability |
@@ -569,7 +570,7 @@ notes. Counts are guide-topics / Q&A pairs / Mermaid diagrams.
 | Java | `src/content/java.js` | 24 | 24 | 14 | WORA & the JVM/bytecode model, primitives/autoboxing, OOP's four pillars, interfaces vs abstract classes, `equals`/`hashCode`/`toString`, generics & type erasure, checked vs unchecked exceptions, the Collections Framework, lambdas & the Streams API, `Optional`, records & sealed classes, JVM memory & garbage collection, class loading, the Java Memory Model & `volatile`, threads & `java.util.concurrent`, deadlock, JUnit 5 & Mockito, Maven vs Gradle |
 | DSA | `src/content/dsa.js` | 28 | 31 | 25 | Algorithmic complexity & Big-O/Θ/Ω precisely, space-time tradeoffs, arrays vs linked lists, stacks/queues, hashing, two-pointer/sliding-window, recursion, binary trees & traversal, BSTs & self-balancing trees, heaps, tries, graph representations, BFS/DFS, Dijkstra's, MST/Union-Find, topological sort, merge/quicksort, counting/radix sort, binary search variants, dynamic programming (fundamentals + framework), greedy algorithms, backtracking, bit manipulation, an interview-approach capstone |
 
-**Totals: 18 subjects, 36 groups, 378 topics, 381 Q&A pairs, 309 Mermaid diagrams — every one
+**Totals: 19 subjects, 38 groups, 403 topics, 402 Q&A pairs, 355 Mermaid diagrams — every one
 parsed programmatically, see §8.**
 
 Most of these lessons include a live-rendered **Mermaid diagram** — architecture flowcharts,
@@ -653,8 +654,8 @@ This project was verified, not just written:
   deliberately read a ref during render *because that's the concept being taught*;
   `DataFetching.jsx` calls `setState` inside an effect because that's the canonical
   data-fetching-in-an-effect pattern).
-- A programmatic check that every group id is unique across all 18 sections and every
-  `groupId/topicId` pair is unique (378 topics, zero collisions) — required for the flat
+- A programmatic check that every group id is unique across all 19 sections and every
+  `groupId/topicId` pair is unique (403 topics, zero collisions) — required for the flat
   `/:groupId/:topicId` routing scheme to work with no subject segment in the URL.
 - Manual, in-browser testing of the trickiest interactive demos (Error Boundaries actually
   catching and resetting, Portals actually escaping a clipped container, nested routing actually
@@ -672,7 +673,7 @@ This project was verified, not just written:
   AI's fine-tuning/RLHF/LoRA topics go deep on the mechanics that comparison only names). All were
   then spot-checked in-browser across subjects for rendering correctness (tables, code blocks,
   diagrams, Q&A accordions) and checked programmatically for structural/id correctness.
-- **Every one of the app's 309 Mermaid diagrams is parsed programmatically**, not just eyeballed
+- **Every one of the app's 355 Mermaid diagrams is parsed programmatically**, not just eyeballed
   — a small Node script imports the `mermaid` package directly and calls `mermaid.parse()` on
   every diagram string extracted from every `src/content/*.js` file, since a diagram that visually
   renders fine 99% of the time can still contain a genuine grammar error that only a real parse

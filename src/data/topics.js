@@ -25,6 +25,7 @@ import { reactQA } from '../content/react-qa.js'
 import { pythonSection } from '../content/python.js'
 import { javascriptSection } from '../content/javascript.js'
 import { typescriptSection } from '../content/typescript.js'
+import { angularSection } from '../content/angular.js'
 import { gitSection } from '../content/git.js'
 import { lldSection } from '../content/lld.js'
 import { hldSection } from '../content/hld.js'
@@ -106,6 +107,7 @@ export const menuSections = [
   pythonSection,
   javascriptSection,
   typescriptSection,
+  angularSection,
   gitSection,
   lldSection,
   hldSection,
