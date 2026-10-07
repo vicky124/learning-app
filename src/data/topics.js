@@ -25,6 +25,9 @@ import { reactQA } from '../content/react-qa.js'
 import { pythonSection } from '../content/python.js'
 import { javascriptSection } from '../content/javascript.js'
 import { typescriptSection } from '../content/typescript.js'
+import { vueSection } from '../content/vue.js'
+import { nuxtSection } from '../content/nuxt.js'
+import { nodeExpressSection } from '../content/node-express.js'
 import { gitSection } from '../content/git.js'
 import { lldSection } from '../content/lld.js'
 import { hldSection } from '../content/hld.js'
@@ -106,6 +109,9 @@ export const menuSections = [
   pythonSection,
   javascriptSection,
   typescriptSection,
+  vueSection,
+  nuxtSection,
+  nodeExpressSection,
   gitSection,
   lldSection,
   hldSection,
