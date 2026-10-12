@@ -30,6 +30,7 @@ import Portals from './pages/advanced/Portals.jsx'
 import ForwardRefImperative from './pages/advanced/ForwardRefImperative.jsx'
 import CodeSplitting from './pages/advanced/CodeSplitting.jsx'
 import DataFetching from './pages/advanced/DataFetching.jsx'
+import FetchListSearch from './pages/advanced/FetchListSearch.jsx'
 import RoutingDeepDive from './pages/advanced/RoutingDeepDive.jsx'
 import Testing from './pages/advanced/Testing.jsx'
 import Animation from './pages/advanced/Animation.jsx'
@@ -82,6 +83,7 @@ export default function App() {
             <Route path="/react-guide/forward-ref" element={<ForwardRefImperative />} />
             <Route path="/react-guide/code-splitting" element={<CodeSplitting />} />
             <Route path="/react-guide/data-fetching" element={<DataFetching />} />
+            <Route path="/react-guide/fetch-list-search" element={<FetchListSearch />} />
             <Route path="/react-guide/routing/*" element={<RoutingDeepDive />} />
             <Route path="/react-guide/testing" element={<Testing />} />
             <Route path="/react-guide/animation" element={<Animation />} />

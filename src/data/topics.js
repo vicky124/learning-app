@@ -82,6 +82,7 @@ export const menuSections = [
           { id: 'code-splitting', title: 'Lazy Loading & Suspense' },
           { id: 'suspense-boundaries', title: 'Suspense Boundary Placement Patterns' },
           { id: 'data-fetching', title: 'Data Fetching Patterns' },
+          { id: 'fetch-list-search', title: 'Fetch a List & Search It' },
           { id: 'routing', title: 'Routing Deep Dive' },
           { id: 'animation', title: 'Animating with CSS Transitions & the View Transitions API' },
           { id: 'testing', title: 'Testing Components with React Testing Library' },
