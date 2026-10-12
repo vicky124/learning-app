@@ -26,6 +26,9 @@ import { pythonSection } from '../content/python.js'
 import { javascriptSection } from '../content/javascript.js'
 import { typescriptSection } from '../content/typescript.js'
 import { angularSection } from '../content/angular.js'
+import { vueSection } from '../content/vue.js'
+import { nuxtSection } from '../content/nuxt.js'
+import { nodeExpressSection } from '../content/node-express.js'
 import { gitSection } from '../content/git.js'
 import { lldSection } from '../content/lld.js'
 import { hldSection } from '../content/hld.js'
@@ -79,6 +82,7 @@ export const menuSections = [
           { id: 'code-splitting', title: 'Lazy Loading & Suspense' },
           { id: 'suspense-boundaries', title: 'Suspense Boundary Placement Patterns' },
           { id: 'data-fetching', title: 'Data Fetching Patterns' },
+          { id: 'fetch-list-search', title: 'Fetch a List & Search It' },
           { id: 'routing', title: 'Routing Deep Dive' },
           { id: 'animation', title: 'Animating with CSS Transitions & the View Transitions API' },
           { id: 'testing', title: 'Testing Components with React Testing Library' },
@@ -108,6 +112,9 @@ export const menuSections = [
   javascriptSection,
   typescriptSection,
   angularSection,
+  vueSection,
+  nuxtSection,
+  nodeExpressSection,
   gitSection,
   lldSection,
   hldSection,
