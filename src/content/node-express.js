@@ -93,6 +93,32 @@ console.log('async read finished, length =', data2.length);`,
               kind: 'note',
               text: '"Node is single-threaded" is only half true. **Your JavaScript** runs on one thread, but the process also has libuv\'s thread pool, V8 helper threads (garbage collection), and you can start extra threads yourself with `worker_threads`. The point is that you do not write locks and shared-memory code for ordinary request handling.',
             },
+            {
+              type: 'heading',
+              text: 'How V8 makes JavaScript fast (and how you accidentally make it slow)',
+            },
+            {
+              type: 'p',
+              text: 'V8 does not simply interpret your code. It starts with a fast bytecode interpreter (Ignition), collects type feedback while the code runs, and recompiles **hot** functions into optimized machine code (with its optimizing compilers, Maglev and TurboFan). The optimized code is built on *assumptions* — "this argument is always an object with fields `id` and `name` in that order". If a later call breaks the assumption, V8 **deoptimizes** and falls back to slower code. That is why consistent object shapes (create objects with the same properties in the same order, avoid `delete obj.prop` on hot objects) and monomorphic functions (always called with the same kinds of argument) measurably help hot paths such as serializers and parsers.',
+            },
+            {
+              type: 'table',
+              headers: ['Kind of work', 'Who actually does it', 'Blocks your JavaScript?'],
+              rows: [
+                ['TCP/HTTP sockets, pipes', 'OS readiness APIs (epoll, kqueue, IOCP) via libuv', 'No'],
+                ['Timers', 'libuv timer heap inside the event loop', 'No'],
+                ['File system (`fs.readFile`, `fs.stat`)', 'libuv thread pool', 'No, but competes for pool threads'],
+                ['`dns.lookup` (used by `http.get`, `fetch`)', 'libuv thread pool (calls `getaddrinfo`)', 'No, but competes for pool threads'],
+                ['`crypto.pbkdf2`, `scrypt`, `randomBytes` (async), `zlib`', 'libuv thread pool', 'No, but competes for pool threads'],
+                ['`JSON.parse`, loops, regex, template rendering', 'The main thread', '**Yes**'],
+                ['Any `*Sync` API', 'The main thread', '**Yes**'],
+              ],
+            },
+            {
+              type: 'callout',
+              kind: 'tip',
+              text: 'Run an **LTS** release in production. As of late 2026, Node **24** is the Active LTS line, Node **22** is in maintenance, Node **20** has reached end of life, and Node **26** is the Current line on its way to LTS. Check [the official release schedule](https://nodejs.org/en/about/previous-releases) before upgrading — and note that Node announced a move to **one major release per year** starting with Node 27.',
+            },
           ],
         },
         {
@@ -196,6 +222,150 @@ while (Date.now() - start < 3000) {
               kind: 'pitfall',
               text: 'Timers are **minimum** delays, not promises. `setTimeout(fn, 100)` means "run `fn` no sooner than 100 ms from now, when the loop gets to it". A busy loop makes every timer, request, and callback late.',
             },
+            {
+              type: 'heading',
+              text: 'The poll phase: where Node actually sleeps',
+            },
+            {
+              type: 'p',
+              text: 'The poll phase is the heart of the loop. libuv computes how long it may block — "until the nearest timer is due", or zero if `setImmediate` callbacks are waiting — and then asks the OS (`epoll_wait` on Linux, `kqueue` on macOS, IOCP on Windows) to sleep until a socket becomes readable or writable. That single system call watching thousands of file descriptors is why an idle Node server uses almost no CPU, and why one process can hold tens of thousands of mostly idle keep-alive or WebSocket connections. When the OS wakes it up, the loop runs the ready I/O callbacks, then moves on to the check phase.',
+            },
+            {
+              type: 'table',
+              headers: ['API', 'Queue / phase', 'Typical use'],
+              rows: [
+                ['`process.nextTick(fn)`', 'nextTick queue (drained first, between every callback)', 'Library internals: emit after the caller attached listeners'],
+                ['`queueMicrotask(fn)`, `.then`, `await`', 'Promise microtask queue', 'Ordinary async continuations; the web-standard choice'],
+                ['`setTimeout` / `setInterval`', 'Timers phase', 'Delays, polling, timeouts'],
+                ['`setImmediate(fn)`', 'Check phase (right after poll)', 'Yielding to I/O between chunks of heavy work'],
+                ['I/O callbacks (`fs`, sockets)', 'Poll phase', 'Results of async operations'],
+                ['`socket.on(\'close\')`', 'Close callbacks phase', 'Cleanup after abrupt closes'],
+              ],
+            },
+            {
+              type: 'code',
+              language: 'js',
+              title: 'yielding: process a big array without freezing the server',
+              code: `import { setImmediate as yieldToLoop } from 'node:timers/promises';
+
+// BAD: 5 million iterations in one go = the server is deaf for the whole time
+function scoreAllSync(rows) {
+  return rows.map(expensiveScore);
+}
+
+// BETTER: work in slices and let I/O run between them.
+// Total time is slightly longer, but p99 latency for other requests stays low.
+export async function scoreAll(rows, sliceSize = 10_000) {
+  const out = new Array(rows.length);
+  for (let i = 0; i < rows.length; i += sliceSize) {
+    const end = Math.min(i + sliceSize, rows.length);
+    for (let j = i; j < end; j++) out[j] = expensiveScore(rows[j]);
+    await yieldToLoop();          // resume in the check phase, after pending I/O callbacks ran
+  }
+  return out;
+}
+// If the work is truly CPU-bound and large, a worker thread is the real fix.`,
+            },
+            {
+              type: 'callout',
+              kind: 'note',
+              text: 'The "predict the output" example assumes a **CommonJS** script. In an **ES module**, top-level code itself runs as part of an async module evaluation, so a promise reaction queued at the top level can run **before** a `nextTick` queued just after it. Do not write code whose correctness depends on the relative order of `nextTick` and promise callbacks.',
+            },
+            {
+              type: 'callout',
+              kind: 'warning',
+              text: 'Microtasks are not "background". `await` on an already-resolved promise in a tight loop never yields to I/O: `for (...) await Promise.resolve()` keeps draining microtasks and still starves the event loop. Only a macrotask boundary (`setImmediate`, a timer, real I/O) lets the poll phase run.',
+            },
+          ],
+        },
+        {
+          id: 'libuv-thread-pool',
+          title: 'Inside libuv: the Thread Pool and Its Hidden Bottlenecks',
+          summary:
+            'Not all "async" work in Node is equal: network I/O is truly non-blocking at the OS level, but file-system calls, DNS lookups, and some crypto and compression run on libuv\'s small thread pool — and when that pool is saturated, unrelated requests mysteriously slow down.',
+          keyPoints: [
+            'libuv\'s thread pool has **4 threads by default** (`UV_THREADPOOL_SIZE`, max 1024) and is shared by `fs`, `dns.lookup`, async `crypto` (pbkdf2, scrypt, randomBytes, generateKeyPair), and `zlib`.',
+            'Network sockets do **not** use the pool — they use the OS readiness APIs (epoll, kqueue, IOCP), which is why Node scales to many connections.',
+            'Because `http.get` and `fetch` resolve hostnames with `dns.lookup` (`getaddrinfo`), a slow DNS server or many concurrent password hashes can delay **file reads and outbound HTTP calls** that share the pool.',
+            'Raise `UV_THREADPOOL_SIZE` only when you have measured pool saturation; set it before the pool starts (environment variable at process start), and remember threads cost memory and context switches.',
+          ],
+          blocks: [
+            {
+              type: 'p',
+              text: 'Operating systems offer excellent asynchronous APIs for sockets, but historically poor or inconsistent ones for regular files, and `getaddrinfo` (hostname resolution through `/etc/hosts`, `nsswitch`, and DNS) is a *blocking* C function. libuv hides this difference: it runs those blocking calls on a small pool of worker threads and posts the result back to the event loop. From JavaScript both look like ordinary callbacks or promises — the difference only shows up under load.',
+            },
+            {
+              type: 'mermaid',
+              code: `flowchart LR
+    JS["Main thread<br/>your JavaScript"] --> Loop["libuv event loop"]
+    Loop -->|"sockets, pipes"| Kernel["OS readiness APIs<br/>epoll, kqueue, IOCP"]
+    Loop -->|"fs, dns.lookup,<br/>crypto, zlib"| Queue["Thread pool work queue"]
+    Queue --> T1["thread 1"]
+    Queue --> T2["thread 2"]
+    Queue --> T3["thread 3"]
+    Queue --> T4["thread 4"]
+    T1 -->|"done, post result"| Loop
+    Kernel -->|"socket ready"| Loop`,
+            },
+            {
+              type: 'heading',
+              text: 'Seeing the pool saturate',
+            },
+            {
+              type: 'code',
+              language: 'js',
+              title: 'six hashes on a 4-thread pool finish in two waves',
+              code: `import { pbkdf2 } from 'node:crypto';
+
+const start = performance.now();
+for (let i = 1; i <= 6; i++) {
+  pbkdf2('secret', 'salt', 300_000, 64, 'sha512', () => {
+    console.log('hash', i, 'done at', Math.round(performance.now() - start), 'ms');
+  });
+}
+// Typical output with the default pool of 4:
+//   hash 1..4 done at ~250 ms   (first wave: 4 threads busy)
+//   hash 5..6 done at ~500 ms   (had to wait for a free thread)
+//
+// Run again with:  UV_THREADPOOL_SIZE=8 node hashes.js
+// and all six finish in one wave (if you have the cores).`,
+            },
+            {
+              type: 'p',
+              text: 'Now imagine a login endpoint hashing passwords with bcrypt or scrypt during a traffic spike. All four pool threads are busy hashing, so the `fs.readFile` for a template, the `dns.lookup` behind an outbound `fetch`, and the gzip of a response all queue behind them. The symptom is confusing: CPU is not at 100 percent on the main thread, the event loop delay looks fine, yet *unrelated* endpoints get slower. That is pool starvation.',
+            },
+            {
+              type: 'table',
+              headers: ['Symptom', 'Likely pool culprit', 'Mitigation'],
+              rows: [
+                ['Outbound HTTP calls slow only during login spikes', 'Password hashing saturating the pool, starving `dns.lookup`', 'Cap concurrent hashes, larger pool, or hash in a dedicated worker/service'],
+                ['First request to each host is slow, then fine', 'Slow `getaddrinfo` / DNS', 'Keep-alive agents (reuse connections), a caching resolver, or `dns.resolve*` (c-ares, no pool)'],
+                ['Static file serving stalls under load', 'Many concurrent `fs` ops on slow disks or network storage', 'CDN for static files, streaming, larger pool'],
+                ['Compression makes p99 jump', 'Synchronous or many parallel `zlib` jobs', 'Let the reverse proxy or CDN compress'],
+              ],
+            },
+            {
+              type: 'code',
+              language: 'bash',
+              title: 'sizing the pool (set it at process start)',
+              code: `# The pool is created lazily on first use, but setting the variable from JavaScript
+# after any module already used it has no effect. Set it in the environment:
+UV_THREADPOOL_SIZE=16 node src/server.js
+
+# Dockerfile / Kubernetes:   ENV UV_THREADPOOL_SIZE=16
+# A reasonable starting point is the number of cores available to the container,
+# raised only if measurements show work waiting in the pool.`,
+            },
+            {
+              type: 'callout',
+              kind: 'pitfall',
+              text: '`dns.lookup()` and `dns.resolve4()` are different. `lookup` uses the OS resolver on the thread pool and honours `/etc/hosts`; the `resolve*` family talks DNS directly via the c-ares library without the pool, but ignores `/etc/hosts`. HTTP clients use `lookup` by default — which is usually what you want, but it is why DNS latency can show up as pool pressure.',
+            },
+            {
+              type: 'callout',
+              kind: 'tip',
+              text: 'The cheapest way to avoid repeated DNS lookups and TLS handshakes for outbound calls is **connection reuse**: a keep-alive agent (the default in modern Node `http`) or a long-lived undici `Agent`/`Pool` for `fetch`. A warm connection skips DNS, TCP, and TLS entirely.',
+            },
           ],
         },
         {
@@ -206,7 +376,7 @@ while (Date.now() - start < 3000) {
           keyPoints: [
             '**CommonJS (CJS)** loads synchronously with `require()` and exports with `module.exports`; **ES modules (ESM)** use `import`/`export`, load asynchronously, and support top-level `await`.',
             'A file is ESM if it ends in `.mjs`, or ends in `.js` and the nearest `package.json` has `"type": "module"`; it is CJS if it ends in `.cjs` or the type is `"commonjs"` (the default).',
-            'In ESM there is no `__dirname`, `__filename`, or `require` — use `import.meta.dirname` / `import.meta.filename` (Node 20.11+) or `import.meta.url`.',
+            'In ESM there is no `__dirname`, `__filename`, or `require` — use `import.meta.dirname` / `import.meta.filename` (Node 20.11+) or `import.meta.url`; on current LTS lines CommonJS can also `require()` synchronous ES modules.',
             'ESM imports of relative files **must include the extension** (`./utils.js`), and `import` statements are hoisted and static — you cannot put them inside an `if`; use `await import()` for dynamic loading.',
           ],
           blocks: [
@@ -286,7 +456,53 @@ const config = JSON.parse(await (await import('node:fs/promises')).readFile(file
             {
               type: 'callout',
               kind: 'pitfall',
-              text: 'Mixing the two is the classic source of `ERR_REQUIRE_ESM` and "Cannot use import statement outside a module" errors. `import` of a CommonJS package works (you get its `module.exports` as the default import). `require()` of an ES module was blocked for years; recent Node versions (22.12+, and 20.19+) allow it for modules that do not use top-level `await`, but do not rely on it in libraries that must support older versions.',
+              text: 'Mixing the two is the classic source of `ERR_REQUIRE_ESM` and "Cannot use import statement outside a module" errors. `import` of a CommonJS package works (you get its `module.exports` as the default import). `require()` of an ES module was blocked for years; it has been enabled by default since Node 22.12 (and was backported to 20.19), and works for any ES module graph that does **not** use top-level `await` — otherwise it throws `ERR_REQUIRE_ASYNC_MODULE`. On every supported LTS line today, `require(esm)` is available, which removed most of the pain of the CJS-to-ESM transition.',
+            },
+            {
+              type: 'heading',
+              text: 'Package entry points: the exports field and subpath imports',
+            },
+            {
+              type: 'p',
+              text: 'The `"exports"` field in `package.json` is the modern, explicit way to declare what a package exposes. Once present, it is **encapsulating**: consumers can import only the paths you list (deep imports like `pkg/src/internal.js` fail with `ERR_PACKAGE_PATH_NOT_EXPORTED`). *Conditions* let one package serve different files to `import` and `require`, or to Node and browsers. Inside your own app, the `"imports"` field gives you **subpath imports** — `#`-prefixed aliases that replace fragile `../../../` paths and work natively with no bundler or tsconfig `paths`.',
+            },
+            {
+              type: 'code',
+              language: 'json',
+              title: 'package.json: exports for a library, imports for an app',
+              code: `{
+  "name": "@acme/money",
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs"
+    },
+    "./format": "./dist/format.js",
+    "./package.json": "./package.json"
+  },
+  "imports": {
+    "#config": "./src/config.js",
+    "#db/*": "./src/db/*.js"
+  }
+}`,
+            },
+            {
+              type: 'code',
+              language: 'js',
+              title: 'using subpath imports inside the app',
+              code: `// instead of: import { config } from '../../../config.js';
+import { config } from '#config';
+import { pool } from '#db/pool';
+
+// Need a built-in module conditionally, even from CommonJS, without a static import?
+const { createHash } = process.getBuiltinModule('node:crypto');`,
+            },
+            {
+              type: 'callout',
+              kind: 'warning',
+              text: 'Shipping a package as both ESM and CJS risks the **dual package hazard**: if one part of an app `import`s it and another `require`s it, two separate copies load, so `instanceof` checks fail and module-level state (caches, singletons) is duplicated. Now that `require(esm)` works on supported Node versions, many library authors ship **ESM only**.',
             },
             {
               type: 'callout',
@@ -320,23 +536,27 @@ const config = JSON.parse(await (await import('node:fs/promises')).readFile(file
   "version": "1.0.0",
   "private": true,
   "type": "module",
-  "engines": { "node": ">=20.11" },
+  "engines": { "node": ">=22.12" },
   "scripts": {
     "start": "node src/server.js",
-    "dev": "node --watch --env-file=.env src/server.js",
+    "dev": "node --watch --env-file-if-exists=.env src/server.js",
     "test": "node --test",
     "lint": "eslint ."
   },
   "dependencies": {
-    "express": "^5.1.0",
-    "zod": "^3.23.8",
-    "pino": "^9.4.0"
+    "express": "^5.2.1",
+    "zod": "^4.1.0",
+    "pino": "^10.0.0"
   },
   "devDependencies": {
-    "supertest": "^7.0.0",
-    "eslint": "^9.12.0"
+    "supertest": "^7.1.0",
+    "eslint": "^10.0.0"
   }
 }`,
+            },
+            {
+              type: 'p',
+              text: 'Two small modern touches above: `node --run dev` (Node 22+) runs a script **without starting npm**, which is noticeably faster and skips the npm lifecycle (`predev`/`postdev` hooks are not run); and `--env-file-if-exists` loads `.env` when present without failing in CI where the variables come from the environment instead.',
             },
             {
               type: 'table',
@@ -385,6 +605,116 @@ npm ls express                    # why is express installed, and which version?
               type: 'callout',
               kind: 'warning',
               text: 'Install scripts run arbitrary code on your machine. Prefer well-maintained packages, check weekly download counts and repository activity before adding one, and consider `npm ci --ignore-scripts` in build pipelines that do not need install scripts.',
+            },
+            {
+              type: 'heading',
+              text: 'Supply-chain security: what changed after 2025',
+            },
+            {
+              type: 'p',
+              text: 'In 2025 several very popular npm packages were hijacked through phished maintainer accounts, and a self-propagating worm spread through install scripts that stole tokens and republished infected versions. The lesson for application teams: a caret range plus `npm install` on a developer laptop can pull a malicious release within minutes of it being published. Defences are mostly about **slowing down and pinning**, not about scanning harder.',
+            },
+            {
+              type: 'list',
+              items: [
+                '**Install from the lockfile** everywhere except when you intentionally update (`npm ci` in CI and Docker), and review lockfile diffs in pull requests like code.',
+                '**Delay adoption** of brand-new releases — Renovate and Dependabot can wait a few days before proposing an update, and some package managers support a minimum release age setting.',
+                '**Disable install scripts by default** (`ignore-scripts=true` in `.npmrc`, or a package manager that requires an explicit allow-list of packages allowed to run them).',
+                '**Verify provenance**: `npm audit signatures` checks registry signatures and provenance attestations; publish your own packages from CI with trusted publishing instead of long-lived tokens.',
+                '**Keep tokens out of reach**: CI tokens scoped and short-lived, no npm or cloud credentials in environment variables of build steps that run third-party code.',
+              ],
+            },
+          ],
+        },
+        {
+          id: 'typescript-node',
+          title: 'TypeScript on Node: Type Stripping, tsx, and tsc',
+          summary:
+            'Modern Node runs `.ts` files directly by stripping type annotations — no build step for development or simple services — but it only handles *erasable* syntax and never type-checks, so `tsc --noEmit` stays in your pipeline.',
+          keyPoints: [
+            '**Type stripping** is enabled by default since Node 23.6 / 22.18 and is marked stable in current LTS releases: `node src/server.ts` simply works for erasable TypeScript.',
+            'Node **replaces types with whitespace** and runs the result; it does **not** type-check, does **not** read `tsconfig.json`, and does not support syntax that needs code generation: `enum`, runtime `namespace`, parameter properties, legacy decorators.',
+            'Relative imports must use the real extension (`./db.ts`), and type-only imports must use `import type` — enable `erasableSyntaxOnly`, `verbatimModuleSyntax`, and `allowImportingTsExtensions` in `tsconfig.json` so the editor enforces the same rules.',
+            'Type-check separately with `tsc --noEmit` in CI; use **tsx** (esbuild-based) or a bundler when you need full TypeScript syntax, path aliases, or decorators (for example NestJS).',
+          ],
+          blocks: [
+            {
+              type: 'p',
+              text: 'For years TypeScript on the server meant a compile step (`tsc` to `dist/`) or a loader such as `ts-node`. Node now does the simplest possible thing: it parses the file, blanks out the type annotations (keeping line and column positions, so stack traces stay accurate without source maps), and executes the JavaScript that remains. Because nothing is *generated*, only TypeScript features that are pure annotations can be supported — which is exactly the direction TypeScript itself has been moving with the `erasableSyntaxOnly` option.',
+            },
+            {
+              type: 'code',
+              language: 'ts',
+              title: 'src/server.ts: runs with plain `node src/server.ts`',
+              code: `import express, { type Request, type Response } from 'express';
+import type { Order } from './types.ts';          // type-only: erased entirely
+import { findOrder } from './orders.repo.ts';     // real extension required
+
+const app = express();
+
+app.get('/orders/:id', async (req: Request<{ id: string }>, res: Response<Order | { error: string }>) => {
+  const order = await findOrder(Number(req.params.id));
+  if (!order) return res.status(404).json({ error: 'Not found' });
+  res.json(order);
+});
+
+// Use a const object + union type instead of enum (enums need code generation)
+export const OrderStatus = { Pending: 'pending', Paid: 'paid' } as const;
+export type OrderStatus = (typeof OrderStatus)[keyof typeof OrderStatus];
+
+app.listen(3000);`,
+            },
+            {
+              type: 'code',
+              language: 'json',
+              title: 'tsconfig.json aligned with Node type stripping',
+              code: `{
+  "compilerOptions": {
+    "target": "es2023",
+    "module": "nodenext",
+    "moduleResolution": "nodenext",
+    "noEmit": true,
+    "strict": true,
+    "erasableSyntaxOnly": true,
+    "verbatimModuleSyntax": true,
+    "allowImportingTsExtensions": true,
+    "skipLibCheck": true
+  },
+  "include": ["src"]
+}`,
+            },
+            {
+              type: 'table',
+              headers: ['Approach', 'Type-checks?', 'Full TS syntax?', 'Best for'],
+              rows: [
+                ['`node file.ts` (type stripping)', 'No', 'Erasable syntax only', 'Scripts, services, dev loop with `--watch`'],
+                ['**tsx** (esbuild loader)', 'No', 'Yes, incl. enums, paths via tsconfig', 'Existing codebases that use enums or aliases'],
+                ['`tsc` build to `dist/`', 'Yes', 'Yes', 'Publishing libraries (emit `.js` + `.d.ts`)'],
+                ['Bundler (esbuild, tsup, Rollup)', 'No (run `tsc --noEmit` alongside)', 'Yes', 'Single-file deploys, serverless, smaller cold starts'],
+              ],
+            },
+            {
+              type: 'code',
+              language: 'bash',
+              title: 'a typical script setup',
+              code: `# development: run TS directly, restart on change
+node --watch --env-file-if-exists=.env src/server.ts
+
+# CI: the type checker is still the safety net
+npx tsc --noEmit
+node --test "src/**/*.test.ts"
+
+# production: either run .ts directly, or ship compiled JS if you need full TS features`,
+            },
+            {
+              type: 'callout',
+              kind: 'pitfall',
+              text: 'Node refuses to strip types from files inside `node_modules`, so you cannot publish raw `.ts` and expect consumers to run it. Libraries should still publish compiled JavaScript plus `.d.ts` declaration files.',
+            },
+            {
+              type: 'callout',
+              kind: 'tip',
+              text: 'Decorator-heavy frameworks (NestJS, TypeORM entities) rely on legacy `experimentalDecorators` and `emitDecoratorMetadata`, which type stripping cannot run. Keep a real compiler (tsc, SWC) in those projects.',
             },
           ],
         },
@@ -950,12 +1280,14 @@ console.log('rows:', rows);`,
               language: 'js',
               title: 'serving a large file from Express without loading it into memory',
               code: `import express from 'express';
+import fs from 'node:fs/promises';
 import { createReadStream } from 'node:fs';
 import { pipeline } from 'node:stream/promises';
 
 const app = express();
 
 // BAD: reads the whole file into RAM per request. 100 users x 500 MB = trouble.
+// (It also trusts req.params.name as a path - see path traversal in Core Modules.)
 app.get('/bad/:name', async (req, res) => {
   const data = await fs.readFile('./videos/' + req.params.name);
   res.send(data);
@@ -980,6 +1312,73 @@ app.get('/video', async (req, res, next) => {
               type: 'callout',
               kind: 'tip',
               text: 'In Node you can also use the web-standard streams (`ReadableStream`) that `fetch` returns, and convert with `Readable.fromWeb()` / `Readable.toWeb()`.',
+            },
+            {
+              type: 'heading',
+              text: 'highWaterMark, object mode, and async generators',
+            },
+            {
+              type: 'p',
+              text: 'Every stream has an internal buffer whose soft limit is `highWaterMark`: 64 KiB by default for byte streams in current Node versions (16 KiB in older ones), and 16 **objects** for streams in `objectMode`. It is a *threshold*, not a hard cap — `write()` still accepts data past it but returns `false` to ask you to stop. Bigger values mean fewer, larger chunks (better throughput, more memory per stream); smaller values mean tighter memory with more overhead. With thousands of concurrent streams, the buffer size multiplied by the number of connections is your memory bill.',
+            },
+            {
+              type: 'code',
+              language: 'js',
+              title: 'pipeline with async generators: parse, filter, and batch-insert a huge CSV',
+              code: `import { createReadStream } from 'node:fs';
+import { pipeline } from 'node:stream/promises';
+import { createInterface } from 'node:readline';
+
+// Each stage is an async generator: it pulls from the previous stage only when
+// it is ready for more, so backpressure is automatic - no manual pause/resume.
+async function* toLines(source) {
+  yield* createInterface({ input: source, crlfDelay: Infinity });
+}
+
+async function* parseRows(lines) {
+  for await (const line of lines) {
+    const [id, email, plan] = line.split(',');
+    if (plan === 'pro') yield { id: Number(id), email };
+  }
+}
+
+async function* inBatches(rows, size = 500) {
+  let batch = [];
+  for await (const row of rows) {
+    batch.push(row);
+    if (batch.length === size) { yield batch; batch = []; }
+  }
+  if (batch.length) yield batch;
+}
+
+const ac = new AbortController();
+setTimeout(() => ac.abort(), 10 * 60_000);            // give up after 10 minutes
+
+await pipeline(
+  createReadStream('customers.csv'),
+  toLines,
+  parseRows,
+  inBatches,
+  async function (batches) {                          // final stage: a consumer
+    for await (const batch of batches) await db.insertCustomers(batch);   // DB speed sets the pace
+  },
+  { signal: ac.signal },                              // abort destroys every stream in the chain
+);`,
+            },
+            {
+              type: 'table',
+              headers: ['Approach', 'Backpressure', 'Error cleanup', 'Verdict'],
+              rows: [
+                ['`src.on(\'data\', c => dst.write(c))`', 'None (unless you handle `false` and `drain`)', 'Manual', 'Avoid'],
+                ['`src.pipe(dst)`', 'Yes', 'No — an error in one stream leaves the others open (fd and memory leaks)', 'Legacy'],
+                ['`await pipeline(src, ...steps, dst)`', 'Yes', 'Yes — destroys all streams, supports `signal`', 'Default choice'],
+                ['`for await (const chunk of src)`', 'Yes (pull-based)', 'Yes, breaking out destroys the source', 'Great for consuming'],
+              ],
+            },
+            {
+              type: 'callout',
+              kind: 'pitfall',
+              text: 'In an HTTP handler, a client that disconnects mid-download makes the response stream close early. With `pipeline()` that rejects with `ERR_STREAM_PREMATURE_CLOSE` and the file stream is destroyed — which is correct. Do not log it as a server error at `error` level, or your logs fill with noise from users closing tabs.',
             },
           ],
         },
@@ -1140,7 +1539,9 @@ app.get('/health', (req, res) => {
   res.json({ status: 'ok', uptime: process.uptime() });
 });
 
-app.listen(PORT, () => {
+// Express 5: startup errors such as EADDRINUSE are passed to the callback
+app.listen(PORT, (error) => {
+  if (error) throw error;
   console.log('Listening on http://localhost:' + PORT);
 });`,
             },
@@ -1211,6 +1612,31 @@ app.use((req, res) => {
               type: 'callout',
               kind: 'pitfall',
               text: 'Route order matters. `app.get(\'/users/:id\', ...)` declared **before** `app.get(\'/users/me\', ...)` will treat the word `me` as an id and the second route never runs. Declare fixed paths (`/users/me`) before parameterized ones (`/users/:id`).',
+            },
+            {
+              type: 'heading',
+              text: 'Express 5 path syntax at a glance',
+            },
+            {
+              type: 'p',
+              text: 'Express 5 uses path-to-regexp v8, which deliberately removed the regex-like mini-language of Express 4. The old syntax allowed patterns that could be exploited for **ReDoS** (a crafted URL making route matching take seconds), so the new syntax is smaller and predictable: named parameters, braces for optional parts, and *named* wildcards.',
+            },
+            {
+              type: 'table',
+              headers: ['Pattern', 'Matches', 'req.params'],
+              rows: [
+                ['`/users/:id`', '`/users/42`', '`{ id: \'42\' }`'],
+                ['`/users{/:id}`', '`/users` and `/users/42`', '`{}` or `{ id: \'42\' }` (unmatched params are omitted)'],
+                ['`/files/*path`', '`/files/a/b.txt` (not `/files`)', '`{ path: [\'a\', \'b.txt\'] }` (an array)'],
+                ['`/{*splat}`', 'Everything, including `/`', '`{ splat: [...] }`'],
+                ['`/:file{.:ext}`', '`/report` and `/report.pdf`', '`{ file, ext? }`'],
+                ['`[\'/discussion/:slug\', \'/page/:slug\']`', 'Either path (arrays replace regex alternation)', '`{ slug }`'],
+              ],
+            },
+            {
+              type: 'callout',
+              kind: 'note',
+              text: 'The characters `( ) [ ] ? + !` are reserved in Express 5 paths; escape them with a backslash if you need them literally. If you truly need a regular expression, pass a `RegExp` object instead of a string — and keep it free of nested quantifiers.',
             },
             {
               type: 'callout',
@@ -1351,7 +1777,7 @@ app.post('/orders', (req, res) => {
               headers: ['You want to read...', 'Use', 'Notes'],
               rows: [
                 ['Path variable', '`req.params.id`', 'Always a string'],
-                ['Query string value', '`req.query.page`', 'String, or array/object for repeated or nested keys'],
+                ['Query string value', '`req.query.page`', 'String, or array for repeated keys; nested `a[b]=1` objects only with the "extended" parser (not the Express 5 default); read-only getter in Express 5'],
                 ['Parsed JSON body', '`req.body`', 'Needs `express.json()`; `undefined` otherwise (Express 5)'],
                 ['A header', '`req.get(\'content-type\')`', 'Case-insensitive'],
                 ['Client IP', '`req.ip`', 'Needs correct `trust proxy` setting behind a proxy'],
@@ -1454,6 +1880,11 @@ app.use((req, res, next) => {
               type: 'callout',
               kind: 'note',
               text: '`res.json()` converts the object with `JSON.stringify`, so `Date` becomes an ISO string, `undefined` fields disappear, and `BigInt` throws. Convert those yourself before sending.',
+            },
+            {
+              type: 'callout',
+              kind: 'pitfall',
+              text: 'Express 5 changes that bite during upgrades: `req.query` is a **getter**, so middleware that did `req.query = cleaned` silently stops working (store validated data on `req.validated` or `res.locals` instead); `res.status()` throws for anything that is not an integer from 100 to 999 (so `res.status(err.code)` with a string code crashes the error handler); `res.redirect(\'back\')` is gone (use `req.get(\'Referrer\') || \'/\'`); and `req.host` now includes the port.',
             },
           ],
         },
@@ -1736,16 +2167,16 @@ app.post('/payments', async (req, res) => {
               type: 'code',
               language: 'js',
               title: 'schemas and a reusable validation middleware (Zod)',
-              code: `// npm install zod
+              code: `// npm install zod     (Zod 4 syntax)
 import { z } from 'zod';
 
 export const createUserSchema = z.object({
-  body: z.object({
-    email: z.string().email().toLowerCase(),
-    password: z.string().min(10, 'at least 10 characters').max(128),
+  body: z.strictObject({                     // unknown keys (like isAdmin) are rejected
+    email: z.email().toLowerCase(),          // Zod 4: top-level format schemas (z.email, z.url, z.uuid)
+    password: z.string().min(10, { error: 'at least 10 characters' }).max(128),
     name: z.string().trim().min(1).max(80),
     age: z.number().int().min(13).optional(),
-  }).strict(),                               // unknown keys (like isAdmin) are rejected
+  }),
 });
 
 export const listUsersSchema = z.object({
@@ -1805,6 +2236,16 @@ const user2 = await db.users.create({ data: { email, name, role: 'user' } });`,
                 ['**Valibot**', 'Small, modular functions', 'Tiny bundles; similar ideas to Zod'],
                 ['**express-validator**', 'Middleware chains per field', 'Express-specific; fine for small apps'],
               ],
+            },
+            {
+              type: 'callout',
+              kind: 'warning',
+              text: 'Zod 4 (2025) changed a few APIs you will see in older tutorials: string formats moved to top-level schemas (`z.email()` instead of `z.string().email()`, which still works but is deprecated), `.strict()`/`.passthrough()` became `z.strictObject()`/`z.looseObject()`, and custom messages use `{ error: ... }` instead of `{ message: ... }`. It is also much faster and smaller, and ships `zod/mini` for bundle-sensitive front ends. In Express 5 you cannot assign to `req.query` (it is a getter), which is why the middleware above stores results on `req.validated`.',
+            },
+            {
+              type: 'callout',
+              kind: 'note',
+              text: 'Validation and TypeScript fit together: `type CreateUser = z.infer<typeof createUserSchema>` derives the static type from the runtime schema, so the two can never drift. Libraries implementing the **Standard Schema** interface (Zod, Valibot, ArkType) can be swapped in frameworks that accept any compliant validator.',
             },
             {
               type: 'callout',
@@ -1994,7 +2435,27 @@ CORS_ORIGINS=http://localhost:5173,http://localhost:3001
 
 # Run with the built-in loader (Node 20.6+). Later files override earlier ones.
 node --env-file=.env src/server.js
-node --env-file=.env --env-file=.env.local src/server.js`,
+node --env-file=.env --env-file=.env.local src/server.js
+
+# Optional file: no error if it is missing (handy when CI injects real variables)
+node --env-file-if-exists=.env.local src/server.js
+
+# Variables already set in the real environment WIN over values in the file,
+# so a platform-provided DATABASE_URL is never overwritten by a stale .env.`,
+            },
+            {
+              type: 'code',
+              language: 'js',
+              title: 'loading and parsing .env files from code (no dotenv)',
+              code: `import { parseEnv } from 'node:util';
+import { readFileSync } from 'node:fs';
+
+// Load into process.env (same rules as --env-file)
+process.loadEnvFile('.env');
+
+// Or just parse the format without touching process.env (e.g. for a CLI tool)
+const values = parseEnv(readFileSync('.env.test', 'utf8'));
+console.log(values.DATABASE_URL);`,
             },
             {
               type: 'code',
@@ -2005,8 +2466,8 @@ node --env-file=.env --env-file=.env.local src/server.js`,
 const schema = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
   PORT: z.coerce.number().int().min(1).max(65535).default(3000),   // env values are strings
-  DATABASE_URL: z.string().url(),
-  REDIS_URL: z.string().url().optional(),
+  DATABASE_URL: z.url(),
+  REDIS_URL: z.url().optional(),
   JWT_ACCESS_SECRET: z.string().min(32, 'must be at least 32 characters'),
   CORS_ORIGINS: z.string().transform((s) => s.split(',').map((o) => o.trim())),
 });
@@ -2196,10 +2657,10 @@ app.use(session({
   cookie: { httpOnly: true, secure: config.isProd, sameSite: 'lax', maxAge: 1000 * 60 * 60 * 24 },
 }));
 
-app.post('/login', async (req, res) => {
-  const user = await authService.login(req.body.email, req.body.password);
+app.post('/login', async (req, res, next) => {
+  const user = await authService.login(req.body.email, req.body.password);   // a throw here reaches the error handler (Express 5)
   req.session.regenerate((err) => {              // new id after login: prevents session fixation
-    if (err) throw err;
+    if (err) return next(err);                   // NOT throw: a throw inside a callback escapes Express and crashes the process
     req.session.userId = user.id;
     res.json({ id: user.id });
   });
@@ -2313,6 +2774,46 @@ export function requireAuth(req, res, next) {
               type: 'callout',
               kind: 'note',
               text: '**Passport.js** is a popular Express library that standardizes login "strategies" (local username/password, Google, GitHub OAuth, JWT) behind one `passport.authenticate()` middleware. It saves boilerplate for social login, but the concepts above — hashing, sessions vs tokens, rotation — still apply underneath. For "Sign in with Google", the protocol is **OAuth 2.0 / OpenID Connect**: your app redirects to Google, and Google redirects back with a one-time code you exchange for the user\'s identity.',
+            },
+            {
+              type: 'heading',
+              text: 'Asymmetric keys, JWKS, and the jose library',
+            },
+            {
+              type: 'p',
+              text: 'With `HS256` every service that *verifies* tokens also holds the secret that can *mint* them — fine for one API, risky across many services. With an asymmetric algorithm (`ES256`, `EdDSA`, `RS256`) only the auth service holds the private key; everyone else verifies with the public key, typically fetched from a **JWKS** endpoint (`/.well-known/jwks.json`) that also enables key rotation via the `kid` header. The `jose` library is a dependency-free, web-standard implementation that works in Node, edge runtimes, and browsers.',
+            },
+            {
+              type: 'code',
+              language: 'js',
+              title: 'verifying tokens from an identity provider with jose',
+              code: `// npm install jose
+import { createRemoteJWKSet, jwtVerify } from 'jose';
+
+// Fetched lazily and cached; refreshed automatically when an unknown "kid" appears
+const JWKS = createRemoteJWKSet(new URL('https://auth.example.com/.well-known/jwks.json'));
+
+export async function requireAuth(req, res, next) {
+  const token = req.get('authorization')?.replace(/^Bearer /, '');
+  if (!token) return res.status(401).json({ error: { code: 'NO_TOKEN' } });
+  try {
+    const { payload } = await jwtVerify(token, JWKS, {
+      issuer: 'https://auth.example.com/',
+      audience: 'orders-api',               // reject tokens minted for a different API
+      algorithms: ['ES256', 'RS256'],
+      clockTolerance: 5,                    // seconds of clock skew allowed
+    });
+    req.user = { id: payload.sub, scopes: String(payload.scope ?? '').split(' ') };
+    next();
+  } catch {
+    res.status(401).json({ error: { code: 'INVALID_TOKEN' } });
+  }
+}`,
+            },
+            {
+              type: 'callout',
+              kind: 'warning',
+              text: 'Always validate `aud` (audience) as well as `iss` and the signature. Without an audience check, a valid token your identity provider issued for some *other* application can be replayed against your API.',
             },
           ],
         },
@@ -2484,14 +2985,17 @@ export async function transfer(fromId, toId, amount) {
             {
               type: 'code',
               language: 'prisma',
-              title: 'Prisma schema (prisma/schema.prisma)',
-              code: `datasource db {
+              title: 'Prisma schema (prisma/schema.prisma, Prisma 7+ style)',
+              code: `// The connection URL no longer lives here: it is read from prisma.config.ts
+datasource db {
   provider = "postgresql"
-  url      = env("DATABASE_URL")
 }
 
+// "prisma-client" is the Rust-free generator; the client is generated into
+// your source tree (not node_modules), so the output path is required.
 generator client {
-  provider = "prisma-client-js"
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
 }
 
 model User {
@@ -2523,12 +3027,28 @@ model OrderItem {
             },
             {
               type: 'code',
-              language: 'js',
+              language: 'ts',
+              title: 'prisma.config.ts (project root): where the CLI finds the database',
+              code: `import { defineConfig, env } from 'prisma/config';
+
+// The CLI does not load .env automatically any more:
+// run it with  node --env-file=.env  or load the file yourself.
+export default defineConfig({
+  schema: 'prisma/schema.prisma',
+  datasource: { url: env('DATABASE_URL') },
+});`,
+            },
+            {
+              type: 'code',
+              language: 'ts',
               title: 'Prisma client: queries, relations, transactions, and the N+1 trap',
               code: `// npx prisma migrate dev --name init    # creates tables from schema.prisma
-import { PrismaClient } from '@prisma/client';
+// npx prisma generate                    # migrate no longer generates the client for you
+import { PrismaClient } from './generated/prisma/client.ts';
+import { PrismaPg } from '@prisma/adapter-pg';   // driver adapter: Prisma talks through node-postgres
 
-export const prisma = new PrismaClient();      // create ONE per process and reuse it
+const adapter = new PrismaPg({ connectionString: process.env.DATABASE_URL });
+export const prisma = new PrismaClient({ adapter });   // create ONE per process and reuse it
 
 // Create with a nested relation, atomically
 const order = await prisma.order.create({
@@ -2571,6 +3091,27 @@ const fast = await prisma.order.findMany({ take: 100, include: { items: true } }
               type: 'callout',
               kind: 'tip',
               text: 'Use **migrations** (`prisma migrate`, `knex migrate`, `node-pg-migrate`) for every schema change so the database structure is versioned in git like code. Add indexes for columns you filter or sort by, and check slow queries with `EXPLAIN ANALYZE`. Money belongs in `NUMERIC`/`DECIMAL` or integer cents, never in floating point.',
+            },
+            {
+              type: 'callout',
+              kind: 'note',
+              text: 'Prisma 7 (late 2025) was a large redesign: a Rust-free TypeScript client, mandatory driver adapters, a generated client in your source tree, and configuration in `prisma.config.ts`. Older tutorials showing `url = env(...)` in the schema and `import { PrismaClient } from \'@prisma/client\'` describe Prisma 6 and earlier. Check the upgrade guide for the version you install.',
+            },
+            {
+              type: 'table',
+              headers: ['Tool', 'Style', 'Trade-off'],
+              rows: [
+                ['`pg` (node-postgres)', 'Raw SQL with placeholders', 'Full control and speed; you write mapping and migrations yourself'],
+                ['**Drizzle**', 'SQL-like TypeScript query builder, schema in TS', 'Thin, predictable SQL, great types; fewer high-level conveniences'],
+                ['**Kysely**', 'Type-safe query builder', 'Excellent types over SQL; bring your own migrations story'],
+                ['**Prisma**', 'Schema-first ORM with generated client', 'Very productive, great DX; abstraction can hide expensive queries'],
+                ['**Sequelize / TypeORM**', 'Classic active-record / data-mapper ORMs', 'Mature and widespread in older code; weaker type safety'],
+              ],
+            },
+            {
+              type: 'callout',
+              kind: 'warning',
+              text: 'Pool size multiplies: 10 connections x 4 cluster workers x 6 containers = 240 connections, which can exceed PostgreSQL\'s default `max_connections` of 100. Serverless functions are worse — every concurrent instance opens its own pool. Use a connection pooler (PgBouncer in transaction mode, or a managed pooler) in front of PostgreSQL when the number of Node processes is large or elastic.',
             },
           ],
         },
@@ -3053,6 +3594,130 @@ export async function findOrder(id) {
               kind: 'tip',
               text: 'Logs say *what happened*; **metrics** (request rate, error rate, latency percentiles via Prometheus) say *how often*; **traces** (OpenTelemetry) say *where time went across services*. Together they are called observability — start with good logs, add metrics next.',
             },
+            {
+              type: 'callout',
+              kind: 'note',
+              text: '`AsyncLocalStorage` is the standard way to carry request context in Node and is what tracing libraries build on. Since Node 24 it is implemented on top of `AsyncContextFrame` by default, which makes context propagation considerably cheaper than the older `async_hooks`-based implementation — another reason to stay on a current LTS.',
+            },
+          ],
+        },
+        {
+          id: 'metrics-tracing-otel',
+          title: 'Metrics and Distributed Tracing with OpenTelemetry',
+          summary:
+            'Logs tell you what happened to one request; **metrics** tell you how the whole service behaves over time, and **traces** show where the milliseconds went across services. OpenTelemetry is the vendor-neutral standard for producing both from a Node app.',
+          keyPoints: [
+            'Track the **RED** metrics for every service — **R**ate (requests/s), **E**rrors (failed requests/s), **D**uration (latency histogram, read as p50/p95/p99) — plus Node runtime metrics: event-loop delay, heap, GC pauses.',
+            'A **trace** is a tree of **spans** (one per HTTP call, DB query, queue job) sharing a trace id that travels between services in the W3C `traceparent` header.',
+            '**OpenTelemetry (OTel)** auto-instruments `http`, Express, `pg`, Redis, and more by patching modules at load time — so the SDK must start **before** your app code is imported (`node --import ./otel.js`).',
+            'Export over OTLP to a collector, then to any backend (Grafana Tempo/Prometheus, Jaeger, Datadog, Honeycomb); sample traces in production, and keep metric label **cardinality** low (never a user id or raw URL as a label).',
+          ],
+          blocks: [
+            {
+              type: 'p',
+              text: 'Averages lie. A service whose *average* latency is 80 ms can still have 1 percent of users waiting 4 seconds — and those are often the most valuable users with the biggest carts. That is why latency is recorded in a **histogram** and discussed as percentiles. Once a request fans out to five services, a slow p99 is impossible to explain from logs alone; a trace waterfall shows immediately that, say, 3.1 of the 3.4 seconds were spent in one un-indexed query in the inventory service.',
+            },
+            {
+              type: 'mermaid',
+              code: `sequenceDiagram
+    participant C as Client
+    participant G as API gateway
+    participant O as Orders service
+    participant I as Inventory service
+    participant D as PostgreSQL
+    C->>G: POST /checkout
+    Note over G: span 1 starts, new trace id
+    G->>O: traceparent header carries trace id
+    Note over O: span 2, child of span 1
+    O->>I: traceparent header again
+    Note over I: span 3, child of span 2
+    I->>D: SELECT stock
+    Note over I,D: span 4 db query, 3.1 s - the culprit
+    D-->>I: rows
+    I-->>O: 200
+    O-->>G: 201
+    G-->>C: 201 after 3.4 s`,
+            },
+            {
+              type: 'code',
+              language: 'js',
+              title: 'otel.js: start the SDK before the app (node --import ./otel.js src/server.js)',
+              code: `// npm install @opentelemetry/sdk-node @opentelemetry/auto-instrumentations-node \\
+//             @opentelemetry/exporter-trace-otlp-http @opentelemetry/exporter-metrics-otlp-http \\
+//             @opentelemetry/sdk-metrics
+import { NodeSDK } from '@opentelemetry/sdk-node';
+import { getNodeAutoInstrumentations } from '@opentelemetry/auto-instrumentations-node';
+import { OTLPTraceExporter } from '@opentelemetry/exporter-trace-otlp-http';
+import { OTLPMetricExporter } from '@opentelemetry/exporter-metrics-otlp-http';
+import { PeriodicExportingMetricReader } from '@opentelemetry/sdk-metrics';
+
+const sdk = new NodeSDK({
+  serviceName: 'orders-api',
+  traceExporter: new OTLPTraceExporter(),            // defaults to the OTEL_EXPORTER_OTLP_ENDPOINT env var
+  metricReader: new PeriodicExportingMetricReader({ exporter: new OTLPMetricExporter() }),
+  instrumentations: [getNodeAutoInstrumentations({
+    '@opentelemetry/instrumentation-fs': { enabled: false },   // very noisy, rarely useful
+  })],
+});
+sdk.start();
+
+process.on('SIGTERM', () => { sdk.shutdown().catch(() => {}); });   // flush buffered spans on exit`,
+            },
+            {
+              type: 'code',
+              language: 'js',
+              title: 'custom spans and metrics for business operations',
+              code: `import { trace, metrics, SpanStatusCode } from '@opentelemetry/api';
+
+const tracer = trace.getTracer('orders');
+const meter = metrics.getMeter('orders');
+const ordersCreated = meter.createCounter('orders_created_total');
+const checkoutDuration = meter.createHistogram('checkout_duration_ms', { unit: 'ms' });
+
+export async function checkout(userId, cart) {
+  return tracer.startActiveSpan('checkout', async (span) => {
+    const start = performance.now();
+    span.setAttribute('cart.items', cart.items.length);   // low-cardinality attributes only
+    try {
+      const order = await createOrder(userId, cart);     // auto-instrumented DB spans nest under this one
+      ordersCreated.add(1, { payment_method: cart.paymentMethod });
+      return order;
+    } catch (err) {
+      span.recordException(err);
+      span.setStatus({ code: SpanStatusCode.ERROR });
+      throw err;
+    } finally {
+      checkoutDuration.record(performance.now() - start);
+      span.end();                                         // forgetting end() leaks spans
+    }
+  });
+}`,
+            },
+            {
+              type: 'table',
+              headers: ['Signal', 'Answers', 'Cost driver', 'Typical tool'],
+              rows: [
+                ['Logs', 'What exactly happened to this request?', 'Volume (bytes per line x lines)', 'pino -> Loki, ELK, CloudWatch'],
+                ['Metrics', 'How often, how fast, how many — trends and alerts', 'Cardinality (unique label combinations)', 'OTel or prom-client -> Prometheus'],
+                ['Traces', 'Where did the time go across services?', 'Number of spans kept (sampling)', 'OTel -> Tempo, Jaeger, vendor APM'],
+                ['Profiles', 'Which functions burn CPU or allocate memory?', 'Sampling frequency', 'Continuous profilers, `--cpu-prof`'],
+              ],
+            },
+            {
+              type: 'callout',
+              kind: 'pitfall',
+              text: 'Auto-instrumentation works by hooking `require`/`import` of libraries like `express` and `pg`. If your app imports them **before** the SDK starts, those modules are silently not instrumented and you see traces with only the HTTP span. Use `--import` (ESM) or `--require` (CJS) to load the telemetry file first.',
+            },
+            {
+              type: 'callout',
+              kind: 'warning',
+              text: 'High-cardinality labels can bankrupt a metrics backend: a label like `path="/orders/48213"` or `userId` creates a new time series per value. Use the **route template** (`/orders/:id`) and bounded enums as labels, and put ids in traces or logs instead.',
+            },
+            {
+              type: 'callout',
+              kind: 'tip',
+              text: 'Alert on **symptoms users feel** (error rate and p99 latency against an SLO), not on causes like CPU at 80 percent. Put the trace id in every log line (pino can pick it up from the active span) so you can jump from a slow trace to its logs and back.',
+            },
           ],
         },
         {
@@ -3061,7 +3726,7 @@ export async function findOrder(id) {
           summary:
             'Test your API at two levels: fast **unit tests** for pure logic (services, helpers) and **integration tests** that fire real HTTP requests at your Express app with Supertest — Node now ships a built-in test runner, so you can start without installing anything.',
           keyPoints: [
-            'Node 20+ includes `node:test` (`node --test`) with `describe`/`it`, hooks, mocking, and coverage (`--experimental-test-coverage`); **Jest** and **Vitest** remain popular, with richer mocking and watch UIs.',
+            'Node includes a stable `node:test` runner (`node --test`) with `describe`/`it`, hooks, mocking, fake timers, snapshots, watch mode (`--test --watch`), and coverage (`--experimental-test-coverage`); **Vitest** and **Jest** remain popular, with richer mocking and UIs.',
             '**Supertest** calls your Express app *without opening a port* (`request(app).get(\'/users\')`) — this is why `app.js` and `server.js` are kept separate.',
             'Follow a **test pyramid**: many fast unit tests, a moderate number of integration tests (with a real or containerized database), few end-to-end tests.',
             'Tests must be **independent and repeatable**: reset or isolate the database between tests, mock external services (payments, email), and never depend on test order or the real clock.',
@@ -3113,7 +3778,10 @@ import assert from 'node:assert/strict';
 import request from 'supertest';
 import { app } from '../src/app.js';          // the app, NOT server.js: no port is opened
 import { prisma } from '../src/db.js';
-import * as emailService from '../src/email.js';
+// email.js exports an OBJECT:  export const emailService = { async sendWelcome(user) { ... } };
+// mock.method() needs a writable property. An ES module namespace (import * as x) is
+// read-only, so mocking a named function export that way throws.
+import { emailService } from '../src/email.js';
 
 describe('POST /api/users', () => {
   before(async () => { await prisma.user.deleteMany(); });   // clean state
@@ -3168,6 +3836,40 @@ describe('POST /api/users', () => {
               type: 'callout',
               kind: 'tip',
               text: 'Test the unhappy paths as seriously as the happy ones: invalid input, missing auth, someone else\'s data, duplicate emails, third-party timeouts. That is where production bugs live.',
+            },
+            {
+              type: 'code',
+              language: 'js',
+              title: 'node:test extras: fake timers, test context, and module mocks',
+              code: `import { test, mock } from 'node:test';
+import assert from 'node:assert/strict';
+
+// Fake timers: test retry/backoff logic without really waiting
+test('retries after 2 seconds', (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const fn = t.mock.fn();
+  setTimeout(fn, 2000);
+  t.mock.timers.tick(1999);
+  assert.equal(fn.mock.callCount(), 0);
+  t.mock.timers.tick(1);
+  assert.equal(fn.mock.callCount(), 1);
+});   // mocks created through t.mock are restored automatically after the test
+
+// Replace a whole module (needs the --experimental-test-module-mocks flag)
+test('uses the mocked payment client', async (t) => {
+  t.mock.module('../src/payments.js', {
+    namedExports: { charge: async () => ({ id: 'ch_test', status: 'succeeded' }) },
+  });
+  const { checkout } = await import('../src/checkout.js');   // import AFTER mocking
+  assert.equal((await checkout({ amount: 100 })).status, 'succeeded');
+});
+
+// Run:  node --test --experimental-test-module-mocks --test-concurrency=1`,
+            },
+            {
+              type: 'callout',
+              kind: 'note',
+              text: 'By default `node --test` runs each test **file** in its own child process, in parallel. That isolates module state nicely, but files that share one database must either use separate schemas/databases per file or run with `--test-concurrency=1`.',
             },
           ],
         },
@@ -3704,6 +4406,9 @@ async function shutdown(signal) {
     process.exit(0);
   });
   server.closeIdleConnections();                  // do not wait for idle keep-alive sockets
+  // Note: server.close() also stops accepting connections; Node 19+ already closes idle ones on close().
+  // Long-lived connections (SSE, WebSockets) never go idle: end them yourself or call
+  // server.closeAllConnections() once your drain deadline passes.
 }
 
 process.on('SIGTERM', () => shutdown('SIGTERM'));   // sent by Docker / Kubernetes / PM2
@@ -3714,13 +4419,13 @@ process.on('SIGINT', () => shutdown('SIGINT'));     // Ctrl+C in a terminal`,
               language: 'dockerfile',
               title: 'a production Dockerfile (multi-stage, non-root)',
               code: `# ---- stage 1: install production dependencies ----
-FROM node:22-alpine AS deps
+FROM node:24-alpine AS deps
 WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci --omit=dev
 
 # ---- stage 2: final small image ----
-FROM node:22-alpine
+FROM node:24-alpine
 ENV NODE_ENV=production
 WORKDIR /app
 
@@ -3811,9 +4516,9 @@ server {
           summary:
             'Recent Node versions absorbed many things that used to need packages — `fetch`, a test runner, watch mode, `.env` loading, TypeScript stripping — and Express 5 finally fixed async error handling; knowing both lets you write less code with fewer dependencies.',
           keyPoints: [
-            'Even-numbered Node releases become **LTS** (Long-Term Support) each October — use an active LTS in production; odd-numbered releases are short-lived "Current" versions.',
-            'Built in now: global `fetch`, `node:test`, `--watch`, `--env-file`, `AbortSignal.timeout`, `structuredClone`, `import.meta.dirname`, top-level `await`, `os.availableParallelism()`, and (on recent versions) running `.ts` files with erasable syntax.',
-            '**Express 5** (stable on npm\'s `latest` since 2025) requires Node 18+, forwards errors from `async` handlers automatically, and uses a stricter route-path syntax (path-to-regexp v8).',
+            'Even-numbered Node releases become **LTS** (Long-Term Support) — use an Active or Maintenance LTS in production (late 2026: **24** is LTS, **22** is in maintenance, **20** is end of life, **26** is Current); odd-numbered releases are short-lived. Node 27 onward moves to one major release per year.',
+            'Built in now: global `fetch`, `node:test`, `--watch`, `--env-file`, `--run`, `AbortSignal.timeout`, `structuredClone`, `import.meta.dirname`, top-level `await`, `require(esm)`, `os.availableParallelism()`, a stable permission model, and running `.ts` files with erasable syntax (type stripping).',
+            '**Express 5** (the npm `latest` since March 2025; 5.x keeps receiving minor releases) requires Node 18+, forwards errors from `async` handlers automatically, and uses a stricter route-path syntax (path-to-regexp v8).',
             'Upgrading from Express 4 is mostly mechanical: named wildcards, `req.body` undefined when unparsed, removed legacy methods (`res.json(status, obj)`, `app.del`) — a codemod handles most of it.',
           ],
           blocks: [
@@ -3858,12 +4563,20 @@ const config = JSON.parse(await (await import('node:fs/promises')).readFile('./c
               type: 'code',
               language: 'bash',
               title: 'permission model: least privilege for a Node process',
-              code: `# Node can restrict what a process is allowed to touch (introduced as experimental in Node 20;
-# the flag was later renamed --permission - check the docs for your version).
+              code: `# Node can restrict what a process may touch. Added in Node 20 as experimental,
+# it is now a stable feature enabled with --permission. Everything not granted is denied.
 node --permission --allow-fs-read=/app --allow-fs-write=/app/uploads src/server.js
 
 # Without --allow-child-process, spawning "ffmpeg" or "sh" throws ERR_ACCESS_DENIED.
-# Without --allow-worker, new Worker() is blocked. A compromised dependency can do less damage.`,
+# Without --allow-worker, new Worker() is blocked. Further grants exist for native addons,
+# WASI and network access: check the docs for your version.
+# Try it risk-free first: --permission-audit reports what WOULD be denied instead of blocking.
+
+# At runtime:  process.permission.has('fs.write', '/app/uploads')
+
+# LIMITS: the docs call it a "seat belt", not a sandbox. It guards against accidental misuse by
+# TRUSTED code; symlinks are followed and existing file descriptors bypass it. Use containers
+# and OS-level isolation for real security boundaries.`,
             },
             {
               type: 'heading',
@@ -3907,12 +4620,90 @@ app.post('/echo', express.json(), (req, res) => res.json(req.body ?? {}));`,
             {
               type: 'callout',
               kind: 'tip',
-              text: 'Upgrade path: move to Express 4.21+ first, then `npm install express@5` and run the official codemods (`npx @expressjs/codemod upgrade`), then fix route patterns and re-run your tests. Check that third-party middleware (such as `express-async-errors`) is still needed — it is redundant on Express 5.',
+              text: 'Upgrade path: move to Express 4.21+ first, then `npm install express@5` and run the official codemods (`npx @expressjs/codemod upgrade`), then fix route patterns and re-run your tests. Check that third-party middleware (such as `express-async-errors`) is still needed — it is redundant on Express 5. Also note `express.urlencoded` now defaults to `extended: false`, `express.static` ignores dotfiles by default (serve `/.well-known` with `dotfiles: "allow"`), and `app.listen` passes startup errors such as `EADDRINUSE` to its callback instead of throwing.',
             },
             {
               type: 'callout',
               kind: 'pitfall',
               text: 'Because `fetch` only rejects on network failure, a `500` response resolves normally. Always check `res.ok` (or `res.status`). Also, new built-ins do not mean dropping libraries blindly: `node:test` has fewer features than Jest/Vitest, and `--watch` restarts the whole process, which can matter in larger apps.',
+            },
+          ],
+        },
+        {
+          id: 'http-clients-undici',
+          title: 'Calling Other Services: fetch, undici, Timeouts, and Retries',
+          summary:
+            'Almost every backend calls other HTTP services. Node\'s built-in `fetch` is powered by undici; using it well means deadlines on every call, connection reuse, careful retries, and never forwarding unvalidated URLs (SSRF).',
+          keyPoints: [
+            'Global `fetch` is implemented by **undici**, which keeps a connection pool per origin; reuse is automatic, so do not create a new client per request.',
+            '**Every outbound call needs a deadline**: `AbortSignal.timeout(ms)` for a single call, and an overall budget for the whole request so slow dependencies cannot pile up and exhaust your server.',
+            '`fetch` resolves successfully on 4xx/5xx — check `res.ok`; and **always consume or cancel the body** (`await res.text()`, `res.body?.cancel()`), or the connection stays checked out.',
+            'Retry only **idempotent** requests (or those with an idempotency key), use **exponential backoff with jitter**, and cap attempts — blind retries turn a brief outage into a retry storm.',
+          ],
+          blocks: [
+            {
+              type: 'code',
+              language: 'js',
+              title: 'a small, production-minded HTTP client helper',
+              code: `import { setTimeout as sleep } from 'node:timers/promises';
+import { Agent, setGlobalDispatcher } from 'undici';   // npm install undici (to tune the pool)
+
+// Optional: tune connection reuse for the global fetch
+setGlobalDispatcher(new Agent({
+  connections: 50,                 // max sockets per origin
+  keepAliveTimeout: 10_000,
+  connect: { timeout: 3_000 },
+}));
+
+export async function getJson(url, { timeoutMs = 3000, retries = 2, signal } = {}) {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      const res = await fetch(url, {
+        headers: { Accept: 'application/json' },
+        // combine our deadline with the caller's cancellation (e.g. the client hung up)
+        signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(timeoutMs)]) : AbortSignal.timeout(timeoutMs),
+      });
+      if (res.status >= 500 || res.status === 429) {
+        await res.body?.cancel();                       // release the connection
+        throw new Error('retryable status ' + res.status);
+      }
+      if (!res.ok) throw Object.assign(new Error('HTTP ' + res.status), { permanent: true });
+      return await res.json();
+    } catch (err) {
+      if (err.permanent || signal?.aborted || attempt >= retries) throw err;
+      const backoff = Math.min(2000, 200 * 2 ** attempt);
+      await sleep(backoff / 2 + Math.random() * (backoff / 2));   // jitter spreads retries out
+    }
+  }
+}
+
+// In a route: abort downstream work when the browser disconnects
+// app.get('/dash', async (req, res) => {
+//   const ac = new AbortController();
+//   res.on('close', () => ac.abort());
+//   res.json(await getJson('https://pricing.internal/api', { signal: ac.signal }));
+// });`,
+            },
+            {
+              type: 'table',
+              headers: ['Failure', 'What fetch does', 'What you should do'],
+              rows: [
+                ['DNS failure, connection refused, reset', 'Rejects with `TypeError: fetch failed` (real cause in `err.cause`)', 'Log `err.cause.code`; retry if idempotent'],
+                ['HTTP 404 / 500', 'Resolves normally', 'Check `res.ok`; map to your own error type'],
+                ['Slow server', 'Waits a long time without a signal', 'Always pass `AbortSignal.timeout()`'],
+                ['Timeout fires', 'Rejects with `TimeoutError`', 'Fail fast or retry with backoff'],
+                ['Large response', 'Buffers if you call `.json()`', 'Stream `res.body` for big payloads'],
+              ],
+            },
+            {
+              type: 'callout',
+              kind: 'warning',
+              text: '**SSRF**: never fetch a URL that came from user input without checking it. Attackers point your server at `http://169.254.169.254/` (cloud metadata) or internal admin services. Allow-list hosts, resolve the hostname and reject private, loopback and link-local addresses, and refuse redirects to other hosts (`redirect: "manual"`).',
+            },
+            {
+              type: 'callout',
+              kind: 'tip',
+              text: 'For a flaky dependency add a **circuit breaker** (for example the `opossum` library): after repeated failures, stop calling it for a short time and fail fast or serve a fallback, so your own latency does not collapse with theirs.',
             },
           ],
         },
@@ -4153,7 +4944,7 @@ serve({ fetch: hono.fetch, port: 3000 });
             {
               question: 'What changed in Express 5, and how would you upgrade from Express 4?',
               answer:
-                'Express 5 requires Node 18+, forwards rejected promises and exceptions from async handlers and middleware to the error handler automatically, and upgrades to path-to-regexp v8, so route strings are stricter: wildcards must be named (`/files/*path`), optional segments use braces (`/users{/:id}`), and raw regex characters are no longer allowed. `req.body` is `undefined` when no parser ran, the default query parser is "simple", and legacy APIs such as `res.json(status, obj)`, `res.send(status)`, `app.del`, and `req.param()` were removed. To upgrade: update to the latest 4.x, run the official codemods, change route patterns, remove async wrapper hacks like `express-async-errors`, check third-party middleware compatibility, and rely on the test suite to catch behavioral differences.',
+                'Express 5 requires Node 18+, forwards rejected promises and exceptions from async handlers and middleware to the error handler automatically, and upgrades to path-to-regexp v8, so route strings are stricter: wildcards must be named (`/files/*path`), optional segments use braces (`/users{/:id}`), and raw regex characters are no longer allowed. `req.body` is `undefined` when no parser ran, the default query parser is "simple", and legacy APIs such as `res.json(status, obj)`, `res.send(status)`, `app.del`, and `req.param()` were removed. Smaller changes: `req.query` is a read-only getter, `express.urlencoded` defaults to `extended: false`, `express.static` ignores dotfiles by default, and `app.listen` passes startup errors to its callback. To upgrade: update to the latest 4.x, run the official codemods, change route patterns, remove async wrapper hacks like `express-async-errors`, check third-party middleware compatibility, and rely on the test suite to catch behavioral differences.',
             },
             {
               question: 'How would you test an Express API?',
@@ -4179,6 +4970,71 @@ serve({ fetch: hono.fetch, port: 3000 });
               question: 'What is the difference between `process.nextTick()` and `setImmediate()`, and when would you ever use either?',
               answer:
                 '`process.nextTick(fn)` queues `fn` in the nextTick queue, which Node drains immediately after the current operation completes — before promise microtasks and before the event loop continues to any next phase. `setImmediate(fn)` queues `fn` for the check phase of the current loop iteration, after pending I/O callbacks have had their turn. Their names are famously swapped relative to behavior: nextTick fires "more immediately". In application code you rarely need nextTick; it exists mainly for library authors who must emit an event or invoke a callback asynchronously after the constructor returns so callers can attach listeners. `setImmediate` is useful for breaking a long synchronous task into chunks that yield to I/O between slices. Recursive nextTick calls can starve I/O, which is why `setImmediate` is the safer yielding mechanism.',
+            },
+            {
+              question: 'Why is `fs.readFile` async yet `http` sockets scale better? What does libuv\'s thread pool have to do with it?',
+              answer:
+                'Sockets use the operating system\'s readiness APIs (epoll, kqueue, IOCP): one thread can watch tens of thousands of descriptors and is told when one is ready, so no thread is parked per connection. File-system calls, `dns.lookup` (`getaddrinfo`), and async `crypto`/`zlib` have no equivalent portable OS mechanism, so libuv runs them on a thread pool of 4 threads by default (`UV_THREADPOOL_SIZE`). The consequence is that heavy hashing or slow DNS can starve unrelated file reads and outbound HTTP calls, even though the event loop itself looks idle. Diagnose with event-loop delay versus request latency, cap concurrency of hashing, reuse keep-alive connections, and raise the pool size only after measuring.',
+            },
+            {
+              question: 'What happens in a typical `await db.query()` inside an Express 5 handler when the query rejects? What about Express 4?',
+              answer:
+                'In Express 5 the router checks whether a handler returned a promise and, if it rejects, calls `next(err)` for you, so the error reaches the four-argument error middleware exactly as if you had thrown synchronously. In Express 4 the returned promise was ignored: the rejection became an unhandled rejection (which terminates modern Node) and the request hung, unless you wrapped the handler or called `next(err)`. Two caveats remain in Express 5: errors thrown inside plain callbacks, timers, or emitters still bypass the chain, and `res.status()` now throws for non-integer values, so an error handler that sets a bad status code will itself fail.',
+            },
+            {
+              question: 'How do you cancel work when a client disconnects, and why does it matter?',
+              answer:
+                'Node does not cancel your handler automatically: if a user closes the tab, your database query or downstream HTTP call keeps running and consumes pool connections for a response nobody will read. Listen for `res.on(\'close\')` (check `res.writableFinished` to tell abort from normal completion), create an `AbortController`, and pass its `signal` to `fetch`, `fs.promises` operations, `stream.pipeline`, and drivers that support it. Combine it with `AbortSignal.timeout()` through `AbortSignal.any()` to also enforce a deadline. Under load this prevents wasted work piling up behind slow dependencies and is one of the cheapest resilience wins.',
+            },
+            {
+              question: 'Explain `AsyncLocalStorage` and where it is useful. What are its costs?',
+              answer:
+                '`AsyncLocalStorage` keeps a store that follows the asynchronous call chain, so code deep in a call tree can read request-scoped context (request id, user, tenant, trace span) without threading parameters through every function. It underpins logging correlation and OpenTelemetry context propagation. Run the context with `als.run(store, fn)` in a middleware, then call `als.getStore()` anywhere downstream. Costs: a small per-async-operation overhead (reduced in recent Node versions), context can be lost across libraries that use their own queues, callback pools or native addons (use `AsyncResource` to rebind), and overusing it hides dependencies. Never use module-level variables for per-request state because concurrent requests interleave at every `await`.',
+            },
+            {
+              question: 'What is the difference between `server.close()`, `closeIdleConnections()`, and `closeAllConnections()` during shutdown?',
+              answer:
+                '`server.close()` stops accepting new connections and calls its callback once all existing connections end; with HTTP keep-alive, idle sockets can keep it open for a long time. `closeIdleConnections()` destroys sockets that are not currently handling a request, which speeds up draining. `closeAllConnections()` destroys everything, including in-flight requests, so it is the last resort after a drain deadline. Long-lived connections (SSE, WebSockets) never become idle and must be ended explicitly. Combine these with a failing readiness probe, a short delay so the load balancer stops routing, and a forced-exit timer below the platform grace period.',
+            },
+            {
+              question: 'How does Node run TypeScript natively, and what are the limits?',
+              answer:
+                'Since Node 22.18 and 23.6 type stripping is on by default and is stable in current LTS lines: Node parses the file, replaces type annotations with whitespace, and executes the remaining JavaScript, preserving line and column numbers. It does not type-check and does not read `tsconfig.json`, so you still run `tsc --noEmit` in CI. Only erasable syntax works: `enum`, runtime `namespace`, parameter properties and legacy decorators need code generation and fail with `ERR_UNSUPPORTED_TYPESCRIPT_SYNTAX`. Relative imports need the `.ts` extension, type imports need `import type`, and Node refuses to strip types inside `node_modules`. Use tsx, SWC or tsc when you need the full language, as with NestJS.',
+            },
+            {
+              question: 'What is `require(esm)` and how does it change CommonJS/ESM interoperability?',
+              answer:
+                'Historically CommonJS could not `require()` an ES module because ESM loading is asynchronous, forcing dynamic `import()`. Since Node 22.12 (backported to 20.19) `require()` can load an ES module synchronously as long as the module graph has no top-level `await`; otherwise it throws `ERR_REQUIRE_ASYNC_MODULE`. This lets libraries ship ESM only without breaking CommonJS consumers, and reduces the dual package hazard (two copies of one library loaded via different formats, breaking `instanceof` and singletons). Packages should still declare entry points with the `exports` field and conditions, and applications can use `#` subpath imports for internal aliases.',
+            },
+            {
+              question: 'What is the Node permission model, and is it a sandbox?',
+              answer:
+                'Started with `--permission`, it denies file-system access, child processes, workers, native addons, WASI and similar capabilities unless granted by flags such as `--allow-fs-read` and `--allow-child-process`; `process.permission.has()` checks grants at runtime and `--permission-audit` shows what would be denied. It is stable in current LTS releases, but the documentation describes it as a seat belt for trusted code rather than a security boundary: symlinks are followed, existing file descriptors bypass it, and some startup-time flags are unchecked. Treat it as defence in depth against accidental misuse and compromised dependencies, and still rely on containers, non-root users, seccomp and network policies for isolation.',
+            },
+            {
+              question: 'How do you protect an Express API against abuse beyond basic rate limiting?',
+              answer:
+                'Layer defences: cap request size and parse time (`express.json({ limit })`, `server.requestTimeout`, `headersTimeout`), put rate limits behind a shared store such as Redis so they hold across instances, and key limits on account as well as IP because many users share NAT addresses. Use stricter limits and slow hashing budgets on credential endpoints, add per-tenant quotas and concurrency limits for expensive endpoints, return 429 with `Retry-After`, and apply timeouts and circuit breakers on downstream calls. Set `trust proxy` to the exact hop count or a client could forge `X-Forwarded-For` and evade IP limits. Terminate TLS and absorb volumetric attacks at a CDN or load balancer; Node should never be the first line against DDoS.',
+            },
+            {
+              question: 'What would you monitor for a Node service in production?',
+              answer:
+                'Service-level signals first: request rate, error rate and latency percentiles (p50/p95/p99) per route template, ideally against an SLO. Runtime signals: event-loop delay (`monitorEventLoopDelay`), heap used and GC pause time, active handles and open file descriptors, thread-pool saturation, and restarts. Dependency signals: database pool wait time and size, Redis latency, queue depth and job age, and outbound call error rates. Add structured logs with request ids, and distributed traces via OpenTelemetry for cross-service latency. Alert on user-visible symptoms, keep metric label cardinality low, and sample traces in production.',
+            },
+            {
+              question: 'How do you make an endpoint that charges money safe against retries and double submits?',
+              answer:
+                'Require an `Idempotency-Key` header, store the key with the request fingerprint and result in a durable store, and make the first request take a lock (a unique database constraint is best) so concurrent duplicates wait or receive the same response. Return the stored response for repeats and reject the same key with a different payload. Do the charge and the state change in one database transaction, or use an outbox table so the message to the payment provider is only sent once the transaction commits, and pass your own key to the provider. Retries from clients, load balancers and queues are all at-least-once, so every side effect must be idempotent.',
+            },
+            {
+              question: 'When would you NOT use Node.js?',
+              answer:
+                'Node is a poor fit when the dominant workload is long CPU-bound computation on the main thread (video encoding, large numerical simulations, ML training), because it blocks all other requests unless offloaded to worker threads or other services. It is also not ideal when you need strong static guarantees and mature numerical or ML ecosystems (Python, JVM, Go, Rust are better), or when predictable tail latency under heavy GC pressure matters at extreme scale. For I/O-bound APIs, BFF layers, real-time services, proxies and tooling, Node is excellent. A sensible approach is Node for the I/O-heavy edge and specialised services for heavy compute, connected by queues.',
+            },
+            {
+              question: 'What is the difference between `Promise.all`, `allSettled`, `race`, and `any`, and what are the production pitfalls?',
+              answer:
+                '`all` resolves with every result or rejects on the first rejection; `allSettled` always resolves with each outcome; `race` settles with the first promise to settle either way; `any` resolves with the first fulfilment and rejects with an `AggregateError` only if all reject. Pitfalls: the remaining promises of a failed `all` are not cancelled, so they keep running and their later rejections are swallowed, which is why you should also pass an `AbortSignal`; starting thousands of promises at once overwhelms databases and APIs, so limit concurrency; and `race` used for timeouts leaves the losing work running, so prefer `AbortSignal.timeout()` which actually cancels the operation.',
             },
           ],
         },

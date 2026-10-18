@@ -75,7 +75,26 @@ export const nuxtSection = {
             {
               type: 'callout',
               kind: 'note',
-              text: '**Versions:** the current major version is **Nuxt 4** (released mid-2025). It is an evolution of Nuxt 3 rather than a rewrite: the biggest visible change is that your application code moves into an `app/` directory, plus some stricter data-fetching defaults. This guide says explicitly where Nuxt 3 and Nuxt 4 differ. Nuxt 2 (Vue 2 based) is end-of-life and works very differently.',
+              text: '**Versions (as of October 2026):** the current major is **Nuxt 4** (4.0 shipped in July 2025; the 4.x line has had regular minor releases since, 4.6 being the latest at the time of writing). It is an evolution of Nuxt 3 rather than a rewrite: application code moves into an `app/` directory, data fetching got stricter and faster defaults, and TypeScript is split per context. **Nuxt 3 reached end-of-life on July 31, 2026** and Nuxt 2 (Vue 2) on June 30, 2024 — new work belongs on Nuxt 4. **Nuxt 5** (built around **Nitro v3** and **h3 v2**) is being prepared inside the 4.x line: you can already opt into most of its changes with `future: { compatibilityVersion: 5 }` — see the "Preparing for Nuxt 5" topic.',
+            },
+            {
+              type: 'heading',
+              text: 'The mental model you need for everything else',
+            },
+            {
+              type: 'p',
+              text: 'Almost every hard Nuxt bug comes from forgetting one fact: **your component code runs twice, in two different environments.** First on the server (Node, Bun, Deno or an edge worker), once per request, with no `window` and with many users sharing the same process. Then in the browser, once per tab, where it must reproduce *exactly* the same first render so hydration can reuse the server HTML. Data that the server already loaded must be **transferred** (the *payload*), not fetched again, and state that belongs to one user must be **created per request**, never at module scope. Keep this two-pass model in your head and most of Nuxt\'s APIs — `useFetch`, `useState`, `<ClientOnly>`, `import.meta.client`, `useRequestFetch` — stop looking like magic and start looking like the obvious tools for that model.',
+            },
+            {
+              type: 'table',
+              headers: ['Concern', 'Server pass (SSR)', 'Browser pass (hydration and after)'],
+              rows: [
+                ['Runs', 'Once per HTTP request, in a shared long-lived process', 'Once per tab, for one user'],
+                ['Available globals', 'No `window`, `document`, `localStorage`', 'Full DOM and browser APIs'],
+                ['Lifecycle hooks', '`setup` runs; `onMounted`/`onUpdated` never run', 'All hooks run'],
+                ['Data', 'Fetched here, then written into the payload', 'Read back from the payload on first load; fetched normally on later navigations'],
+                ['Danger', 'Leaking state between users; slow upstream calls block the response', 'Rendering something different from the server (hydration mismatch)'],
+              ],
             },
             {
               type: 'callout',
@@ -131,6 +150,9 @@ npm run generate     # fully static site (prerender every page)`,
     middleware/             # runs on every request
     utils/                  # auto-imported server helpers
   shared/                   # code usable by BOTH app/ and server/ (Nuxt 4)
+    utils/                  # auto-imported in app AND server
+    types/                  # auto-imported types
+  layers/                   # local Nuxt layers, auto-registered (see the layers topic)
   public/                   # served as-is at the site root (favicon, robots.txt)
   modules/                  # your own local Nuxt modules
   nuxt.config.ts
@@ -139,7 +161,22 @@ npm run generate     # fully static site (prerender every page)`,
             {
               type: 'callout',
               kind: 'note',
-              text: '**Why the `app/` folder?** In Nuxt 3, `pages/`, `server/`, `node_modules/` and `.git/` all sat side by side, which made file watchers slow and made it unclear what was browser code and what was server code. Nuxt 4 groups browser-side code in `app/` (the `~` alias now points there) and keeps server code outside it. Nuxt 3 projects can opt in early with `future: { compatibilityVersion: 4 }`.',
+              text: '**Why the `app/` folder?** In Nuxt 3, `pages/`, `server/`, `node_modules/` and `.git/` all sat side by side, which made file watchers slow and made it unclear what was browser code and what was server code. Nuxt 4 groups browser-side code in `app/` (the `~` alias now points there) and keeps server code outside it. Existing Nuxt 3-style layouts (folders at the root) are still auto-detected, so the move is not forced on day one — but new projects should use `app/`.',
+            },
+            {
+              type: 'table',
+              headers: ['Alias', 'Points to', 'Use it for'],
+              rows: [
+                ['`~` / `@`', '`app/` (the `srcDir`)', 'App code: `~/components/Foo.vue`'],
+                ['`~~` / `@@`', 'Project root (`rootDir`)', 'Root files: `~~/shared/schemas`, `~~/content`'],
+                ['`#shared`', '`shared/`', 'Code imported by both app and server'],
+                ['`#server`', '`server/` (Nuxt 4.3+)', 'Server-internal imports; import protection blocks it from client and shared code'],
+                ['`#imports`', 'Every auto-import', 'Explicit imports in tests and libraries: `import { useState } from \'#imports\'`'],
+              ],
+            },
+            {
+              type: 'p',
+              text: '**Three contexts, three TypeScript projects.** Nuxt 4 generates separate tsconfigs for the app, the server, shared code and the config/node context. That is not ceremony: it is what lets your editor tell you that `window` does not exist in a server handler, that `useRoute()` is not available in `server/`, and that a `shared/` file must not import either side. Nuxt 4 also turns on `noUncheckedIndexedAccess` by default, so `arr[0]` is typed as possibly `undefined` — expect a few new type errors when you upgrade, and fix them rather than switching it off.',
             },
             {
               type: 'heading',
@@ -303,6 +340,19 @@ const price = formatPrice(1999)            // from utils/
               kind: 'tip',
               text: 'You can always import explicitly — `import { useCart } from \'~/composables/useCart\'` — useful in tests, scripts and shared libraries. Explicit imports and auto-imports mix freely. Turn auto-imports off entirely with `imports: { autoImport: false }` if your team prefers explicit code.',
             },
+            {
+              type: 'heading',
+              text: 'Auto-imports on the server and in shared code',
+            },
+            {
+              type: 'p',
+              text: 'The server has its own, separate auto-import scope: files in `server/utils/` plus Nitro and h3 helpers (`defineEventHandler`, `getQuery`, `useStorage`...) are available in `server/` without imports. Files in `shared/utils/` and `shared/types/` are auto-imported on **both** sides. The two scopes never mix — a composable from `app/composables/` is not visible in a server handler, and that is deliberate: it would usually depend on the Vue app, which does not exist there.',
+            },
+            {
+              type: 'callout',
+              kind: 'note',
+              text: '**Direction of travel:** with `future: { compatibilityVersion: 5 }` server auto-imports become opt-in, and Nuxt 4.6 introduced explicit imports from `nuxt/server` for server code. Large teams increasingly keep auto-imports for Vue/Nuxt composables in the app but write explicit imports in `server/` — easier to grep, and portable across server runtimes.',
+            },
           ],
         },
         {
@@ -395,6 +445,45 @@ const { data: post } = await useFetch(\`/api/posts/\${slug}\`)
               type: 'callout',
               kind: 'pitfall',
               text: 'If you create `pages/settings.vue` **and** `pages/settings/index.vue` is missing, `/settings` renders the parent with an empty `<NuxtPage />`. Add `settings/index.vue` for the default child. Also: a page used with transitions or `<NuxtPage>` keys should have a **single root element**, otherwise transitions and route changes can misbehave.',
+            },
+            {
+              type: 'heading',
+              text: 'Route groups and named views',
+            },
+            {
+              type: 'p',
+              text: 'A folder in parentheses is a **route group**: it organises files without adding a URL segment. `pages/(marketing)/pricing.vue` is served at `/pricing`. Since Nuxt 4.3 the group names are exposed as `useRoute().meta.groups`, so one middleware can protect a whole group without listing every page. Nuxt 4.5 added **named views**: a sibling file named `child@sidebar.vue` renders into a `<NuxtPage name="sidebar" />` outlet next to the default one — useful for master/detail screens where a side panel depends on the route.',
+            },
+            {
+              type: 'code',
+              language: 'text',
+              title: 'route groups and named views',
+              code: `app/pages/
+  (marketing)/
+    pricing.vue             ->  /pricing              (meta.groups = ['marketing'])
+  (protected)/
+    dashboard.vue           ->  /dashboard            (meta.groups = ['protected'])
+  inbox.vue                 ->  parent with <NuxtPage /> and <NuxtPage name="sidebar" />
+  inbox/
+    [id].vue                ->  /inbox/42, default outlet
+    [id]@sidebar.vue        ->  /inbox/42, "sidebar" outlet (Nuxt 4.5+)`,
+            },
+            {
+              type: 'code',
+              language: 'ts',
+              title: 'app/middleware/protected.global.ts — guard a whole group',
+              code: `export default defineNuxtRouteMiddleware((to) => {
+  const groups = (to.meta.groups as string[] | undefined) ?? []
+  // useUserSession comes from nuxt-auth-utils; swap in your own auth composable
+  if (groups.includes('protected') && !useUserSession().loggedIn.value) {
+    return navigateTo({ path: '/login', query: { redirect: to.fullPath } })
+  }
+})`,
+            },
+            {
+              type: 'callout',
+              kind: 'note',
+              text: 'Nuxt 4.4 moved to **vue-router v5**, which absorbed the typed-routes work from `unplugin-vue-router`. Typed pages (`experimental.typedPages`) give you autocompletion and type errors for `navigateTo({ name: ... })` and `<NuxtLink :to>`; they are still behind a flag in Nuxt 4 and on by default with `compatibilityVersion: 5`. Also note that Nuxt 5 makes routing **case-sensitive** by default — do not rely on `/About` matching `about.vue`.',
             },
             {
               type: 'heading',
@@ -552,7 +641,38 @@ definePageMeta({ pageTransition: false })
             {
               type: 'callout',
               kind: 'tip',
-              text: '`<NuxtLoadingIndicator>` hooks into navigation and `useAsyncData` automatically. For manual control (a long form submit), use `const { start, finish } = useLoadingIndicator()`. Add `<NuxtRouteAnnouncer />` so screen readers announce page changes after a client-side navigation — an accessibility detail that plain SPAs often miss.',
+              text: '`<NuxtLoadingIndicator>` hooks into navigation and `useAsyncData` automatically. For manual control (a long form submit), use `const { start, finish } = useLoadingIndicator()`. Add `<NuxtRouteAnnouncer />` so screen readers announce page changes after a client-side navigation — an accessibility detail that plain SPAs often miss. For in-page updates ("Message sent"), Nuxt 4.4 added `useAnnouncer()` with `polite()` and `assertive()` plus a `<NuxtAnnouncer />` component.',
+            },
+            {
+              type: 'heading',
+              text: 'Layouts from route rules, with props (Nuxt 4.3+)',
+            },
+            {
+              type: 'p',
+              text: 'Choosing the layout in every page file does not scale for a whole area of the site. Since Nuxt 4.3 you can assign a layout by URL pattern with the `appLayout` route rule, pass props to a layout with `setPageLayout(name, props)` (or `definePageMeta({ layout: { name, props } })`, typed from the layout\'s `defineProps` since 4.4), and read the resolved layout anywhere with `useLayout()` (4.5).',
+            },
+            {
+              type: 'code',
+              language: 'ts',
+              title: 'layout per URL pattern and layout props',
+              code: `// nuxt.config.ts
+export default defineNuxtConfig({
+  routeRules: {
+    '/admin/**': { appLayout: 'admin' },
+    '/auth/**': { appLayout: 'minimal' },
+  },
+})
+
+// in a page or composable: switch layout and give it props
+setPageLayout('admin', { sidebar: true, theme: 'dark' })
+
+// in any component: which layout is active for this route? (read-only computed)
+const layout = useLayout()`,
+            },
+            {
+              type: 'callout',
+              kind: 'pitfall',
+              text: 'Layout state is **not** a good place for data. A layout stays mounted across navigations, so a `useFetch` inside it runs once and does not refetch when the page changes unless you watch the route. Keep layouts as dumb shells; fetch page data in pages, and shared data (current user, navigation menu) in a composable keyed with `useState`/`useAsyncData`.',
             },
           ],
         },
@@ -770,6 +890,43 @@ const html = computed(() => marked.parse(props.source))
               text: 'Prerendering freezes data at build time. A page that shows "5 items in stock" and is prerendered will show 5 forever (until the next build) — unless the *client* fetches fresh data after hydration. Do not prerender pages that depend on cookies, the logged-in user, or per-request headers.',
             },
             {
+              type: 'heading',
+              text: 'How cached routes interact with the payload',
+            },
+            {
+              type: 'p',
+              text: 'When a user navigates client-side *to* a prerendered or cached page, Nuxt does not need to run that page\'s `useFetch` calls in the browser: it downloads a small `_payload.json` generated alongside the HTML and hydrates the data from it (**payload extraction**). Since Nuxt 4.3 these payload files are also produced for `isr`, `swr` and `cache` route rules, not just prerendered pages, so a CDN can cache them next to the HTML. The consequence: on a cached route, *client-side navigations also see the cached data* — the TTL you chose applies to both the HTML and the data.',
+            },
+            {
+              type: 'heading',
+              text: 'SSR streaming (experimental, Nuxt 4.5+)',
+            },
+            {
+              type: 'p',
+              text: 'Classic SSR is **buffered**: the server renders the entire page into a string, then sends it. If one `useFetch` takes 800 ms, the browser receives nothing for 800 ms — not even the `<head>` with CSS and preload hints. With `experimental.ssrStreaming`, Nuxt sends the shell (head, styles, preload hints, entry scripts) immediately and streams the body as Vue renders it, so the browser starts downloading assets while your data is still loading.',
+            },
+            {
+              type: 'code',
+              language: 'ts',
+              title: 'nuxt.config.ts — opt into streaming',
+              code: `export default defineNuxtConfig({
+  experimental: {
+    ssrStreaming: {
+      // crawlers still get fully buffered HTML
+      botRegex: /googlebot|bingbot|my-internal-crawler/i,
+    },
+  },
+  routeRules: {
+    '/checkout/**': { streaming: false },   // per-route opt-out
+  },
+})`,
+            },
+            {
+              type: 'callout',
+              kind: 'pitfall',
+              text: '**Streaming commits the status code and headers with the first byte.** After that, `setResponseStatus()` in `<script setup>`, a cookie written by middleware during render, or a late `createError({ status: 404 })` can no longer change the response the browser already received (Nuxt logs a warning per dropped mutation in dev). Routes with `redirect`, `cache`, `isr`, `swr`, `noScripts` or `ssr: false` automatically fall back to buffered rendering. Stream content pages; keep auth-sensitive and status-sensitive routes buffered.',
+            },
+            {
               type: 'callout',
               kind: 'tip',
               text: 'Start with the default (SSR) and add `routeRules` only where you can name a concrete reason: speed (prerender/SWR), cost (cache expensive pages), or no SEO need (`ssr: false`). Hybrid rendering is one of Nuxt\'s strongest features because you can change a route\'s mode **without touching its component code**.',
@@ -914,6 +1071,166 @@ onMounted(() => {
               kind: 'pitfall',
               text: 'Hiding a mismatch by wrapping *everything* in `<ClientOnly>` defeats the purpose of SSR: crawlers and first paint see only the fallback. Wrap the smallest possible piece, and prefer fixing the cause.',
             },
+            {
+              type: 'heading',
+              text: 'What Vue actually does on a mismatch (and why it is worse in production)',
+            },
+            {
+              type: 'p',
+              text: 'Vue 3 hydration is a single depth-first walk that pairs each virtual node with the next real DOM node. Since Vue 3.4 it handles a mismatch *locally*: a text difference is patched in place; an element of the wrong tag, or a missing/extra node, causes Vue to throw that DOM subtree away and mount fresh nodes for it. Attribute and class mismatches are reported in dev but **not fixed** — the server value stays in the DOM, which is how you end up with a button that *looks* active but whose state says otherwise. In production the warnings are stripped for size, so a mismatch shows up only as flicker, lost focus/scroll, layout shift, or third-party widgets that were mounted into a node Vue later replaced.',
+            },
+            {
+              type: 'list',
+              ordered: true,
+              items: [
+                '**Reproduce with the production build** (`nuxt build && nuxt preview`) and also in dev, where Vue prints the mismatching node and expected vs actual value.',
+                '**Compare raw HTML with the client render:** "view source" (the server HTML) against the Elements panel right after load. Disable browser extensions and auto-translation first.',
+                '**Check the usual suspects:** time zones and locales (server in UTC, user in Europe/Berlin), `Intl` output differences between Node and the browser, random ids, `v-if` on browser state, invalid nesting, and data that changed between the server fetch and a *client* fetch (a `$fetch` in setup).',
+                '**Need details in production?** Vue exposes the compile-time flag `__VUE_PROD_HYDRATION_MISMATCH_DETAILS__`; define it as `true` through `vite.define` in a staging build to get full warnings without shipping them to everyone.',
+                '**Fix at the source**, then add an end-to-end test that loads the page with `waitUntil: \'hydration\'` and asserts there are no console warnings.',
+              ],
+            },
+            {
+              type: 'code',
+              language: 'vue',
+              title: 'timezone-safe dates with NuxtTime',
+              code: `<template>
+  <!-- Renders a <time> element with Intl formatting; NuxtTime is built to avoid
+       server/client mismatches caused by different locales and time zones -->
+  <NuxtTime :datetime="post.publishedAt" date-style="medium" time-style="short" />
+
+  <!-- Relative times ("3 minutes ago") are supported too -->
+  <NuxtTime :datetime="post.publishedAt" relative />
+</template>`,
+            },
+          ],
+        },
+        {
+          id: 'ssr-lifecycle-and-payload',
+          title: 'Inside an SSR Request: Lifecycle, Async Context and the Payload',
+          summary:
+            'What really happens between "request arrives" and "page is interactive": a fresh Vue app per request, plugins, middleware, Suspense-awaited setup, HTML rendering, head tags and a serialized payload that the browser revives instead of refetching.',
+          keyPoints: [
+            'Every request gets a **brand-new `nuxtApp` and Vue app instance**. Plugins run, route middleware runs, then pages render inside `<Suspense>`, which is why top-level `await useFetch()` can block the server render.',
+            'The **payload** is everything the client needs to recreate server state: `useAsyncData` results, `useState` values, Pinia state, errors and some flags. It is serialized with **devalue** (supports `Date`, `Map`, `Set`, refs, cyclic references) into `<script id="__NUXT_DATA__">`, or into `_payload.json` for prerendered/cached pages.',
+            'Composables find "the current app" through an **async context** (unctx). That context survives `await` only where Nuxt\'s compiler transforms the code (`<script setup>`, `defineNuxtPlugin`, `defineNuxtRouteMiddleware`) — elsewhere use `nuxtApp.runWithContext()`.',
+            'Payload size is a performance budget: it is downloaded as part of the HTML *and* parsed before hydration. Shrink it with `pick`/`transform`, avoid duplicating data in both `useFetch` and a store, and teach Nuxt to serialize custom classes with `definePayloadReducer`/`definePayloadReviver`.',
+          ],
+          blocks: [
+            {
+              type: 'p',
+              text: 'Most Nuxt APIs make sense only once you can picture a single request flowing through the system. The diagram below is the version a senior engineer keeps in their head when debugging: if you know which phase a piece of code runs in, you know which APIs are available, what can block the response and what ends up in the HTML.',
+            },
+            {
+              type: 'mermaid',
+              code: `sequenceDiagram
+    participant B as Browser
+    participant N as Nitro
+    participant R as Vue renderer
+    participant A as Nuxt app for this request
+    B->>N: GET /products/42
+    N->>N: server middleware and routeRules
+    N->>R: no API match - render page
+    R->>A: createNuxtApp and Vue app (fresh per request)
+    A->>A: run plugins in order
+    A->>A: run global then page route middleware
+    A->>A: setup inside Suspense - await useFetch etc.
+    A->>R: renderToString when all awaited setup resolved
+    R->>R: collect head tags (unhead) and preload hints
+    R->>R: serialize payload with devalue
+    R-->>B: HTML + __NUXT_DATA__ + script tags
+    B->>B: load entry JS, create app, run client plugins
+    B->>B: revive payload - useAsyncData reads cached result
+    B->>B: hydrate DOM, then onMounted hooks run`,
+            },
+            {
+              type: 'table',
+              headers: ['Phase', 'Server', 'Client (first load)', 'Typical code'],
+              rows: [
+                ['Nitro server plugins', 'Once per process start', 'Never', 'DB pool, Nitro hooks, logging'],
+                ['Server middleware', 'Every HTTP request', 'Never', 'Request ids, `event.context.user`'],
+                ['Nuxt plugins', 'Every SSR request', 'Once per tab', 'API clients, Vue plugins, auth bootstrap'],
+                ['Route middleware', 'First navigation', 'Every later navigation', 'Guards, redirects'],
+                ['`setup` / `useFetch`', 'Every SSR request', 'Hydration (reads payload, no refetch)', 'Page data'],
+                ['`onMounted`', 'Never', 'After hydration', 'Browser APIs, analytics, widgets'],
+              ],
+            },
+            {
+              type: 'heading',
+              text: 'Async context: why "Nuxt instance unavailable" happens',
+            },
+            {
+              type: 'p',
+              text: 'On the server, many requests are in flight at the same time inside one process, so `useNuxtApp()` cannot read a global variable — it would get another user\'s app. Nuxt keeps the current app in an *async context* that is set while your setup function runs. After an `await`, JavaScript resumes your function later, from the event loop, and the context may already belong to someone else. Nuxt\'s compiler rewrites `await` inside `<script setup>`, plugins and middleware so the context is restored afterwards (the `withAsyncContext` transform). Your own helper functions do not get that rewrite.',
+            },
+            {
+              type: 'code',
+              language: 'ts',
+              title: 'losing and restoring the context',
+              code: `// app/composables/useCheckout.ts
+export async function startCheckout() {
+  const nuxtApp = useNuxtApp()          // OK: called synchronously from setup
+  await $fetch('/api/cart/validate')    // context may be lost after this line...
+
+  // BAD: useRuntimeConfig()/useState() here may throw NUXT_E1001
+  // GOOD: re-enter the context explicitly
+  return nuxtApp.runWithContext(() => {
+    const config = useRuntimeConfig()
+    return navigateTo(config.public.checkoutUrl, { external: true })
+  })
+}`,
+            },
+            {
+              type: 'callout',
+              kind: 'tip',
+              text: 'Since Nuxt 4.5, warnings and errors carry stable codes (for example `NUXT_E1001` for a composable called outside the Nuxt context) with a "why" and a "fix" in development and a docs link for bigger problems. Search the code instead of the message text — it does not change between versions.',
+            },
+            {
+              type: 'heading',
+              text: 'The payload, concretely',
+            },
+            {
+              type: 'code',
+              language: 'html',
+              title: 'what ends up in the HTML (simplified)',
+              code: `<div id="__nuxt"><!-- server-rendered markup --></div>
+<script type="application/json" data-nuxt-data="nuxt-app" id="__NUXT_DATA__">
+  [{"data":1,"state":4},{"product-42":2},{"id":3,"name":"..."}, 42, {"$scart:items":5}, []]
+</script>`,
+            },
+            {
+              type: 'p',
+              text: 'The format is devalue\'s flat array of values with index references, which is why it can represent `Date`, `Map`, `Set`, repeated objects and cycles that plain JSON cannot. Nuxt adds reducers for its own types (refs, `NuxtError`, shallow reactive objects). Anything else — a class instance, a function, a Luxon `DateTime` — either fails to serialize or arrives as a plain object without methods. Nuxt 4 removed the old `window.__NUXT__` global: read the payload through `useNuxtApp().payload` if you must.',
+            },
+            {
+              type: 'code',
+              language: 'ts',
+              title: 'app/plugins/money-payload.ts — teach the payload about a custom class',
+              code: `import { Money } from '~/utils/money'
+
+export default definePayloadPlugin(() => {
+  // server: turn a Money instance into plain data
+  definePayloadReducer('Money', value => value instanceof Money && value.toJSON())
+  // client: rebuild the instance from that data
+  definePayloadReviver('Money', data => Money.fromJSON(data))
+})`,
+            },
+            {
+              type: 'table',
+              headers: ['Payload problem', 'Symptom', 'Fix'],
+              rows: [
+                ['Whole API objects stored', 'HTML of hundreds of KB, slow TTI on mobile', '`pick` / `transform` in `useFetch`, paginate'],
+                ['Same data in `useFetch` *and* a Pinia store', 'Data serialized twice', 'Pick one owner: store or async data'],
+                ['Secrets in state', 'Tokens visible in view-source', 'Never put server-only data in `useState` or stores — the payload is public'],
+                ['Custom classes', '`value.format is not a function` after hydration', 'Plain data, or payload reducer/reviver'],
+                ['Large static content', 'Payload duplicates text already in the HTML', 'Server components (islands) or `hydrate-never`'],
+              ],
+            },
+            {
+              type: 'callout',
+              kind: 'warning',
+              text: '**The payload is public.** Everything in `useState`, `useAsyncData` results and server-side Pinia state is embedded in the HTML that the user (and any cache in between) receives. Filter API responses on the server so that internal fields — emails of other users, cost prices, feature flags for staff — never enter a store that renders on a public page.',
+            },
           ],
         },
         {
@@ -925,7 +1242,7 @@ onMounted(() => {
             '`const { data, status, error, refresh } = await useFetch(\'/api/posts\')` — `data` starts empty then fills; `status` is `idle | pending | success | error`; `error` is set (not thrown) when the request fails; `refresh()` re-runs the request.',
             '**During SSR the request runs on the server and the result is copied into the page payload**, so the browser hydrates with that data and does **not** repeat the request on first load. Later client-side navigations fetch normally in the browser.',
             '`useFetch` is `useAsyncData` + `$fetch` with an automatic key, plus reactive URL/query support. Treat it as the default for "load this when the page renders".',
-            'Options you will use: `query`, `body`, `method`, `headers`, `lazy`, `server`, `default`, `transform`, `pick`, `watch`, `key`, `immediate`.',
+            'Options you will use: `query`, `body`, `method`, `headers`, `lazy`, `server`, `default`, `transform`, `pick`, `watch`, `key`, `immediate`, `deep`, `dedupe`, `getCachedData` and (Nuxt 4.5+) `enabled`, a ref or getter that blocks fetching while it is `false`.',
           ],
           blocks: [
             {
@@ -941,17 +1258,19 @@ interface Post { id: number; title: string }
 
 const page = ref(1)
 
-const { data: posts, status, error, refresh } = await useFetch<Post[]>('/api/posts', {
+const { data: posts, status, error, refresh } = await useFetch('/api/posts', {
   query: { page },          // a ref in query: changing page refetches automatically
   default: () => [],        // never undefined in the template
-  pick: ['id', 'title'] as any, // keep only these fields in the payload (smaller HTML)
+  // keep only what the template shows (smaller payload). Note: \`pick\` only works on
+  // a single object response; for arrays use transform.
+  transform: (rows: Post[]) => rows.map(({ id, title }) => ({ id, title })),
 })
 </script>
 
 <template>
   <div>
     <p v-if="status === 'pending'">Loading...</p>
-    <p v-else-if="error">Could not load posts: {{ error.statusMessage }}</p>
+    <p v-else-if="error">Could not load posts: {{ error.message }}</p>
     <ul v-else>
       <li v-for="post in posts" :key="post.id">
         <NuxtLink :to="\`/posts/\${post.id}\`">{{ post.title }}</NuxtLink>
@@ -998,8 +1317,8 @@ const { data: product, status, error } = await useFetch(\`/api/products/\${route
 // A missing item should be a real 404 for crawlers and users, not an empty page
 if (!product.value && error.value) {
   throw createError({
-    statusCode: error.value.statusCode ?? 404,
-    statusMessage: 'Product not found',
+    status: error.value.statusCode ?? 404,   // Nuxt 4.3+: status/statusText replace statusCode/statusMessage
+    statusText: 'Product not found',
     fatal: true,
   })
 }
@@ -1018,6 +1337,39 @@ if (!product.value && error.value) {
               type: 'callout',
               kind: 'pitfall',
               text: 'Do not call `useFetch` inside an event handler or after another `await` in your own functions (for example inside a button click or a `setTimeout`). It is a **composable**: it must run synchronously during `setup`, a plugin or route middleware. For user-triggered requests (submitting a form, clicking Save) use `$fetch` — see the next topic.',
+            },
+            {
+              type: 'heading',
+              text: 'Dependent requests and conditional fetching',
+            },
+            {
+              type: 'p',
+              text: 'A frequent real-world shape: request B needs a value from request A, or should only run once the user has chosen something. Do not nest `useFetch` inside a `watch`. Make the second call reactive on the first and gate it with `enabled` (Nuxt 4.5+) — while `enabled` is false no request is made, and flipping it to false mid-flight cancels the request without clearing existing `data`.',
+            },
+            {
+              type: 'code',
+              language: 'vue',
+              title: 'a dependent, gated request',
+              code: `<script setup lang="ts">
+const { data: user } = await useFetch('/api/me')
+
+const selectedTeam = ref<string>()
+
+// Reactive URL + enabled gate: runs only when both a user and a team exist,
+// and refetches automatically when selectedTeam changes.
+const { data: members, status } = await useFetch(
+  () => \`/api/teams/\${selectedTeam.value}/members\`,
+  {
+    enabled: () => !!user.value && !!selectedTeam.value,
+    default: () => [],
+  },
+)
+</script>`,
+            },
+            {
+              type: 'callout',
+              kind: 'note',
+              text: 'On Nuxt versions before 4.5, the same effect is achieved with `immediate: false` plus a `watch` source, calling `execute()` once the precondition is met. Prefer `enabled` where available — it expresses the intent directly and also handles cancellation.',
             },
           ],
         },
@@ -1102,19 +1454,24 @@ const { data: sameThing } = await useAsyncData('posts', () => $fetch('/api/posts
               code: `<script setup lang="ts">
 const route = useRoute()
 
-// Key includes the route param so each product gets its own cache entry
+// A reactive (getter) key, supported in Nuxt 4: each product gets its own cache entry,
+// and changing the id switches to (and fetches) the new entry automatically.
+// A plain template string would be evaluated once and keep the FIRST id forever.
 const { data, status, error } = await useAsyncData(
-  \`product-\${route.params.id}\`,
-  async () => {
-    // Two requests in parallel, merged into one result
+  () => \`product-\${route.params.id}\`,
+  async (_nuxtApp, { signal }) => {
+    // Two requests in parallel, merged into one result.
+    // signal (Nuxt 4.2+) aborts both if the id changes again before they finish.
     const [product, reviews] = await Promise.all([
-      $fetch(\`/api/products/\${route.params.id}\`),
-      $fetch(\`/api/products/\${route.params.id}/reviews\`),
+      $fetch(\`/api/products/\${route.params.id}\`, { signal }),
+      $fetch(\`/api/products/\${route.params.id}/reviews\`, { signal }),
     ])
     return { product, reviews }
   },
   {
-    watch: [() => route.params.id],     // refetch when the id changes (same page component reused)
+    // On Nuxt 3 (static keys only) you would instead add:
+    // watch: [() => route.params.id]
+    default: () => null,
   },
 )
 </script>`,
@@ -1132,7 +1489,7 @@ async function save() {
   try {
     // Runs only in the browser, after a click - $fetch is exactly right here
     await $fetch('/api/posts', { method: 'POST', body: { title: title.value } })
-    await refreshNuxtData('posts')   // re-run the data of the list page
+    await refreshNuxtData('posts')   // re-run the list page's data (it must use key: 'posts')
     await navigateTo('/posts')
   } catch (e: any) {
     alert(e.data?.statusMessage ?? 'Failed to save')
@@ -1162,7 +1519,7 @@ async function save() {
           keyPoints: [
             '`lazy: true` (or `useLazyFetch`) does **not** block navigation: the page renders immediately with `data` empty and `status === \'pending\'`, and fills in later. Without it, navigation waits for the data.',
             '`server: false` skips the server entirely and fetches only in the browser after hydration — good for data that is private to the user or not needed for SEO.',
-            '`transform` reshapes the response *before* it is stored in the payload (smaller HTML, fewer reactivity costs); `pick` keeps only named fields; `default` supplies initial data.',
+            '`transform` reshapes the response *before* it is stored in the payload (smaller HTML, fewer reactivity costs); `pick` keeps only named top-level fields of an *object* response; `default` supplies initial data.',
             '`refresh()` re-runs one call; `refreshNuxtData(\'key\')` re-runs by key from anywhere; `watch` refetches when reactive sources change; `getCachedData` controls reuse. In SSR, forward the visitor\'s cookies with `useRequestFetch()`.',
           ],
           blocks: [
@@ -1244,8 +1601,13 @@ const { data, refresh, status, clear } = await useFetch('/api/search', {
   query: { q: search },             // reactive: refetches when search changes
   watch: false,                     // ...but we want to control when with a button
   immediate: false,                 // do not run on mount at all; wait for execute()/refresh()
-  // Reuse the client-side cache on navigation back to this page
-  getCachedData: (key, nuxtApp) => nuxtApp.payload.data[key] ?? nuxtApp.static.data[key],
+  // Reuse already-loaded data when navigating back to this page.
+  // Nuxt 4 calls getCachedData on EVERY fetch (including refresh), so let manual
+  // refreshes through - otherwise the Search button would always return the cache.
+  getCachedData: (key, nuxtApp, ctx) => {
+    if (ctx.cause === 'refresh:manual') return undefined   // undefined = fetch for real
+    return nuxtApp.payload.data[key] ?? nuxtApp.static.data[key]
+  },
 })
 
 // Elsewhere, any component can re-run it by key:
@@ -1282,7 +1644,39 @@ const { data: orders } = await useFetch('/api/orders', { $fetch: requestFetch })
             {
               type: 'callout',
               kind: 'note',
-              text: '**Nuxt 4 data-fetching changes** (from Nuxt 3): `data` and `error` default to `undefined` instead of `null`; `data` is a **shallowRef** by default (set `deep: true` if you mutate nested fields and need deep reactivity); calls with the same key share their refs; reactive keys are supported and `dedupe` defaults to cancelling the previous in-flight request. In Nuxt 3, set `future: { compatibilityVersion: 4 }` to try them.',
+              text: '**Nuxt 4 data-fetching changes** (from Nuxt 3): `data` and `error` default to `undefined` instead of `null`; `data` is a **shallowRef** by default (set `deep: true` if you mutate nested fields and need deep reactivity); calls with the same key share one set of `data`/`error`/`status` refs (and Nuxt warns if they pass conflicting `transform`, `pick`, `default`, `deep` or `getCachedData`); keys can be refs, computeds or getters; `getCachedData` runs on every fetch and receives `ctx.cause`; `pending` is a computed that is true only while `status` is pending; `refresh({ dedupe })` takes `\'cancel\'` or `\'defer\'` instead of a boolean; `clear()` resets to your `default`; and prerender data is shared across pages, so keys must uniquely identify their data.',
+            },
+            {
+              type: 'heading',
+              text: 'Why shallowRef became the default',
+            },
+            {
+              type: 'p',
+              text: 'A deep `ref` wraps every nested object of the response in a reactive Proxy, lazily, as you touch it. For a 2,000-row table that is a lot of proxies, and the cost is paid on the server for *every request* and again in the browser. Fetched data is usually **replaced**, not mutated, so deep tracking buys nothing. `shallowRef` only tracks `.value` reassignment: assigning a new response re-renders, while `data.value.items.push(x)` silently does not. That is the trade: big wins for read-mostly data, one rule to remember for the rest.',
+            },
+            {
+              type: 'heading',
+              text: 'Race conditions and cancellation',
+            },
+            {
+              type: 'p',
+              text: 'Type "ne", then "nux" quickly into a search box and two requests race; if the first one is slower, its stale result can arrive last and overwrite the correct one. `useAsyncData` handles this with `dedupe: \'cancel\'` (the default): a new execution cancels the in-flight one. Since Nuxt 4.2 the handler also receives an `AbortSignal`, so the cancellation reaches the *network*, and `refresh()`/`execute()` accept your own signal.',
+            },
+            {
+              type: 'code',
+              language: 'ts',
+              title: 'abort-aware fetching',
+              code: `const q = ref('')
+
+const { data, refresh } = await useAsyncData(
+  () => \`search:\${q.value}\`,
+  (_nuxtApp, { signal }) => $fetch('/api/search', { query: { q: q.value }, signal }),
+)
+
+// Abort a refresh from your own code, e.g. when a dialog closes
+const controller = new AbortController()
+refresh({ signal: controller.signal })
+controller.abort()`,
             },
             {
               type: 'callout',
@@ -1293,6 +1687,127 @@ const { data: orders } = await useFetch('/api/orders', { $fetch: requestFetch })
               type: 'callout',
               kind: 'tip',
               text: 'Rule of thumb: await the data the page *needs to make sense* (and that crawlers should see); make decorative or secondary data `lazy`; make private per-user data `server: false`; use `$fetch` for anything triggered by a click.',
+            },
+          ],
+        },
+        {
+          id: 'custom-fetch-composables',
+          title: 'Custom Fetch Composables and API Clients (createUseFetch, $fetch.create)',
+          summary:
+            'Real apps talk to one or more backends with a base URL, auth headers, error mapping and retries. Centralise that once — with `$fetch.create` for the raw client and `createUseFetch` / `createUseAsyncData` (Nuxt 4.4+) for SSR-aware composables — instead of repeating options in every page.',
+          keyPoints: [
+            '`$fetch.create({ baseURL, onRequest, onResponseError, retry })` returns a pre-configured ofetch instance. Use it for mutations and inside `useAsyncData` handlers.',
+            '`createUseFetch(defaults | (options) => options)` (Nuxt 4.4+) produces your own `useFetch` variant — e.g. `useApiFetch` with a base URL from runtime config — that still has payload reuse, keys and SSR support. Define it in `composables/` so Nuxt registers it.',
+            'On the server, forward cookies or bearer tokens explicitly (`useRequestHeaders`, `useRequestFetch`) — internal calls do not carry the visitor\'s credentials by themselves.',
+            'Keep error handling in **one place**: map 401 to a login redirect, 403/404/5xx to `createError` or a toast, and never swallow errors silently.',
+          ],
+          blocks: [
+            {
+              type: 'p',
+              text: 'Once an app has more than a handful of pages, the same `useFetch` options appear everywhere: `baseURL: config.public.apiBase`, an `Authorization` header, `server: false` for private data, a `transform` that unwraps `{ data: ... }`. Copy-paste becomes drift — one page forgets the header, another handles 401 differently. The fix is the same as in any codebase: one client, one composable, one policy.',
+            },
+            {
+              type: 'heading',
+              text: 'Your own useFetch with createUseFetch (Nuxt 4.4+)',
+            },
+            {
+              type: 'code',
+              language: 'ts',
+              title: 'app/composables/useApiFetch.ts',
+              code: `// A plain object = defaults that call-site options override
+export const useClientFetch = createUseFetch({ server: false })
+
+// A function = full control over merging, with access to runtime config
+export const useApiFetch = createUseFetch((currentOptions) => {
+  const config = useRuntimeConfig()
+  return {
+    ...currentOptions,
+    baseURL: currentOptions.baseURL ?? config.public.apiBase,
+  }
+})
+
+// createUseAsyncData follows the same pattern for useAsyncData`,
+            },
+            {
+              type: 'code',
+              language: 'vue',
+              title: 'usage — identical to useFetch',
+              code: `<script setup lang="ts">
+const { data: users } = await useApiFetch('/users')            // SSR, payload, keys - all intact
+const { data: drafts } = await useClientFetch('/api/me/drafts') // browser-only by default
+</script>`,
+            },
+            {
+              type: 'callout',
+              kind: 'warning',
+              text: 'Do **not** build a custom composable by wrapping `useFetch` in a function that changes its call site or key behaviour carelessly (for example by always passing the same `key`). Keys must stay unique per request, or different pages will share one cache entry. `createUseFetch` exists precisely so that the key generation and SSR registration keep working.',
+            },
+            {
+              type: 'heading',
+              text: 'A shared $fetch client for mutations',
+            },
+            {
+              type: 'code',
+              language: 'ts',
+              title: 'app/plugins/api.ts — one client, one error policy',
+              code: `export default defineNuxtPlugin((nuxtApp) => {
+  const config = useRuntimeConfig()
+  // On the server, forward the visitor's cookie to the backend (empty object in the browser)
+  const forwarded = useRequestHeaders(['cookie'])
+
+  const api = $fetch.create({
+    baseURL: config.public.apiBase,
+    headers: forwarded,
+    retry: 1,                                  // retry idempotent requests once on network errors
+    retryStatusCodes: [502, 503, 504],
+    async onResponseError({ response }) {
+      if (response.status === 401) {
+        await nuxtApp.runWithContext(() => navigateTo('/login'))
+      }
+    },
+  })
+
+  return { provide: { api } }
+})`,
+            },
+            {
+              type: 'code',
+              language: 'ts',
+              title: 'app/composables/useOrders.ts — data + mutation together',
+              code: `export function useOrders() {
+  const { $api } = useNuxtApp()
+
+  const list = useAsyncData('orders', (_app, { signal }) =>
+    $api<Order[]>('/orders', { signal }), { default: () => [] })
+
+  async function cancel(id: string) {
+    await $api(\`/orders/\${id}/cancel\`, { method: 'POST' })
+    await list.refresh()                      // re-sync from the server, do not guess
+  }
+
+  return { ...list, cancel }
+}`,
+            },
+            {
+              type: 'table',
+              headers: ['Need', 'Tool'],
+              rows: [
+                ['Page data with SSR and payload reuse', '`useFetch` / your `createUseFetch` variant'],
+                ['Non-HTTP source or several calls merged', '`useAsyncData` / `createUseAsyncData`'],
+                ['Mutation on click / submit', 'Your `$fetch.create` client'],
+                ['Call own `/api` on server with user cookies', '`useRequestFetch()`'],
+                ['Call an external API from the server with a secret', 'A `server/api` proxy route using `useRuntimeConfig(event)` — never send the secret to the browser'],
+              ],
+            },
+            {
+              type: 'callout',
+              kind: 'pitfall',
+              text: '**Retries are not free.** Automatic retries on `POST` can create duplicate orders. ofetch does not retry `POST`/`PUT`/`PATCH`/`DELETE` by default for this reason; if you enable it, make the endpoint idempotent (an idempotency key sent by the client and checked by the server).',
+            },
+            {
+              type: 'callout',
+              kind: 'tip',
+              text: 'Prefer a **backend-for-frontend** route in `server/api` over calling third-party APIs directly from the browser: you keep secrets on the server, can cache with `defineCachedFunction`, reshape responses to exactly what the UI needs (smaller payload), and avoid CORS entirely.',
             },
           ],
         },
@@ -1403,7 +1918,7 @@ const { increment } = useCounter()
             {
               type: 'callout',
               kind: 'tip',
-              text: 'Because `useState` keys are global strings, prefix them by feature (`\'cart:items\'`, `\'auth:user\'`). Omit the key and Nuxt generates one from the call site — fine for one-off use, but an explicit key is safer when two files must share the state. Reset with `clearNuxtState(\'cart:items\')`.',
+              text: 'Because `useState` keys are global strings, prefix them by feature (`\'cart:items\'`, `\'auth:user\'`). Omit the key and Nuxt generates one from the call site — fine for one-off use, but an explicit key is safer when two files must share the state. Reset with `clearNuxtState(\'cart:items\')` — since Nuxt 4.4 this resets the state to its **initial value** (the init function result) rather than `undefined`.',
             },
           ],
         },
@@ -1413,7 +1928,7 @@ const { increment } = useCounter()
           summary:
             'For structured, larger app state use Pinia via the `@pinia/nuxt` module: stores are created per request, serialized into the payload and rehydrated in the browser automatically. Vuex is in maintenance mode and not recommended for new Nuxt apps.',
           keyPoints: [
-            'Install with `npx nuxi module add pinia` (adds `@pinia/nuxt` to `modules`). `defineStore`, `storeToRefs` and your store folder can be auto-imported. Pinia itself is covered in the Pinia topic of the Vue.js section — here is what Nuxt adds.',
+            'Install with `npx nuxt module add pinia` (adds `@pinia/nuxt` to `modules`). `defineStore`, `storeToRefs` and your store folder can be auto-imported. Pinia itself is covered in the Pinia topic of the Vue.js section — here is what Nuxt adds.',
             '**SSR hydration is automatic:** state set on the server is serialized into the payload and applied to the browser\'s Pinia instance, so the browser does not need to re-fetch what a server-side action already loaded.',
             '**Pattern for loading data into a store:** call the store action inside `await useAsyncData` or `callOnce`, so it runs once on the server and not again during hydration.',
             '**Vuex** was Nuxt 2\'s built-in store (`store/` folder). In Nuxt 3/4 it is not built in; Pinia is the official Vue state library. Use `useState` for small shared values and Pinia when you want actions, getters, devtools and structure.',
@@ -1423,7 +1938,7 @@ const { increment } = useCounter()
               type: 'code',
               language: 'bash',
               title: 'install',
-              code: `npx nuxi module add pinia      # installs pinia + @pinia/nuxt and updates nuxt.config.ts`,
+              code: `npx nuxt module add pinia      # installs pinia + @pinia/nuxt and updates nuxt.config.ts`,
             },
             {
               type: 'code',
@@ -1585,7 +2100,7 @@ export const usePrefsStore = defineStore('prefs', () => {
                 ['`server/middleware/*.ts`', 'every request', 'Logging, auth context, headers. Must **not return** a value to continue.'],
                 ['`server/plugins/*.ts`', 'at server start', 'Hook into Nitro (`render:response`), open connections'],
                 ['`server/utils/*.ts`', '—', 'Auto-imported helpers for server code only (`useDb()`)'],
-                ['`server/tasks/*.ts`', 'scheduled / on demand', 'Background tasks (experimental feature flag)'],
+                ['`server/tasks/*.ts`', 'scheduled / on demand', 'Background tasks (behind `nitro.experimental.tasks`); Nuxt CLI v4 can run them with `nuxt task`'],
               ],
             },
             {
@@ -1633,6 +2148,30 @@ PORT=3000 node .output/server/index.mjs`,
               type: 'callout',
               kind: 'warning',
               text: 'Server code runs in **many environments** (Node, Cloudflare Workers, Vercel Edge). Edge runtimes lack `fs`, native modules (`bcrypt`, `sharp`) and long-lived connections. If you target the edge, choose edge-friendly libraries (e.g. HTTP-based database clients) and test on the target preset.',
+            },
+            {
+              type: 'heading',
+              text: 'Nitro versions and the new nuxt/server entry point',
+            },
+            {
+              type: 'p',
+              text: 'Nuxt 4 runs on **Nitro v2** with **h3 v1**. Nuxt 5 moves to **Nitro v3** and **h3 v2**, whose request event is built on web standards (`event.req` is a standard `Request`, `event.url` a `URL`), so the same handler runs unchanged on Node, Bun, Deno and workers. To make that migration painless, Nuxt 4.6 introduced a small, version-neutral server API imported from `nuxt/server` — `defineEventHandler`, `createError`, `getQuery`, `getRouterParam(s)`, `readValidatedBody` (accepting any Standard Schema validator such as zod, valibot or arktype), `getRequestIP`, `handleCors`, `getRouteRules`, `useRuntimeConfig`, `useSession` and a few more. Handlers written against it work under Nitro v2, Nitro v3, and the experimental `@nuxt/vite-server`.',
+            },
+            {
+              type: 'code',
+              language: 'ts',
+              title: 'server/api/hello.get.ts — portable across Nitro versions (Nuxt 4.6+)',
+              code: `import { defineEventHandler, getQuery } from 'nuxt/server'
+
+export default defineEventHandler((event) => {
+  const { name } = getQuery<{ name?: string }>(event)
+  return { message: \`Hello, \${name ?? 'world'}!\` }
+})`,
+            },
+            {
+              type: 'callout',
+              kind: 'pitfall',
+              text: 'Do not mix the two worlds in one handler. On Nuxt 4 the *auto-imported* `defineEventHandler` and `readBody` are still h3 v1\'s versions; combining them with `nuxt/server` helpers triggers error `NUXT_E8012`. Pick one style per file — for new code that should survive the Nuxt 5 upgrade, import everything explicitly from `nuxt/server`. Nitro remains the default and recommended server; `@nuxt/vite-server` has no storage, caching, tasks or server plugins.',
             },
           ],
         },
@@ -1777,6 +2316,119 @@ async function submit() {
               type: 'callout',
               kind: 'tip',
               text: 'Because `server/api/posts.get.ts` and `server/api/posts.post.ts` share the URL `/api/posts`, the method suffix is what separates them. A file with no suffix (`posts.ts`) answers **all** methods, which is rarely what you want — check `event.method` yourself or use suffixes.',
+            },
+          ],
+        },
+        {
+          id: 'end-to-end-type-safety',
+          title: 'End-to-End Type Safety: shared/ Schemas, Typed $fetch and Typed Routes',
+          summary:
+            'Because the frontend and the backend live in one Nuxt project, one schema can validate the request on the server, type the form on the client and type the response of `$fetch` — no code generation, no drift between API and UI.',
+          keyPoints: [
+            'Put validation schemas and DTO types in `shared/` (auto-imported from `shared/utils` and `shared/types` on both sides). The server validates with them; the client reuses them for forms.',
+            '`$fetch` and `useFetch` infer the **response** type from the handler\'s return value. Since Nuxt 4.6, `experimental.routeTypedFetch` rebuilds this on `fetchdts` and also checks the request `body`, `query` and `headers`, scaling to hundreds of routes.',
+            'Types describe what crosses the wire **after serialization**: a `Date` returned from a handler arrives as a `string`, and class instances become plain objects. Model DTOs as JSON-friendly data.',
+            'Typed pages (`experimental.typedPages`) make `navigateTo` and `<NuxtLink :to>` type-check route names and params — rename a page and the compiler shows every broken link.',
+          ],
+          blocks: [
+            {
+              type: 'mermaid',
+              code: `flowchart LR
+    S["shared/utils/schemas.ts<br/>zod schema + inferred type"] --> SV["server/api/posts.post.ts<br/>readValidatedBody"]
+    S --> CL["app/pages/new.vue<br/>form validation"]
+    SV -- "return type inferred" --> F["$fetch / useFetch<br/>typed response"]
+    F --> CL`,
+            },
+            {
+              type: 'code',
+              language: 'ts',
+              title: 'shared/utils/schemas.ts — one source of truth',
+              code: `import { z } from 'zod'
+
+export const createPostSchema = z.object({
+  title: z.string().trim().min(3).max(120),
+  body: z.string().min(1),
+  tags: z.array(z.string()).max(5).default([]),
+})
+
+export type CreatePostInput = z.infer<typeof createPostSchema>
+
+// Keep DTOs JSON-friendly: ISO strings instead of Date objects
+export interface PostDto {
+  id: number
+  title: string
+  publishedAt: string
+}`,
+            },
+            {
+              type: 'code',
+              language: 'ts',
+              title: 'server/api/posts.post.ts — validate with the shared schema',
+              code: `export default defineEventHandler(async (event): Promise<PostDto> => {
+  // Throws a 400 with the validation issues if the body does not match
+  const input = await readValidatedBody(event, createPostSchema.parse)
+  const row = await db.posts.insert(input)
+  return { id: row.id, title: row.title, publishedAt: row.publishedAt.toISOString() }
+})`,
+            },
+            {
+              type: 'code',
+              language: 'vue',
+              title: 'app/pages/posts/new.vue — the same schema on the client',
+              code: `<script setup lang="ts">
+const form = reactive<CreatePostInput>({ title: '', body: '', tags: [] })
+
+const clientErrors = computed(() => {
+  const r = createPostSchema.safeParse(form)
+  return r.success ? [] : r.error.issues          // instant UX feedback, server re-validates
+})
+
+async function submit() {
+  // created is typed as PostDto, inferred from the handler
+  const created = await $fetch('/api/posts', { method: 'POST', body: form })
+  await navigateTo(\`/posts/\${created.id}\`)
+}
+</script>`,
+            },
+            {
+              type: 'heading',
+              text: 'Typed $fetch and typed routes',
+            },
+            {
+              type: 'code',
+              language: 'ts',
+              title: 'nuxt.config.ts — opt-in type features (Nuxt 4.6)',
+              code: `export default defineNuxtConfig({
+  experimental: {
+    routeTypedFetch: true,    // rebuilt typed $fetch: checks body/query/headers too
+    strictRouteTypes: true,   // unknown API paths become type errors instead of "unknown"
+    typedPages: true,         // typed route names and params for navigateTo / NuxtLink
+  },
+})`,
+            },
+            {
+              type: 'p',
+              text: 'Why was a rebuild needed? The older inference computed a giant union type of every route on each call, which hit TypeScript\'s "type instantiation is excessively deep" limit (`TS2589`) at a few hundred routes and made editors sluggish. The Nuxt 4.6 announcement reports type-checking a 300-route project dropping from several seconds (and an error) to a fraction of a second. If your project is large and editor performance matters, this flag is worth enabling early — it is on the path to becoming the Nuxt 5 default.',
+            },
+            {
+              type: 'table',
+              headers: ['Layer', 'Mechanism', 'Catches'],
+              rows: [
+                ['Request body/query', 'Shared zod (or any Standard Schema) + `readValidatedBody` / `getValidatedQuery`', 'Bad input at runtime (400) and at compile time on the client'],
+                ['Response', 'Handler return type inferred by `$fetch` / `useFetch`', 'UI using fields that no longer exist'],
+                ['Routes', '`typedPages`', 'Links to renamed or deleted pages, missing params'],
+                ['Environment', '`runtimeConfig` typed from defaults', 'Typos in config keys'],
+              ],
+            },
+            {
+              type: 'callout',
+              kind: 'pitfall',
+              text: 'Compile-time types are not a security boundary. TypeScript disappears at build time; anyone can POST anything to `/api/posts`. The schema must run **on the server** for every request, and it is the server\'s validated output — not the client\'s form type — that you trust.',
+            },
+            {
+              type: 'callout',
+              kind: 'tip',
+              text: 'Never import from `server/` into `app/` to "share a type" — import protection will (rightly) block server code from reaching the client bundle. Move the type into `shared/`. If a type depends on your ORM (`InferSelectModel<typeof posts>`), map it to a DTO in `shared/` so the client does not transitively import the database layer.',
             },
           ],
         },
@@ -2028,9 +2680,11 @@ export const useFavorites = () => {
               type: 'table',
               headers: ['Module', 'What it gives you', 'Use when'],
               rows: [
-                ['`@nuxt/image`', '`<NuxtImg>` / `<NuxtPicture>`: resizing, modern formats (WebP/AVIF), lazy loading, srcset', 'You show many or large images'],
-                ['`@nuxt/content`', 'Write pages as Markdown/YAML/JSON files; query them with `queryCollection` (v3)', 'Docs, blogs, marketing sites'],
-                ['`@nuxt/ui`', 'Accessible component library on Tailwind CSS (buttons, forms, modals, tables)', 'You want a ready-made design system'],
+                ['`@nuxt/image`', '`<NuxtImg>` / `<NuxtPicture>`: resizing, modern formats (WebP/AVIF), lazy loading, srcset; v2 (Nov 2025) brought full TypeScript support and IPX v3', 'You show many or large images'],
+                ['`@nuxt/content`', 'Write pages as Markdown/YAML/JSON files; v3 stores them in an SQL database (SQLite, D1, Postgres...) defined by typed collections and queried with `queryCollection`', 'Docs, blogs, marketing sites'],
+                ['`@nuxt/ui`', 'Accessible component library on Tailwind CSS and Reka UI; since v4 (Sept 2025) the former Pro components are merged in and free (100+ components)', 'You want a ready-made design system'],
+                ['`@nuxt/scripts`', 'Load third-party scripts (analytics, maps, chat) with triggers such as idle or interaction, plus typed wrappers', 'Third-party JS is hurting performance'],
+                ['`@nuxt/fonts`', 'Self-hosts and optimises web fonts with fallback metrics to reduce layout shift', 'Any site using custom fonts'],
                 ['`@nuxtjs/i18n`', 'Translations, locale routing (`/fr/about`), `useI18n`, SEO alternates', 'Multi-language sites'],
                 ['`@vueuse/nuxt`', 'Auto-imports hundreds of SSR-aware VueUse composables', 'Browser utilities (`useMouse`, `useStorage`, `useDark`)'],
                 ['`nuxt-auth-utils`', 'Sealed-cookie sessions, `useUserSession`, OAuth providers, password hashing', 'Simple, first-party session auth'],
@@ -2044,7 +2698,8 @@ export const useFavorites = () => {
               title: 'add modules',
               code: `npx nuxt module add image
 npx nuxt module add @nuxt/ui
-npx nuxt module add i18n`,
+npx nuxt module add i18n
+npx nuxt module remove i18n     # Nuxt CLI: uninstall and remove from nuxt.config`,
             },
             {
               type: 'code',
@@ -2144,6 +2799,91 @@ export default defineEventHandler(() => ({ message: 'served by the greeter modul
           ],
         },
         {
+          id: 'nuxt-layers',
+          title: 'Nuxt Layers: Sharing Apps, Themes and Domains Across Projects',
+          summary:
+            'A layer is a partial Nuxt app — its own `nuxt.config`, `app/`, `server/`, components and composables — that another project extends. Layers are how you share a design system, an auth setup or an entire feature domain across several Nuxt apps, or split one large app by domain.',
+          keyPoints: [
+            'Add layers with `extends: [\'../base\', \'github:org/repo\', \'@acme/nuxt-layer\']`, or drop them into `layers/` where they are registered automatically.',
+            'Layers **merge**: configs are deep-merged, and files (components, pages, composables, server routes) are combined. When two layers define the same file, the **project wins over its layers**, which lets an app override a single component from a theme layer.',
+            'Layers vs modules: a module is *code that configures Nuxt at build time*; a layer is *a Nuxt project* that gets merged in. Use a layer to share app code and conventions, a module to share an integration.',
+            'Useful for monorepos: one layer per business domain (`layers/billing`, `layers/catalog`) keeps ownership clear while still building a single app.',
+          ],
+          blocks: [
+            {
+              type: 'p',
+              text: 'Imagine five marketing sites for five brands. They share the header, footer, cookie banner, analytics plugin, SEO defaults and a `/api/newsletter` endpoint, but each has its own pages and colours. With modules you would have to package each piece separately; with a **layer** you publish one small Nuxt project with all of it, and each site `extends` it and adds only what is different.',
+            },
+            {
+              type: 'code',
+              language: 'text',
+              title: 'a monorepo split into domain layers',
+              code: `my-app/
+  nuxt.config.ts              # extends nothing explicitly: layers/ is auto-scanned
+  app/pages/index.vue
+  layers/
+    base/                     # design system, layouts, app.config, error page
+      nuxt.config.ts
+      app/components/AppButton.vue
+      app/layouts/default.vue
+    auth/                     # login pages, middleware, server/api/auth/*
+      nuxt.config.ts
+      app/pages/login.vue
+      app/middleware/auth.ts
+      server/api/auth/login.post.ts
+    billing/                  # invoices pages, stores and server routes
+      nuxt.config.ts
+      app/pages/billing/index.vue
+      server/api/invoices.get.ts`,
+            },
+            {
+              type: 'code',
+              language: 'ts',
+              title: 'nuxt.config.ts — extending remote and local layers',
+              code: `export default defineNuxtConfig({
+  extends: [
+    '../shared-theme',                          // local path
+    ['github:acme/nuxt-base-layer', { install: true }],  // remote git layer
+    '@acme/nuxt-analytics-layer',               // npm package
+  ],
+
+  // Nuxt 4.3+: disable a module that a layer enabled
+  image: false,
+})`,
+            },
+            {
+              type: 'mermaid',
+              code: `flowchart TB
+    P["Your project<br/>highest priority"] --> M["Merged Nuxt app"]
+    L1["layers/auth"] --> M
+    L2["layers/base"] --> M
+    E["extends: remote theme<br/>lowest priority"] --> M
+    M --> O["Same file in several places?<br/>the higher-priority source wins"]`,
+            },
+            {
+              type: 'table',
+              headers: ['', 'Layer', 'Module'],
+              rows: [
+                ['What it is', 'A (partial) Nuxt project', 'A build-time function using `@nuxt/kit`'],
+                ['Contains', 'Pages, components, composables, server routes, config, assets', 'Logic that adds or changes those things'],
+                ['Overriding', 'Override any file by creating the same path in the project', 'Only through the options the module exposes'],
+                ['Typical use', 'Themes, starter kits, shared domains, multi-brand sites', 'Integrations: images, i18n, auth providers, CMS'],
+                ['Effort to create', 'Low: it is just a Nuxt folder', 'Medium: API design, kit helpers, publishing'],
+              ],
+            },
+            {
+              type: 'callout',
+              kind: 'pitfall',
+              text: '**Relative paths inside a layer resolve against the project, not the layer.** In a layer\'s `nuxt.config.ts`, `css: [\'./assets/main.css\']` would look in the consuming app. Resolve paths explicitly (for example with `fileURLToPath(new URL(\'./app/assets/main.css\', import.meta.url))`) or use the layer aliases. Also remember that in Nuxt 4 **layer modules load before project modules**, which matters if a project module expects to configure something a layer module sets up.',
+            },
+            {
+              type: 'callout',
+              kind: 'tip',
+              text: 'Keep layer boundaries honest: a domain layer should expose a small public surface (its pages, a few composables, its API) and not reach into another domain\'s internals. If two layers keep importing each other, they are one domain. Auto-scanned `layers/` directories are ordered by name — prefix them with numbers when the override order between sibling layers matters.',
+            },
+          ],
+        },
+        {
           id: 'seo-and-meta',
           title: 'SEO and Meta: useHead, useSeoMeta, Sitemap and Open Graph',
           summary:
@@ -2218,12 +2958,13 @@ useHead({
   link: [{ rel: 'canonical', href: url }],       // tells search engines the preferred URL
   script: [{
     type: 'application/ld+json',                  // structured data for rich results
-    innerHTML: {
+    // Serialize explicitly; never build JSON-LD by string concatenation (XSS risk)
+    innerHTML: JSON.stringify({
       '@context': 'https://schema.org',
       '@type': 'Article',
       headline: post.value.title,
       datePublished: post.value.publishedAt,
-    },
+    }),
   }],
 })
 </script>`,
@@ -2362,6 +3103,19 @@ export const useApi = () => {
               kind: 'pitfall',
               text: 'Variable not overriding? Check that (1) the key exists in `runtimeConfig` with a default (even an empty string), (2) the env name is exactly `NUXT_` + UPPER_SNAKE path (`NUXT_PUBLIC_API_BASE`, not `API_BASE`), and (3) the variable is set in the **runtime** environment of the process that serves requests, not only at build time.',
             },
+            {
+              type: 'callout',
+              kind: 'note',
+              text: '**Reserved keys (Nuxt 4.6+):** runtime config keys starting with `app` are reserved for Nuxt. `runtimeConfig.appSecret` (set via `NUXT_APP_SECRET`) is the framework-level secret used by built-in sealed sessions, and modules derive their own purpose-specific secrets from it. In development Nuxt generates one if none is set; production builds never do — set a long random value per environment and rotate it like any other secret.',
+            },
+            {
+              type: 'heading',
+              text: 'Build time vs runtime: the mistake that ships the wrong URL',
+            },
+            {
+              type: 'p',
+              text: 'Anything evaluated while `nuxt build` runs — `process.env.X` inside `nuxt.config.ts`, `app.config.ts`, a value hard-coded into a module option — is **frozen into the bundle**. If you build one Docker image and promote it from staging to production, those values stay at their staging settings. `runtimeConfig` keys, by contrast, are re-read from `NUXT_*` variables every time the server starts. Rule: "build once, deploy many" requires every environment-specific value to be a `runtimeConfig` key.',
+            },
           ],
         },
         {
@@ -2477,6 +3231,34 @@ async function deleteAccount() {
               type: 'callout',
               kind: 'tip',
               text: 'In production, Nuxt hides stack traces from visitors. Log the real error on the server (Nitro plugin on `error`, or an observability tool) and show a friendly message with a request id so users can quote it to support.',
+            },
+            {
+              type: 'heading',
+              text: 'status / statusText replace statusCode / statusMessage (Nuxt 4.3+)',
+            },
+            {
+              type: 'p',
+              text: 'Nuxt 4.3 deprecated the `statusCode` and `statusMessage` options of `createError` in favour of the web-standard names `status` and `statusText` (matching `Response`). The old names still work during the deprecation period, so existing code keeps running, but write new code with the new names and migrate when convenient. Note that `$fetch` errors (ofetch `FetchError`) expose both `status` and `statusCode`.',
+            },
+            {
+              type: 'code',
+              language: 'ts',
+              title: 'old and new spelling',
+              code: `// Nuxt 3 / early Nuxt 4 style (deprecated, still works)
+throw createError({ statusCode: 404, statusMessage: 'Not Found' })
+
+// Nuxt 4.3+ style
+throw createError({ status: 404, statusText: 'Not Found', data: { slug } })`,
+            },
+            {
+              type: 'callout',
+              kind: 'warning',
+              text: '`statusText` travels in the HTTP status line and in the error page; keep it short and generic. Put structured details in `data` (Nuxt 4 parses `error.data` automatically) and never include internal messages, SQL or stack traces — anything you put in an error you throw from a server route is sent to the client.',
+            },
+            {
+              type: 'callout',
+              kind: 'note',
+              text: 'Development got better too: since Nuxt 4.2 you see *your* `error.vue` together with a toggleable technical overlay (stack trace, source-mapped code frame), so you can design the user-facing page and debug the cause at the same time.',
             },
           ],
         },
@@ -2638,6 +3420,136 @@ async function logout() {
               kind: 'tip',
               text: 'Authentication ("who are you?") is different from authorization ("what may you do?"). Keep roles/permissions in the session or look them up server-side per request, and write a small helper like `requireRole(event, \'admin\')` in `server/utils` so every handler uses the same check.',
             },
+            {
+              type: 'heading',
+              text: 'Built-in sealed sessions (Nuxt 4.6+)',
+            },
+            {
+              type: 'p',
+              text: 'Nuxt 4.6 added a framework-level `useSession(event)` to `nuxt/server`. The session data is sealed (encrypted and signed, using iron) into a cookie with the `runtimeConfig.appSecret` key, so no server-side store is required. It is a primitive, not a full auth solution — no OAuth, password hashing or client composable — so `nuxt-auth-utils` remains the pragmatic choice for login flows; but for "remember this visitor\'s cart / preferences / CSRF state" the built-in session avoids an extra dependency.',
+            },
+            {
+              type: 'code',
+              language: 'ts',
+              title: 'server/api/visits.get.ts',
+              code: `import { defineEventHandler, useSession } from 'nuxt/server'
+
+export default defineEventHandler(async (event) => {
+  const session = await useSession<{ visits: number }>(event)
+  await session.update(d => ({ visits: (d.visits ?? 0) + 1 }))
+  return { visits: session.data.visits }
+})`,
+            },
+            {
+              type: 'table',
+              headers: ['Approach', 'Where state lives', 'Revocation', 'Good for'],
+              rows: [
+                ['Sealed cookie session (`nuxt-auth-utils`, `useSession`)', 'Encrypted in the cookie (about 4 KB max)', 'Hard: valid until expiry unless you add a server-side denylist or version check', 'Most apps; simple, stateless, scales horizontally'],
+                ['Session id + server store (Redis/DB)', 'Server; cookie holds only a random id', 'Easy: delete the record', 'Banking, admin tools, "log out everywhere"'],
+                ['JWT in httpOnly cookie from an external IdP', 'Token claims, verified per request', 'Short expiry + refresh token rotation', 'SSO, many services sharing one identity provider'],
+                ['Token in `localStorage`', 'Browser JS', '—', 'Avoid with SSR: invisible to the server and exposed to XSS'],
+              ],
+            },
+            {
+              type: 'callout',
+              kind: 'pitfall',
+              text: 'Never render pages that read the session on a shared cache route (`swr`, `isr`, `cache`, `prerender`). The first visitor\'s personalised HTML would be stored and served to everyone. Keep authenticated areas on plain SSR with `cache-control: private, no-store`, or render the shell from cache and load user-specific parts on the client.',
+            },
+          ],
+        },
+        {
+          id: 'security-hardening',
+          title: 'Security Hardening: XSS, CSRF, Headers, SSRF and Secrets',
+          summary:
+            'A full-stack framework gives you a full-stack attack surface. The main Nuxt-specific risks are XSS through `v-html` and the public payload, CSRF on cookie-authenticated endpoints, SSRF through server-side proxies, leaked secrets via `runtimeConfig.public`, and cached personal data.',
+          keyPoints: [
+            'Vue escapes interpolations, so XSS mostly enters via `v-html`, `innerHTML` in head scripts, URLs in `:href` (`javascript:`), and untrusted Markdown. Sanitize on the server and add a **Content Security Policy**.',
+            'Cookie sessions need **CSRF** protection for state-changing requests: `sameSite: \'lax\'` (or `strict`) cookies, only mutate on POST/PUT/PATCH/DELETE, and check `Origin` or a CSRF token for anything cross-site.',
+            'Security headers (CSP, HSTS, `X-Content-Type-Options`, `Referrer-Policy`, frame protection) can be set with `routeRules.headers`, a Nitro plugin, or the community `nuxt-security` module.',
+            'Server routes that fetch a user-supplied URL are an **SSRF** risk; allow-list hosts. Rate-limit login and expensive endpoints, and validate every input with a schema.',
+          ],
+          blocks: [
+            {
+              type: 'table',
+              headers: ['Threat', 'How it shows up in Nuxt', 'Mitigation'],
+              rows: [
+                ['XSS', '`v-html` with CMS content; JSON-LD built by string concatenation; `:href` from user input', 'Sanitize (e.g. DOMPurify on the server), `JSON.stringify` for JSON-LD, validate URL schemes, CSP'],
+                ['Data exposure', 'Secrets under `runtimeConfig.public`; full user objects in the payload', 'Server-only config; DTOs that whitelist fields'],
+                ['CSRF', 'Cookie-authenticated `POST /api/*` reachable from other sites', '`sameSite` cookies, origin checks, CSRF tokens, no GET mutations'],
+                ['SSRF', '`/api/proxy?url=...` or image fetchers', 'Allow-list hosts, block private IP ranges, timeouts'],
+                ['Broken access control', 'Only route middleware protects data', 'Check session and ownership in every handler'],
+                ['Cache poisoning / leaks', 'Personalised responses on `swr`/`cache` routes', 'Cache only public data; `private, no-store` for user pages'],
+                ['Brute force / abuse', 'Login, signup, search endpoints', 'Rate limiting at the edge or in Nitro middleware'],
+              ],
+            },
+            {
+              type: 'code',
+              language: 'ts',
+              title: 'nuxt.config.ts — baseline security headers with routeRules',
+              code: `export default defineNuxtConfig({
+  routeRules: {
+    '/**': {
+      headers: {
+        'strict-transport-security': 'max-age=31536000; includeSubDomains',
+        'x-content-type-options': 'nosniff',
+        'referrer-policy': 'strict-origin-when-cross-origin',
+        'x-frame-options': 'DENY',
+        'permissions-policy': 'camera=(), microphone=(), geolocation=()',
+      },
+    },
+    '/account/**': { headers: { 'cache-control': 'private, no-store' } },
+  },
+})`,
+            },
+            {
+              type: 'p',
+              text: '**Content Security Policy is harder with SSR than it looks**: Nuxt injects inline scripts (the payload, and in some setups hydration helpers), so a naive `script-src \'self\'` breaks the app. You need per-request **nonces** (or hashes for prerendered pages). This is the main reason teams adopt the community `nuxt-security` module, which generates nonces, sets the other headers with sensible defaults, and adds rate limiting, request size limits and an XSS validator. Whatever you choose, roll out CSP in `report-only` mode first and watch the reports.',
+            },
+            {
+              type: 'code',
+              language: 'ts',
+              title: 'server/middleware/csrf-origin.ts — a simple origin check for mutations',
+              code: `const SAFE = new Set(['GET', 'HEAD', 'OPTIONS'])
+
+export default defineEventHandler((event) => {
+  if (SAFE.has(event.method) || !event.path.startsWith('/api/')) return
+
+  const origin = getHeader(event, 'origin')
+  const host = getRequestHost(event, { xForwardedHost: true })
+  // Browsers send Origin on cross-site POSTs; reject mismatches
+  if (origin && new URL(origin).host !== host) {
+    throw createError({ status: 403, statusText: 'Cross-site request blocked' })
+  }
+})`,
+            },
+            {
+              type: 'code',
+              language: 'ts',
+              title: 'server/api/preview.get.ts — avoiding SSRF in a URL fetcher',
+              code: `const ALLOWED_HOSTS = new Set(['images.example-cdn.com', 'api.partner.com'])
+
+export default defineEventHandler(async (event) => {
+  const { url } = getQuery(event)
+  let target: URL
+  try { target = new URL(String(url)) } catch {
+    throw createError({ status: 400, statusText: 'Invalid URL' })
+  }
+  if (target.protocol !== 'https:' || !ALLOWED_HOSTS.has(target.hostname)) {
+    throw createError({ status: 400, statusText: 'Host not allowed' })
+  }
+  return $fetch(target.toString(), { timeout: 5000 })
+})`,
+            },
+            {
+              type: 'callout',
+              kind: 'warning',
+              text: '**The trust boundary is the server handler.** Route middleware, hidden buttons, TypeScript types and client-side validation are all UX. Every handler that reads or writes private data must authenticate, authorize (does *this* user own *this* order?), and validate input itself.',
+            },
+            {
+              type: 'callout',
+              kind: 'tip',
+              text: 'Keep dependencies patched: Nuxt publishes coordinated security releases (for example the July 2026 patch releases for Nuxt 4.5.1, Nuxt 3.21.10 and DevTools). Subscribe to the GitHub security advisories of `nuxt/nuxt` and your modules, run `npm audit` in CI, and never expose Nuxt DevTools or a dev server on a public network.',
+            },
           ],
         },
         {
@@ -2762,7 +3674,12 @@ async function logout() {
     '/blog/**': { swr: 3600 },
   },
   experimental: {
-    payloadExtraction: true,    // prerendered pages load data from a small _payload.json on client navigation
+    // Payload extraction is on by default. 'client' (Nuxt 4.4+, experimental) inlines the
+    // payload in the first HTML and caches _payload.json in memory on navigation;
+    // it becomes the default under compatibilityVersion 5.
+    payloadExtraction: 'client',
+    extractAsyncDataHandlers: true,   // Nuxt 4.2+: move useAsyncData handlers into lazy chunks
+    early404: true,                   // Nuxt 4.6+: skip app setup for URLs that match no page
   },
   nitro: { compressPublicAssets: true },   // pre-gzip/brotli static files
 })`,
@@ -2864,7 +3781,10 @@ async function logout() {
       // Replace the in-memory "cache" mount with Redis so all instances share it
       cache: {
         driver: 'redis',
-        url: process.env.REDIS_URL,                // read at build time; or use runtime env for the driver
+        // CAREFUL: process.env here is read at BUILD time and baked into the output.
+        // For "build once, deploy many", mount the driver at runtime in a Nitro plugin
+        // (useStorage().mount('cache', redisDriver({ url: useRuntimeConfig().redisUrl })))
+        url: process.env.REDIS_URL,
       },
     },
     devStorage: {
@@ -2898,6 +3818,22 @@ async function logout() {
               kind: 'note',
               text: 'There are three layers you can combine: **browser** (HTTP headers like `Cache-Control`), **CDN** (`s-maxage` and `stale-while-revalidate`, which `swr`/`isr` route rules emit), and **Nitro storage** (the server-side cache described here). Decide which layer should hold each piece of data and how it is invalidated.',
             },
+            {
+              type: 'heading',
+              text: 'Production caching pitfalls',
+            },
+            {
+              type: 'table',
+              headers: ['Pitfall', 'What happens', 'Prevention'],
+              rows: [
+                ['Cache stampede', 'An entry expires under heavy load and hundreds of requests recompute it at once', 'Keep `swr: true` so only a background refresh recomputes; Nitro also de-duplicates concurrent resolutions of the same key within one instance'],
+                ['Per-instance memory cache', 'Each of 10 pods has its own copy; users see different data depending on the pod; invalidation hits only one', 'Shared driver (Redis, Cloudflare KV) for anything you invalidate'],
+                ['Serverless memory', 'Cache vanishes on every cold start, hit ratio near zero', 'Use the platform KV/CDN (`isr`) or a remote store'],
+                ['Missing `varies` / key parts', 'English page served to French users; page 1 served for `?page=2`', 'Put every input that changes the output into `getKey` or `varies`'],
+                ['Caching errors', 'A transient 500 from upstream is cached for an hour', 'Throw instead of returning error objects; use `shouldBypassCache` / `shouldInvalidateCache` for special cases'],
+                ['Unbounded keys', 'Free-text search terms create millions of entries and exhaust Redis memory', 'Normalise keys, cap length, set TTLs, do not cache long-tail queries'],
+              ],
+            },
           ],
         },
         {
@@ -2920,7 +3856,7 @@ async function logout() {
     A -- yes --> B{"Where should it run?"}
     B -- "My own server or container" --> N["node-server preset plus Docker or PM2"]
     B -- "Managed serverless" --> SV["vercel, netlify, aws-lambda presets"]
-    B -- "Edge close to users" --> E["cloudflare-pages, cloudflare module, deno-deploy presets"]
+    B -- "Edge close to users" --> E["cloudflare-module, cloudflare-pages, deno-deploy presets"]
     SV --> I["ISR and swr route rules supported by platform CDN"]
     E --> L["Limited Node APIs: choose edge-friendly libraries"]`,
             },
@@ -2952,10 +3888,11 @@ NITRO_PRESET=static npm run build`,
             },
             {
               type: 'code',
-              language: 'text',
+              language: 'dockerfile',
               title: 'Dockerfile — multi-stage build',
               code: `# --- build stage: needs dev dependencies ---
-FROM node:22-alpine AS build
+# Use an active LTS Node; recent Nuxt tooling requires a current Node 22.x/24.x or newer
+FROM node:24-alpine AS build
 WORKDIR /app
 COPY package*.json ./
 RUN npm ci
@@ -2963,7 +3900,7 @@ COPY . .
 RUN npm run build
 
 # --- runtime stage: only the self-contained output ---
-FROM node:22-alpine
+FROM node:24-alpine
 WORKDIR /app
 COPY --from=build /app/.output ./.output
 ENV NODE_ENV=production HOST=0.0.0.0 PORT=3000
@@ -3126,12 +4063,29 @@ test('user can log in and see the dashboard', async ({ page, goto }) => {
             {
               type: 'callout',
               kind: 'tip',
-              text: 'Other everyday commands: `npx nuxt typecheck` (run vue-tsc over the project), `npx nuxt cleanup` (delete `.nuxt/` and caches when things get weird), `npx nuxt info` (versions for bug reports) and `npx nuxt prepare` (regenerate types).',
+              text: 'Other everyday commands: `npx nuxt typecheck` (run vue-tsc over the project), `npx nuxt cleanup` (delete `.nuxt/` and caches when things get weird), `npx nuxt info` (versions for bug reports) and `npx nuxt prepare` (regenerate types). Newer additions: `nuxt build --profile` (Nuxt 4.4+, writes a Chrome trace and CPU profile of the build), `nuxt typecheck --checker=vue-tsc|golar` (4.5+), and in Nuxt CLI v4 `nuxt curl` (request a route of the running dev server) and `nuxt docs "<query>"`.',
             },
             {
               type: 'callout',
               kind: 'pitfall',
               text: 'When testing a component that uses `useFetch`, mounting it with plain `@vue/test-utils` `mount()` fails because there is no Nuxt context or async handling. Use `mountSuspended` and `registerEndpoint` instead of hand-mocking `fetch` globally.',
+            },
+            {
+              type: 'heading',
+              text: 'Keep the Nuxt environment for tests that need it',
+            },
+            {
+              type: 'p',
+              text: 'Booting a Nuxt environment costs time per test file. A common production setup uses **two Vitest projects**: a plain `node` project for pure functions and server utils (fast, the majority of tests), and a `nuxt` project only for files that mount components or call composables (by convention named `*.nuxt.test.ts` or kept in `test/nuxt/`). `@nuxt/test-utils` documents this split with `defineVitestProject`; check the version you install for the exact helper names.',
+            },
+            {
+              type: 'list',
+              items: [
+                '**Test SSR output, not just client behaviour:** an e2e `$fetch(\'/page\')` assertion catches content that accidentally became client-only (and thus invisible to crawlers).',
+                '**Test hydration:** in Playwright, `goto(url, { waitUntil: \'hydration\' })` and fail the test on console messages containing "Hydration".',
+                '**Test cross-request isolation:** fire two concurrent requests as different users in an e2e test and assert neither response contains the other\'s data — the cheapest guard against module-level state bugs.',
+                '**Test the production build in CI** (`nuxt build` then `nuxt preview`), because the dev server hides prerender errors, missing env vars and import-protection issues.',
+              ],
             },
           ],
         },
@@ -3143,8 +4097,8 @@ test('user can log in and see the dashboard', async ({ page, goto }) => {
           keyPoints: [
             '**Nuxt 2 to 3:** Vue 2 to Vue 3, Webpack to Vite, `asyncData`/`fetch()` hooks to `useAsyncData`/`useFetch`, Vuex `store/` to Pinia, `head()` to `useHead`, `serverMiddleware` to `server/`, `this.$axios` to `$fetch`, and `nuxt.config.js` to `nuxt.config.ts`.',
             '**Nuxt 3 to 4:** `npx nuxt upgrade --dedupe`, move app code into `app/`, adapt to data-fetching changes (`undefined` defaults, shallow `data`, shared keys), and review TypeScript project separation. You can try changes in Nuxt 3 first with `future: { compatibilityVersion: 4 }`.',
-            'An incremental path for large Nuxt 2 apps: **Nuxt Bridge** (Nuxt 2 with Nuxt 3 features) to move gradually; Nuxt 2 itself is end-of-life, so it no longer receives fixes.',
-            'Check the official upgrade guide and the **current support dates** for each major before planning; Nuxt 3 enters end-of-life some time after Nuxt 4\'s release, so new projects should start on Nuxt 4.',
+            'An incremental path for large Nuxt 2 apps: **Nuxt Bridge** (Nuxt 2 with Nuxt 3 features) to move gradually; Nuxt 2 reached end-of-life on June 30, 2024, so a still-running Nuxt 2 app should go straight to Nuxt 4 rather than stopping at 3.',
+            '**Support status:** Nuxt 3 reached end-of-life on **July 31, 2026** — no more security fixes from the core team. Any Nuxt 3 app still in production is now a security liability; upgrading to Nuxt 4 is the priority, and the next topic covers preparing for Nuxt 5.',
           ],
           blocks: [
             {
@@ -3235,6 +4189,9 @@ npm test`,
                 ['TypeScript', 'Separate TS projects for app, server, shared and config (better types in each context)'],
                 ['`shared/` folder', 'New place for code, types and utils imported by both app and server'],
                 ['Defaults', 'Several experimental features became defaults (check the upgrade guide for your version)'],
+                ['Head management', 'Unhead v2: `hid`, `vmid`, `children` and `body` props removed, promise inputs unsupported, Capo-style tag sorting on by default'],
+                ['Component names', 'Normalised to the Nuxt naming pattern (`SomeFolderMyComponent`) — update `<KeepAlive include>` lists and `findComponent` in tests'],
+                ['Misc', '`window.__NUXT__` removed (use `useNuxtApp().payload`); top-level `generate` config removed (use `nitro.prerender`); `route.meta.name` moved to `route.name`; layer modules load before project modules'],
               ],
             },
             {
@@ -3246,6 +4203,87 @@ npm test`,
               type: 'callout',
               kind: 'warning',
               text: 'The Nuxt 2 to 3 migration is not a find-and-replace: mixed Options/Composition code, Vue 2 libraries (Vuetify 2, many plugins) and Webpack-specific config all need decisions. For big apps, budget for it as a project and consider the Bridge route, or a gradual rewrite page by page.',
+            },
+          ],
+        },
+        {
+          id: 'preparing-for-nuxt-5',
+          title: 'Preparing for Nuxt 5: Nitro v3, h3 v2 and compatibilityVersion 5',
+          summary:
+            'Nuxt 5 is being delivered incrementally inside Nuxt 4.x: most of its breaking changes are already available behind flags, and `future: { compatibilityVersion: 5 }` turns them on together. The headline change no flag can fully emulate is the move to Nitro v3 and h3 v2 — which is what the new `nuxt/server` imports prepare you for.',
+          keyPoints: [
+            'As of October 2026, Nuxt 4 is the current major; Nuxt 4.5 and 4.6 shipped "groundwork for Nuxt 5" (Vite 8, unhead v3, unctx v3, `nuxt/server`). Nuxt 5 itself was originally planned for early 2026 and has not yet had a stable release at the time of writing — check nuxt.com before planning dates.',
+            '`future.compatibilityVersion: 5` (available since 4.2, for testing) enables, among others: case-sensitive routing, the Vite Environment API, typed pages, serializable page meta, opt-in server auto-imports, Options API removed from the client bundle by default, PostCSS defaults off, `payloadExtraction: \'client\'` and the shared builder watcher.',
+            'Server code is the biggest migration: Nitro v3 and h3 v2 move to a web-standard event (`event.req` is a `Request`). Writing handlers against `nuxt/server` (Nuxt 4.6+) makes them work on both versions today.',
+            'Strategy: upgrade to the latest 4.x, enable the v5 flag in a branch, fix what breaks, and keep individual flags off only where you have a documented reason.',
+          ],
+          blocks: [
+            {
+              type: 'p',
+              text: 'The Nuxt team learned from the painful Nuxt 2 to 3 migration. Instead of one big-bang release, breaking changes now land early as opt-in flags, are bundled under a `compatibilityVersion`, and then flip to defaults in the next major. Nuxt 4 itself was previewed this way (`compatibilityVersion: 4` on Nuxt 3). For a team this means you can do the Nuxt 5 work **now**, in small pull requests, while still on a supported Nuxt 4 release.',
+            },
+            {
+              type: 'code',
+              language: 'ts',
+              title: 'nuxt.config.ts — trying Nuxt 5 behaviour on Nuxt 4',
+              code: `export default defineNuxtConfig({
+  future: {
+    compatibilityVersion: 5,      // opt into upcoming breaking changes (testing)
+  },
+  experimental: {
+    // individual flags can still be toggled; e.g. keep server auto-imports while migrating
+    // (check the upgrade guide for the exact flag names in your version)
+  },
+})`,
+            },
+            {
+              type: 'table',
+              headers: ['Change under v5', 'What breaks', 'What to do now'],
+              rows: [
+                ['Case-sensitive routing', 'Links or bookmarks with different casing (`/About`)', 'Normalise links; add redirects for old casings via `routeRules`'],
+                ['Server auto-imports opt-in', 'Server files relying on implicit `defineEventHandler`, `useStorage`, your `server/utils`', 'Add explicit imports — ideally from `nuxt/server`'],
+                ['Options API off in the client bundle by default', 'Components or libraries still written with `data()`/`methods`', 'Migrate to `<script setup>`, or re-enable the Options API explicitly'],
+                ['Typed pages', 'Type errors on `navigateTo` with unknown route names', 'Fix the links; they were bugs'],
+                ['Serializable page meta', 'Functions or non-serializable values in `definePageMeta`', 'Move logic into middleware; keep meta to plain data'],
+                ['PostCSS defaults off', 'Styles that relied on default autoprefixing/nesting', 'Configure PostCSS plugins explicitly'],
+                ['Nitro v3 / h3 v2 (Nuxt 5 itself)', 'Direct `h3`/`nitropack` imports, Node-only `event.node.req` usage', 'Use `nuxt/server` helpers and web-standard `event.req` / `event.url`'],
+              ],
+            },
+            {
+              type: 'mermaid',
+              code: `flowchart LR
+    A["Nuxt 3 app<br/>EOL July 2026"] --> B["Nuxt 4 latest<br/>codemods + app dir"]
+    B --> C["Enable compatibilityVersion 5<br/>in a branch"]
+    C --> D["Fix breakages flag by flag<br/>adopt nuxt/server imports"]
+    D --> E["Nuxt 5 stable<br/>Nitro v3 + h3 v2"]`,
+            },
+            {
+              type: 'code',
+              language: 'ts',
+              title: 'h3 v1 style vs portable style',
+              code: `// Before: Node-specific, tied to h3 v1
+export default defineEventHandler((event) => {
+  const ua = event.node.req.headers['user-agent']
+  return { ua }
+})
+
+// After: portable (Nuxt 4.6+), runs on Nitro v2 today and v3 tomorrow
+import { defineEventHandler } from 'nuxt/server'
+
+export default defineEventHandler((event) => {
+  const ua = event.req.headers.get('user-agent')
+  return { ua, path: event.url.pathname }
+})`,
+            },
+            {
+              type: 'callout',
+              kind: 'warning',
+              text: 'The `compatibilityVersion: 5` flag is meant for **testing and preparation**; the set of changes can still move before Nuxt 5 is final. Pin your Nuxt minor version, read the release notes of each 4.x minor, and re-run your end-to-end suite whenever you flip a flag.',
+            },
+            {
+              type: 'callout',
+              kind: 'tip',
+              text: 'Modules are the usual upgrade blocker, not your own code. Before a major, list every module, check that it supports the target major (and, for server-side modules, Nitro v3), and replace abandoned ones. Module authors can detect the server stack with `getNitroVersion()` / `hasNitroVersion()` from `@nuxt/kit` and register per-version handlers with `addServerHandler`.',
             },
           ],
         },
@@ -3427,7 +4465,7 @@ npm test`,
             {
               question: 'What changed in Nuxt 4 compared to Nuxt 3?',
               answer:
-                'Nuxt 4 is an evolution, not a rewrite. The visible change is the directory structure: application code (pages, components, composables, layouts, middleware, plugins, `app.vue`) lives in `app/`, while `server/`, `public/`, `shared/` and `modules/` stay at the root; the `~` alias points to `app/`. Data fetching became stricter: `data` and `error` default to `undefined`, `data` is a shallowRef, calls with the same key share state, reactive keys are supported and the older in-flight request is cancelled by default. TypeScript projects are separated per context (app, server, shared), there is a new `shared/` folder, and some experimental flags became defaults. Upgrade with `npx nuxt upgrade --dedupe` and the migration codemod, and you can pre-test with `future.compatibilityVersion: 4` on Nuxt 3.',
+                'Nuxt 4 is an evolution, not a rewrite. The visible change is the directory structure: application code (pages, components, composables, layouts, middleware, plugins, `app.vue`) lives in `app/`, while `server/`, `public/`, `shared/` and `modules/` stay at the root; the `~` alias points to `app/`. Data fetching became stricter and faster: `data` and `error` default to `undefined`, `data` is a shallowRef (no deep proxies for big responses), calls with the same key share one set of refs (a singleton data layer that warns on conflicting options), keys can be reactive, `getCachedData` runs on every fetch with a `cause`, `clear()` resets to `default`, and `refresh({ dedupe })` takes `\'cancel\'`/`\'defer\'` instead of booleans. TypeScript projects are separated per context (app, server, shared, node) with `noUncheckedIndexedAccess` on, there is a `shared/` folder auto-imported on both sides, Unhead v2 replaced v1, component names were normalised, and `window.__NUXT__` was removed. Upgrade with `npx nuxt upgrade --dedupe` and the migration codemod. Since Nuxt 3 reached end-of-life on July 31, 2026, staying on 3 is no longer an option for production apps. The 4.x minors kept adding features (route-rule layouts, `createUseFetch`, vue-router v5, Vite 8, experimental SSR streaming, `nuxt/server`) on the way to Nuxt 5.',
             },
             {
               question: 'What are islands / server components, and when are they a good idea?',
@@ -3448,6 +4486,76 @@ npm test`,
               question: 'When would you not choose Nuxt?',
               answer:
                 'Skip Nuxt when you do not need what it adds: an internal dashboard behind a login, an embeddable widget or an app dropped into an existing server-rendered site can be a plain Vue + Vite SPA, which is simpler to build, debug and host. Consider other tools when the team is on React (Next.js, with a larger ecosystem), when minimal bundle size is the top priority (SvelteKit), or when the site is mostly static content with a few interactive islands (Astro ships almost no JS by default). Nuxt also brings real costs: SSR pitfalls (hydration mismatches, per-request state, browser-only APIs), a runtime to host, convention "magic" that newcomers must learn, and module/upgrade risk. The honest answer is to decide from SEO needs, team skills, hosting and interactivity, not from hype.',
+            },
+            {
+              question: 'Walk me through what happens on the server, step by step, when a Nuxt page is requested.',
+              answer:
+                'Nitro receives the request and runs server middleware and route rules (redirects, headers, cached responses — a cache hit can return here without rendering). If no API route matches, the Vue renderer handles it: it creates a **fresh `nuxtApp` and Vue app for this request**, runs Nuxt plugins in order, runs global and page route middleware for the target route, then renders the page tree inside `<Suspense>`, which waits for every top-level `await` in setup (`useFetch`, `useAsyncData`, `callOnce`). Once everything resolves, `renderToString` produces the HTML, unhead collects head tags, preload hints are added, and the payload (async data, `useState`, Pinia state, errors) is serialized with devalue into `__NUXT_DATA__`. In the browser the entry script creates the app, runs client plugins, revives the payload so data composables return cached results instead of refetching, hydrates the DOM, and only then runs `onMounted`. Knowing this tells you what can block TTFB (any awaited call), what is per-request (everything created inside the app), and what is shared (module scope in the Node process). With experimental SSR streaming (4.5+), the shell is sent before rendering finishes, which also means headers are committed early.',
+            },
+            {
+              question: 'What exactly is in the Nuxt payload, how is it serialized, and how do you keep it small?',
+              answer:
+                'The payload is the state the client needs to reproduce the server render: `useAsyncData`/`useFetch` results by key, `useState` values, Pinia state, the error (if any), and some flags. It is serialized with **devalue**, which handles `Date`, `Map`, `Set`, `BigInt`, repeated references and cycles that JSON cannot; Nuxt adds reducers for refs and its own types, and you can add your own with `definePayloadReducer`/`definePayloadReviver`. It is embedded in the HTML as `<script id="__NUXT_DATA__">`, or written to `_payload.json` for prerendered and (since 4.3) ISR/SWR/cached routes so client navigations can reuse it. It costs bytes *and* parse time before hydration, so: `transform`/`pick` responses down to what the template uses, paginate, do not store the same data in both async data and a store, move big static content into server components, and treat it as public — never put secrets or other users\' data in it.',
+            },
+            {
+              question: 'Why did Nuxt 4 make `data` a shallowRef by default, and what bugs does that introduce?',
+              answer:
+                'A deep ref proxies every nested object as you access it; for large API responses that is significant CPU and memory, paid on every SSR request and again in the browser, for data that is almost always replaced wholesale rather than mutated. `shallowRef` only tracks reassignment of `.value`, so refetching and assigning still re-render, but in-place mutation such as `data.value.items.push(x)` or `data.value.title = \'new\'` no longer triggers updates — the classic bug is an optimistic UI update that silently does nothing. Fixes: replace immutably (`data.value = { ...data.value, items: [...data.value.items, x] }`), pass `deep: true` for that call, or copy into a local editable `ref` for forms. Also watch out for `watch(data, ..., { deep: true })` assumptions and for code that checks `=== null` — Nuxt 4 defaults are `undefined`.',
+            },
+            {
+              question: 'Explain the Nuxt 4 "singleton data layer". What problems does it solve and what new mistakes does it surface?',
+              answer:
+                'In Nuxt 4 all `useAsyncData`/`useFetch` calls with the same key share one set of `data`, `error` and `status` refs, and one in-flight request. That means two components asking for `\'current-user\'` get the same object, deduplicated network calls, and consistent refresh — `refreshNuxtData(\'current-user\')` updates both. It also makes keys an explicit contract: if two calls use the same key with different handlers or options (`transform`, `pick`, `default`, `deep`, `getCachedData`), they now visibly conflict and Nuxt warns. Common mistakes it exposes: static keys that should include a route param (fixed by reactive keys like `() => \`product-${id.value}\``), generic keys like `\'list\'` reused across pages (which also collide in shared prerender data), and per-component transforms applied to shared data. Rule: the key identifies *the data*, not the component.',
+            },
+            {
+              question: 'What does getCachedData do, and how did its semantics change in Nuxt 4?',
+              answer:
+                '`getCachedData(key, nuxtApp, ctx)` lets you return already-available data instead of running the handler; returning `undefined` means "fetch". By default it reads the hydration payload (and static/prerender data), which is how the first client render avoids refetching. People customise it to reuse data on back-navigation or implement a TTL. In Nuxt 4 it is called on **every** fetch — including watcher-triggered fetches and manual `refresh()`/`refreshNuxtData()` — and receives `ctx.cause` (`\'initial\'`, `\'refresh:manual\'`, `\'refresh:hook\'`, `\'watch\'`). The trap: a Nuxt 3 style implementation that always returns cached data makes the Refresh button and reactive refetches do nothing. Check `ctx.cause` and return `undefined` for manual refreshes, or store a timestamp alongside the data and expire it.',
+            },
+            {
+              question: 'How do you prevent cross-request state pollution beyond just "use useState"?',
+              answer:
+                'Treat every module-scope variable in code that runs on the server as shared by all users for the lifetime of the process. Audit for: module-level `ref`/`reactive`/`Map` caches in composables, utils and store files; singletons in `server/utils` that store per-user data (put it on `event.context` instead); third-party SDKs initialised once with a user token (create them per request, e.g. in a Nuxt plugin, and `provide` them); Pinia stores created outside the per-request Pinia instance; and libraries with global mutable config (i18n, date libraries set to a user\'s locale) mutated during render. Detect it with a concurrency e2e test (two users in parallel, assert no data crossover) and code review rules. Legitimately global things — config, DB pools, compiled regexes, a shared cache of *public* data — can stay at module scope.',
+            },
+            {
+              question: 'What are Nuxt layers, and when would you choose a layer over a module?',
+              answer:
+                'A layer is a partial Nuxt project (its own `nuxt.config`, `app/`, `server/`, components, composables, pages) that another project includes via `extends` or by placing it in `layers/`. Configs are deep-merged and files are combined, with the consuming project overriding layer files at the same path. A module is a build-time function using `@nuxt/kit` that programmatically adds or changes things. Choose a layer to share *application code and conventions* — a design system with layouts and error page, an auth area, a multi-brand starter, or one domain of a large monorepo — because it is just Nuxt code and individual files can be overridden. Choose a module for a reusable *integration* with options and logic (image optimisation, a CMS client, i18n). Watch out for relative paths in layer configs (resolve them against the layer) and for module load order (in Nuxt 4 layer modules load before project modules).',
+            },
+            {
+              question: 'What is SSR streaming in Nuxt and what are its trade-offs?',
+              answer:
+                'With `experimental.ssrStreaming` (Nuxt 4.5+), the server sends the HTML shell — head, styles, preload hints, entry scripts — immediately and streams the body as Vue renders, instead of buffering the whole page. That improves TTFB and lets the browser fetch CSS and JS while slow data is still loading. Trade-offs: the HTTP status and headers are committed with the first byte, so `setResponseStatus`, late 404s or cookie writes during render can no longer take effect (Nuxt warns in dev); bots get buffered HTML by default via `botRegex`; routes with `redirect`, `cache`, `isr`, `swr`, `noScripts` or `ssr: false` fall back to buffered rendering; and you can opt out per route with `streaming: false`. It is still experimental, so measure TTFB and LCP before and after, and keep status-critical routes buffered.',
+            },
+            {
+              question: 'How would you design a type-safe API layer in a Nuxt app?',
+              answer:
+                'Put request schemas (zod or any Standard Schema library) and JSON-friendly DTO types in `shared/`, so both sides import them. On the server, validate every input with `readValidatedBody`/`getValidatedQuery`/`getValidatedRouterParams` using those schemas and return DTOs, mapping ORM rows explicitly so internal fields never leak. On the client, `$fetch` and `useFetch` infer the response type from the handler; enable `experimental.routeTypedFetch` (Nuxt 4.6) for typed bodies/queries and scalable type-checking, and `typedPages` for typed links. Centralise base URLs, auth headers and error policy in a `$fetch.create` client and a `createUseFetch` composable. Remember types describe the *serialized* shape (a `Date` becomes a `string`), and that types are not validation — the server schema is the security boundary.',
+            },
+            {
+              question: 'A CDN or swr route is serving one user\'s personalised page to other users. How did it happen and how do you fix it?',
+              answer:
+                'A shared cache stores the first response for a URL and replays it. If a route with `swr`, `isr`, `cache` or `prerender` renders anything derived from the session cookie — a name in the header, a cart count, prices for a customer tier — that HTML (and its payload, including `useState` user data) gets cached and served to everyone. Likewise a `defineCachedEventHandler` that reads the session without putting the user in `getKey`/`varies`. Immediate fix: purge the cache and remove caching from that route. Structural fix: keep cached routes strictly public; render the personalised bits on the client after hydration (`server: false` fetch or `<ClientOnly>` for the small widget), or keep the route on uncached SSR with `cache-control: private, no-store`. Add a test that requests the cached route as two different users and compares responses, and review `routeRules` whenever a page gains user-specific content.',
+            },
+            {
+              question: 'What is `nuxt/server`, and why does it matter for upgrading to Nuxt 5?',
+              answer:
+                'Introduced in Nuxt 4.6, `nuxt/server` is a small, Nuxt-owned server API (`defineEventHandler`, `createError`, `getQuery`, `getRouterParam(s)`, `readValidatedBody`, `getRequestIP`, `handleCors`, `getRouteRules`, `useRuntimeConfig`, `useSession` and so on) with a web-standard request event. Handlers written against it run unchanged on Nitro v2 (Nuxt 4), Nitro v3 (Nuxt 5) or the experimental `@nuxt/vite-server`. Nuxt 5 moves to Nitro v3 and h3 v2, whose APIs differ from h3 v1, so code importing `h3` or `nitropack` directly or using `event.node.req` will need changes. Migrating server files to `nuxt/server` now — one file at a time, without mixing it with the auto-imported h3 helpers in the same file — turns the future major upgrade into a non-event for your server code.',
+            },
+            {
+              question: 'How do you protect a Nuxt app against XSS and CSRF?',
+              answer:
+                'XSS: Vue escapes text interpolation, so the risk is concentrated in `v-html`, head scripts built from strings, user-controlled URLs in `:href`/`:src` (`javascript:` URLs) and Markdown from untrusted sources. Sanitize HTML on the server (and preferably store sanitized output), serialize JSON-LD with `JSON.stringify`, validate URL schemes, and add a Content Security Policy — with SSR this requires per-request nonces because Nuxt emits inline payload scripts, which is why many teams use the `nuxt-security` module. Keep session cookies `httpOnly` so an XSS cannot steal them. CSRF: cookie-based sessions are sent automatically on cross-site requests, so use `sameSite: \'lax\'` or `strict`, never mutate on GET, verify the `Origin` header (or a CSRF token) on state-changing API routes, and be extra careful with `sameSite: \'none\'` and CORS configurations that allow credentials.',
+            },
+            {
+              question: 'callOnce, useAsyncData and onServerPrefetch: how do they differ?',
+              answer:
+                '`useAsyncData` fetches data, stores it in the payload under a key, and gives you reactive `data`/`status`/`error`/`refresh` — the right tool when a component *renders* that data. `callOnce(key, fn)` runs a side effect once during SSR and skips it during hydration (and, with `mode: \'navigation\'`, once per navigation); it returns nothing reactive, which makes it ideal for filling a Pinia store whose state is serialized separately. `onServerPrefetch` is the low-level Vue hook that Nuxt\'s composables build on: it lets a component await work during SSR, but it does not transfer results to the client by itself — you must put the result into serializable state yourself, otherwise the client re-runs the work and risks a mismatch. In Nuxt code, reach for `useAsyncData` or `callOnce` and leave `onServerPrefetch` to library authors.',
+            },
+            {
+              question: 'How do you debug a hydration mismatch that only happens in production?',
+              answer:
+                'First reproduce it locally with `nuxt build && nuxt preview` rather than the dev server, and compare "view source" (server HTML) with the DOM right after load. Production builds strip Vue\'s detailed warnings, so for a staging build define `__VUE_PROD_HYDRATION_MISMATCH_DETAILS__: true` via `vite.define` to get the node and the expected vs actual value. Then look for production-only differences: the server running in UTC while users are in other time zones, `Intl` output differing between Node and browsers, data that changed between the server fetch and a client refetch (a `$fetch` in setup, or a `getCachedData` that misses), CDN-cached HTML whose payload is older than the client bundle after a deploy, A/B testing or feature flags evaluated differently on each side, and HTML minification or edge rewrites that alter markup. Fix the root cause — `useState` for shared values, `onMounted` for browser-only values, `<NuxtTime>` for dates, `data-allow-mismatch` only for intentional differences — and add a Playwright check that fails on hydration warnings.',
             },
           ],
         },

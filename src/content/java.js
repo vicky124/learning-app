@@ -30,7 +30,7 @@ export const javaSection = {
             },
             {
               type: 'mermaid',
-              code: 'flowchart LR\n  Source[".java source file"] -->|"javac (compiler)"| Bytecode[".class file\\n(portable bytecode)"]\n  Bytecode -->|"loaded by"| ClassLoader["Class Loader"]\n  ClassLoader --> JVM["JVM Execution Engine"]\n  JVM -->|"interpreted at first"| Interp["bytecode interpreter"]\n  JVM -->|"hot paths recompiled"| JIT["JIT compiler\\n(native machine code)"]\n  Interp --> OS["runs on this OS/CPU"]\n  JIT --> OS',
+              code: 'flowchart LR\n  Source[".java source file"] -->|"javac (compiler)"| Bytecode[".class file<br/>(portable bytecode)"]\n  Bytecode -->|"loaded by"| ClassLoader["Class Loader"]\n  ClassLoader --> JVM["JVM Execution Engine"]\n  JVM -->|"interpreted at first"| Interp["bytecode interpreter"]\n  JVM -->|"hot paths recompiled"| JIT["JIT compiler<br/>(native machine code)"]\n  Interp --> OS["runs on this OS/CPU"]\n  JIT --> OS',
             },
             {
               type: 'list',
@@ -49,6 +49,103 @@ export const javaSection = {
               type: 'callout',
               kind: 'tip',
               text: 'This same bytecode-then-JIT architecture is why the JVM is also a serious deployment target for other languages — Kotlin, Scala, and Clojure all compile to the same JVM bytecode and can call Java libraries directly, since the JVM doesn\'t care what source language produced the `.class` file.',
+            },
+            {
+              type: 'heading',
+              text: 'Why bytecode + JIT can beat ahead-of-time compilation',
+            },
+            {
+              type: 'p',
+              text: 'A C++ compiler must optimize for *every possible* execution. The JIT optimizes for the execution that is *actually happening*: it profiles which branches are taken, which concrete classes show up at a virtual call site, and which methods are hot, then compiles speculatively for exactly that shape — inlining a "virtual" interface call that in practice only ever sees one implementation, eliminating allocations that never escape a method, and removing bounds checks it can prove redundant. If a speculation later turns out wrong (a new subclass gets loaded), the JVM **deoptimizes** back to the interpreter and recompiles. The price is **warm-up**: a freshly started JVM runs slowly until profiling and compilation catch up, which is why startup time and memory footprint — not peak throughput — are the JVM\'s historical weak spots (see the JIT & startup topic).',
+            },
+            {
+              type: 'code',
+              language: 'java',
+              title: 'the smallest Java program today (compact source file, JDK 25+)',
+              code: `// Hello.java -- no class declaration, no "public static", no String[] args.
+// Finalized in JDK 25 (JEP 512 "Compact Source Files and Instance Main Methods").
+void main() {
+    IO.println("Hello, JVM!");   // java.lang.IO: simple console I/O helper
+}
+
+// Run directly from source -- the launcher compiles in memory, no javac step:
+//   java Hello.java
+// Since JDK 22 the source launcher can also run multi-file programs.`,
+            },
+            {
+              type: 'callout',
+              kind: 'note',
+              text: '"The JVM" is a specification, not one product. **HotSpot** (in OpenJDK) is the dominant implementation; vendors such as Eclipse Temurin, Amazon Corretto, Azul Zulu, Microsoft Build of OpenJDK, Red Hat and Oracle ship OpenJDK-based builds that are functionally near-identical — the real differences are support timelines, patch cadence and licensing. Eclipse OpenJ9 is an alternative JVM with a different GC and JIT, and GraalVM adds an alternative JIT compiler plus Native Image ahead-of-time compilation.',
+            },
+          ],
+        },
+        {
+          id: 'jdk-releases-and-lts',
+          title: 'Java Releases & LTS: What Changed from 8 to Today',
+          summary:
+            'Java ships a new feature release every six months and designates one every two years as Long-Term Support. Knowing which features landed in which LTS — and how preview features graduate — is how you decide what you can use, and how to plan upgrades.',
+          keyPoints: [
+            'Since Java 10 (2018) there is a **feature release every March and September**. As of October 2026 the latest release is **JDK 27** (GA 15 September 2026); the latest **LTS is JDK 25** (September 2025).',
+            'LTS releases since 2021 come every two years: **8, 11, 17, 21, 25** — the next on that cadence would be JDK 29 (September 2027). Most production fleets standardize on an LTS; non-LTS releases get only six months of updates from OpenJDK.',
+            'New language/API features usually arrive as **preview** (`--enable-preview`, may change or be withdrawn) or **incubator** (`jdk.incubator.*` modules) first, then become final — e.g. virtual threads previewed in 19–20 and went final in 21.',
+            'Features can be **withdrawn**: String Templates previewed in JDK 21–22 and were removed in JDK 23 for redesign. Never ship production code on preview APIs unless you accept rewriting it.',
+            'Upgrading LTS-to-LTS (17 → 21 → 25) is now routine; most of the pain was the 8 → 11 jump (module system encapsulation, removed Java EE modules like JAXB, `sun.misc` internals).',
+          ],
+          blocks: [
+            {
+              type: 'table',
+              headers: ['Release', 'Year', 'Headline features you will meet in real code'],
+              rows: [
+                ['Java 8 (LTS)', '2014', 'Lambdas, Streams, `Optional`, `java.time`, default methods'],
+                ['Java 11 (LTS)', '2018', 'Module system (from 9), `var` (10), `HttpClient`, single-file source launch, Java EE modules removed, ZGC (experimental)'],
+                ['Java 17 (LTS)', '2021', 'Records (16), sealed classes, pattern matching for `instanceof` (16), text blocks (15), switch expressions (14), helpful NPE messages (14)'],
+                ['Java 21 (LTS)', '2023', 'Virtual threads, pattern matching for `switch`, record patterns, sequenced collections, generational ZGC'],
+                ['JDK 22–24', '2024–25', 'Unnamed variables `_`, FFM API (Panama) final, Stream Gatherers, Class-File API, AOT class loading & linking cache, `synchronized` no longer pins virtual threads, Security Manager permanently disabled'],
+                ['Java 25 (LTS)', '2025', 'Scoped values final, compact source files & instance `main`, module import declarations, flexible constructor bodies, compact object headers (product option), generational Shenandoah, AOT method profiling'],
+                ['JDK 26', 'Mar 2026', 'HTTP/3 in `HttpClient`, warnings on reflective mutation of `final` fields ("prepare to make final mean final"), Applet API removed, G1 throughput improvements'],
+                ['JDK 27', 'Sep 2026', 'G1 default in all environments, compact object headers on by default, post-quantum hybrid key exchange for TLS 1.3; structured concurrency still in preview'],
+              ],
+            },
+            {
+              type: 'mermaid',
+              code: 'flowchart LR\n  JEP["JEP draft"] --> Inc["Incubator<br/>jdk.incubator.* module"]\n  JEP --> Prev["Preview<br/>needs --enable-preview"]\n  Inc --> Prev\n  Prev -->|"feedback, often 2-6 rounds"| Prev\n  Prev --> Final["Final / standard<br/>in a numbered release"]\n  Prev -->|"design rejected"| Withdrawn["Withdrawn<br/>e.g. String Templates"]',
+            },
+            {
+              type: 'code',
+              language: 'bash',
+              title: 'using a preview feature (compile AND run need the flag)',
+              code: `# preview features are tied to ONE exact release -- bytecode compiled with
+# --enable-preview on JDK 27 will refuse to run on JDK 28
+javac --release 27 --enable-preview -d out src/Main.java
+java --enable-preview -cp out Main
+
+# or straight from source
+java --enable-preview Main.java`,
+            },
+            {
+              type: 'heading',
+              text: 'Upgrade strategy that works in practice',
+            },
+            {
+              type: 'list',
+              ordered: true,
+              items: [
+                'Compile with `--release N` (not just `-source/-target`) so `javac` also checks you only use APIs that exist in release N.',
+                'Run `jdeps --jdk-internals` on your jars to find uses of JDK internals that strong encapsulation (JDK 16/17) now blocks.',
+                'Upgrade build plugins, bytecode-manipulating libraries (ByteBuddy, ASM, Mockito, Lombok, Spring) **first** — they are the usual blockers because they must understand the new class-file version.',
+                'Run your test suite on the new JDK in CI before switching production; watch for new warnings (e.g. dynamic agent loading, final-field mutation, native access).',
+                'Roll out gradually and compare GC logs and latency percentiles — defaults (GC choice, heap ergonomics, object header size) do change between releases.',
+              ],
+            },
+            {
+              type: 'callout',
+              kind: 'tip',
+              text: 'A practical policy: production on the latest LTS (today JDK 25), CI also building on the latest feature release (JDK 27) so incompatibilities surface early. The "it\'s not LTS so it\'s unstable" belief is wrong — non-LTS releases are equally production-quality; they just stop receiving free updates after six months.',
+            },
+            {
+              type: 'callout',
+              kind: 'warning',
+              text: 'Java 8 is still common in legacy estates, but staying there means no virtual threads, no records, no modern GCs (generational ZGC, current G1 improvements), worse container awareness defaults in old builds, and steadily shrinking library support — many major frameworks (Spring Framework 6+, Spring Boot 3+, Jakarta EE 11, JUnit 6) require Java 17 as a minimum.',
             },
           ],
         },
@@ -98,7 +195,7 @@ System.out.println(p.equals(q)); // true -- always compare wrapper VALUES with .
             },
             {
               type: 'mermaid',
-              code: 'flowchart TD\n  Box["Integer x = 100;\\n(autoboxing)"] --> Check{"value between\\n-128 and 127?"}\n  Check -->|"yes"| Cached["Integer.valueOf() returns a\\nSHARED cached object"]\n  Check -->|"no"| NewObj["a brand-new Integer\\nobject is allocated"]\n  Cached --> SameRef["two cached Integers with the\\nsame value ARE == equal\\n(same object, by coincidence)"]\n  NewObj --> DiffRef["two new Integers with the\\nsame value are NOT == equal\\n(different objects)"]',
+              code: 'flowchart TD\n  Box["Integer x = 100;<br/>(autoboxing)"] --> Check{"value between<br/>-128 and 127?"}\n  Check -->|"yes"| Cached["Integer.valueOf() returns a<br/>SHARED cached object"]\n  Check -->|"no"| NewObj["a brand-new Integer<br/>object is allocated"]\n  Cached --> SameRef["two cached Integers with the<br/>same value ARE == equal<br/>(same object, by coincidence)"]\n  NewObj --> DiffRef["two new Integers with the<br/>same value are NOT == equal<br/>(different objects)"]',
             },
             {
               type: 'callout',
@@ -109,6 +206,40 @@ System.out.println(p.equals(q)); // true -- always compare wrapper VALUES with .
               type: 'callout',
               kind: 'warning',
               text: 'Unboxing a `null` wrapper throws `NullPointerException` at the point of unboxing — `Integer count = null; int x = count;` blows up. This is a common source of NPEs when a `Map<String, Integer>` lookup returns `null` for a missing key and the result is used directly in arithmetic.',
+            },
+            {
+              type: 'heading',
+              text: 'What boxing really costs',
+            },
+            {
+              type: 'p',
+              text: 'An `int` is 4 bytes stored inline. An `Integer` is a separate heap object: an object header (12 bytes on a typical 64-bit JVM with compressed class pointers, 8 bytes with compact object headers) plus the 4-byte value, padded to 16 bytes — **plus** a 4–8 byte reference to point at it. An `int[1_000_000]` is ~4 MB of contiguous memory the CPU can stream through; a `List<Integer>` of the same size is ~20 MB scattered across the heap, with a pointer chase (and likely cache miss) per element. In hot paths that difference dominates: it is the reason `IntStream`, `LongStream`, `mapToInt` and primitive-specialized functional interfaces (`IntPredicate`, `ToIntFunction`) exist.',
+            },
+            {
+              type: 'code',
+              language: 'java',
+              title: 'avoiding accidental boxing in hot code',
+              code: `// BAD: Long sum is unboxed and re-boxed on every iteration -- millions of garbage objects
+Long sum = 0L;
+for (long i = 0; i < 10_000_000; i++) {
+    sum += i;              // sum = Long.valueOf(sum.longValue() + i)
+}
+
+// GOOD: primitive accumulator
+long total = 0;
+for (long i = 0; i < 10_000_000; i++) total += i;
+
+// GOOD: primitive streams avoid Stream<Integer>
+int sumOfSquares = IntStream.rangeClosed(1, 1_000).map(n -> n * n).sum();
+
+// Ternary trap: mixing Integer and int unboxes -- NPE if the Integer is null
+Integer cached = null;
+int value = flag ? cached : 0;   // NullPointerException when flag is true`,
+            },
+            {
+              type: 'callout',
+              kind: 'note',
+              text: 'Project **Valhalla** is working on *value classes* — objects without identity that the JVM may flatten into arrays and fields like primitives, aiming to close the boxing gap ("codes like a class, works like an int"). As of JDK 27 it is not part of a GA release; treat it as future direction, not something to design around today.',
             },
           ],
         },
@@ -121,7 +252,7 @@ System.out.println(p.equals(q)); // true -- always compare wrapper VALUES with .
             'A class defines fields (state) and methods (behavior); `new ClassName(...)` allocates an object on the heap and returns a reference to it.',
             'A constructor has the same name as the class, no return type, and runs exactly once, at object creation, to establish initial state.',
             'If no constructor is written, Java supplies a no-arg default constructor; writing any constructor removes that implicit default.',
-            '`this(...)` calls another constructor in the same class (constructor chaining); `super(...)` calls the parent class\'s constructor and must be the first statement if used explicitly.',
+            '`this(...)` calls another constructor in the same class (constructor chaining); `super(...)` calls the parent class\'s constructor. Historically it had to be the very first statement; since **JDK 25 (flexible constructor bodies, JEP 513)** you may run validation and compute arguments *before* it, as long as that code does not use `this`.',
             'Instance initializer blocks and field initializers run in the order they appear, before the constructor body — a detail that matters when initialization order is subtle.',
           ],
           blocks: [
@@ -157,12 +288,38 @@ Rectangle square = new Rectangle(5);  // area 25, via chained constructor`,
             },
             {
               type: 'mermaid',
-              code: 'flowchart TD\n  New["new Circle(\'red\', 2.0)"] --> SuperCall["1. super(color) runs FIRST\\nShape must be initialized before Circle"]\n  SuperCall --> ShapeFields["2. Shape\'s field initializers run"]\n  ShapeFields --> ShapeBody["3. Shape constructor body runs"]\n  ShapeBody --> CircleFields["4. Circle\'s field initializers run"]\n  CircleFields --> CircleBody["5. Circle constructor body runs\\nthis.radius = radius"]\n  CircleBody --> Ready["object is now fully\\nand safely constructed"]',
+              code: 'flowchart TD\n  New["new Circle(\'red\', 2.0)"] --> SuperCall["1. super(color) runs FIRST<br/>Shape must be initialized before Circle"]\n  SuperCall --> ShapeFields["2. Shape\'s field initializers run"]\n  ShapeFields --> ShapeBody["3. Shape constructor body runs"]\n  ShapeBody --> CircleFields["4. Circle\'s field initializers run"]\n  CircleFields --> CircleBody["5. Circle constructor body runs<br/>this.radius = radius"]\n  CircleBody --> Ready["object is now fully<br/>and safely constructed"]',
             },
             {
               type: 'callout',
               kind: 'tip',
               text: 'Prefer constructing objects in a fully valid state and marking fields `final` wherever the value never needs to change after construction — this rules out an entire class of bugs where an object is used before it is fully initialized, and pairs naturally with immutability (see the Records topic for a modern, terser way to express this).',
+            },
+            {
+              type: 'code',
+              language: 'java',
+              title: 'flexible constructor bodies (JDK 25+): validate before super()',
+              code: `public class PositiveBigInteger extends BigInteger {
+
+    public PositiveBigInteger(long value) {
+        // Before JDK 25 this was illegal -- you had to call super() first and
+        // validate afterwards (wasting work), or hide checks in a static helper.
+        if (value <= 0) {
+            throw new IllegalArgumentException("must be positive: " + value);
+        }
+        super(Long.toString(value));   // "prologue" above may not touch 'this'
+    }
+}`,
+            },
+            {
+              type: 'callout',
+              kind: 'pitfall',
+              text: 'Never call an overridable method from a constructor, and never let `this` escape (registering it as a listener, starting a thread with it, publishing it to a static field). The superclass constructor runs **before** subclass fields are initialized, so an overridden method invoked from it sees `null`/`0` subclass fields; and an escaped `this` can be observed by another thread half-built. `javac -Xlint:this-escape` (JDK 21+) warns about exactly this.',
+            },
+            {
+              type: 'callout',
+              kind: 'tip',
+              text: 'When a constructor grows beyond three or four parameters, or many are optional, use a static factory (`Duration.ofSeconds(5)`) or a builder instead of telescoping overloads. Static factories can have descriptive names, cache instances, and return a subtype — `List.of(...)` returns different hidden implementations depending on size.',
             },
           ],
         },
@@ -227,6 +384,42 @@ System.out.println(s.describe());       // dynamic dispatch calls Circle.area()`
               kind: 'note',
               text: 'Java deliberately disallows multiple inheritance of *classes* (no `class C extends A, B`) to avoid the "diamond problem" — ambiguity when two parent classes define conflicting state or method implementations. Interfaces sidestep this because, until default methods, they carried no state and no implementation to conflict.',
             },
+            {
+              type: 'heading',
+              text: 'How dynamic dispatch actually works',
+            },
+            {
+              type: 'p',
+              text: 'A call like `s.area()` compiles to an `invokevirtual` (or `invokeinterface`) bytecode. Conceptually the JVM looks up `area` in the receiver\'s class via a per-class **virtual method table** (vtable). In practice HotSpot rarely pays even that: it profiles each call site, and if only one or two receiver classes are ever seen (monomorphic/bimorphic), the JIT inlines the target directly behind a cheap type check. Call sites that see many types (megamorphic) fall back to a table lookup and block inlining — one reason deep, heavily-polymorphic hierarchies on hot paths can be measurably slower than a `switch` over a sealed type.',
+            },
+            {
+              type: 'code',
+              language: 'java',
+              title: 'composition over inheritance: the fragile base class problem',
+              code: `// Inheritance couples you to the parent's IMPLEMENTATION, not just its API.
+class CountingSet<E> extends HashSet<E> {
+    int added = 0;
+    @Override public boolean add(E e) { added++; return super.add(e); }
+    @Override public boolean addAll(Collection<? extends E> c) {
+        added += c.size();
+        return super.addAll(c);   // HashSet.addAll calls add() internally...
+    }
+}
+// new CountingSet<>().addAll(List.of("a", "b")) -> added == 4, not 2!
+
+// Composition: wrap and forward -- immune to the parent's internal call graph
+final class CountingSet2<E> {
+    private final Set<E> delegate = new HashSet<>();
+    private int added = 0;
+    boolean add(E e) { added++; return delegate.add(e); }
+    boolean addAll(Collection<? extends E> c) { added += c.size(); return delegate.addAll(c); }
+}`,
+            },
+            {
+              type: 'callout',
+              kind: 'tip',
+              text: 'Design rule from *Effective Java*: "design and document for inheritance or else prohibit it." Make classes `final` by default; open them up deliberately (or use `sealed` to allow a known set of subclasses). Use inheritance for genuine is-a relationships inside code you control; use composition plus interfaces everywhere else.',
+            },
           ],
         },
         {
@@ -279,7 +472,22 @@ System.out.println(g.greet());                        // Hello, Ada! -- uses the
             },
             {
               type: 'mermaid',
-              code: 'flowchart TD\n  A["interface A { default String hi() ... }"] --> C["class C implements A, B"]\n  B["interface B { default String hi() ... }"] --> C\n  C --> Conflict{"both A and B supply\\na default hi() -- ambiguous!"}\n  Conflict --> ErrorState["compiler ERROR:\\nC must override hi() itself"]\n  ErrorState --> FixState["fix: @Override String hi()\\ncall A.super.hi() or B.super.hi()\\nto pick one explicitly"]',
+              code: 'flowchart TD\n  A["interface A { default String hi() ... }"] --> C["class C implements A, B"]\n  B["interface B { default String hi() ... }"] --> C\n  C --> Conflict{"both A and B supply<br/>a default hi() -- ambiguous!"}\n  Conflict --> ErrorState["compiler ERROR:<br/>C must override hi() itself"]\n  ErrorState --> FixState["fix: @Override String hi()<br/>call A.super.hi() or B.super.hi()<br/>to pick one explicitly"]',
+            },
+            {
+              type: 'callout',
+              kind: 'note',
+              text: 'Default methods were added in Java 8 primarily for **API evolution** — so `Collection` could gain `stream()` and `forEach()` without breaking every existing implementation in the world. They are not a license to build stateful "traits": an interface still cannot hold instance state, and a default method that calls other abstract methods quietly becomes part of every implementor\'s contract. Class methods also always win over interface defaults ("class wins" rule), so a superclass method with the same signature silently takes precedence.',
+            },
+            {
+              type: 'table',
+              headers: ['Need', 'Reach for', 'Why'],
+              rows: [
+                ['A capability many unrelated types share', '`interface`', 'Multiple implementation, no hierarchy coupling'],
+                ['Shared state + template method skeleton', '`abstract class`', 'Fields, constructors, protected hooks'],
+                ['A closed set of variants you switch over', '`sealed interface` + records', 'Compiler-checked exhaustiveness'],
+                ['A single behavior passed as a value', '`@FunctionalInterface`', 'Lambdas and method references'],
+              ],
             },
           ],
         },
@@ -308,9 +516,8 @@ System.out.println(g.greet());                        // Hello, Ada! -- uses the
     @Override
     public boolean equals(Object o) {
         if (this == o) return true;
-        if (!(o instanceof Point)) return false;
-        Point p = (Point) o;
-        return x == p.x && y == p.y;
+        // pattern matching for instanceof (Java 16+): test + cast + bind in one step
+        return o instanceof Point p && x == p.x && y == p.y;
     }
 
     @Override
@@ -330,12 +537,48 @@ visited.contains(new Point(1, 2));   // true -- ONLY because hashCode is also ov
             },
             {
               type: 'mermaid',
-              code: 'flowchart TD\n  A["override equals() only"] --> B{"put object in\\nHashMap / HashSet?"}\n  B -- yes --> C["hashCode() still uses\\nObject identity (default)"]\n  C --> D["equal objects land in\\nDIFFERENT hash buckets"]\n  D --> E["contains() / get() with an\\nequal-but-different instance\\nreturns false / null -- BUG"]',
+              code: 'flowchart TD\n  A["override equals() only"] --> B{"put object in<br/>HashMap / HashSet?"}\n  B -- yes --> C["hashCode() still uses<br/>Object identity (default)"]\n  C --> D["equal objects land in<br/>DIFFERENT hash buckets"]\n  D --> E["contains() / get() with an<br/>equal-but-different instance<br/>returns false / null -- BUG"]',
             },
             {
               type: 'callout',
               kind: 'pitfall',
               text: 'Modern IDEs and `record` types (see the Records topic) generate a correct `equals`/`hashCode`/`toString` triple automatically — for a hand-written mutable class, always generate or override all three together, never just one, and never base `hashCode()` on mutable fields that change after the object is placed in a hash-based collection.',
+            },
+            {
+              type: 'heading',
+              text: 'The full `equals` contract, and the `instanceof` vs `getClass()` debate',
+            },
+            {
+              type: 'list',
+              items: [
+                '**Reflexive**: `x.equals(x)` is true. **Symmetric**: `x.equals(y)` iff `y.equals(x)`. **Transitive**: `x = y` and `y = z` implies `x = z`. **Consistent**: repeated calls give the same answer if nothing changed. **Non-null**: `x.equals(null)` is false.',
+                'Using `instanceof` lets a subclass instance equal a superclass instance. If the subclass adds a field that participates in equality (`ColorPoint extends Point`), symmetry breaks: `point.equals(colorPoint)` is true but `colorPoint.equals(point)` is false. There is no way to extend an instantiable class, add a value component, and keep the contract.',
+                'Using `getClass() != o.getClass()` keeps symmetry but breaks substitutability — a Hibernate proxy subclass of `User` will never equal the real `User`.',
+                'The clean resolution: make value classes `final` (records are), and prefer composition over subclassing value types.',
+              ],
+            },
+            {
+              type: 'code',
+              language: 'java',
+              title: 'the mutable-key bug in action',
+              code: `class MutableKey {
+    String name;
+    MutableKey(String n) { name = n; }
+    @Override public boolean equals(Object o) { return o instanceof MutableKey k && name.equals(k.name); }
+    @Override public int hashCode() { return name.hashCode(); }
+}
+
+Set<MutableKey> set = new HashSet<>();
+MutableKey key = new MutableKey("a");
+set.add(key);
+key.name = "b";               // hash changes AFTER insertion
+set.contains(key);            // false -- looked up in the bucket for "b", entry lives under "a"
+set.size();                   // 1 -- the entry is now unreachable via lookup: a silent leak`,
+            },
+            {
+              type: 'callout',
+              kind: 'note',
+              text: 'JPA/Hibernate entities are the hardest case: the database id is null before persist and assigned after, so an id-based `hashCode` changes mid-life. Common, defensible choices: equality on an immutable natural/business key, or id-based `equals` with a constant `hashCode()` (e.g. `getClass().hashCode()`) — slower in large hash sets, but correct across the entity lifecycle.',
             },
           ],
         },
@@ -384,12 +627,49 @@ static void copy(List<? extends Number> source, List<? super Number> dest) {
             },
             {
               type: 'mermaid',
-              code: 'flowchart LR\n  Compile["compile time:\\nList<String>, List<Integer>\\nfully type-checked"] -->|"type erasure"| Runtime["runtime (.class bytecode):\\nboth are just List\\n(raw type, T erased to Object)"]',
+              code: 'flowchart LR\n  Compile["compile time:<br/>List&lt;String&gt;, List&lt;Integer&gt;<br/>fully type-checked"] -->|"type erasure"| Runtime["runtime (.class bytecode):<br/>both are just List<br/>(raw type, T erased to Object)"]',
             },
             {
               type: 'callout',
               kind: 'pitfall',
               text: 'Because of erasure, `list instanceof List<String>` will not compile — the JVM has no way to check the erased type parameter at runtime. Only the raw type check `list instanceof List<?>` (or plain `List`) is legal.',
+            },
+            {
+              type: 'heading',
+              text: 'Why erasure? And how to work around it',
+            },
+            {
+              type: 'p',
+              text: 'Generics arrived in Java 5 (2004) into an ecosystem with a decade of compiled, non-generic code. Erasure was chosen for **migration compatibility**: a generic `List<String>` compiles to the same `List` bytecode as pre-generics code, so old and new libraries interoperate without recompilation. The compiler inserts the casts you used to write by hand (`(String) list.get(0)`), and generates **bridge methods** so overriding still works after erasure. C#, by contrast, reified generics at the cost of a hard break between old and new collections.',
+            },
+            {
+              type: 'code',
+              language: 'java',
+              title: 'type tokens, heap pollution and @SafeVarargs',
+              code: `// Workaround 1: pass a Class<T> "type token" when you need T at runtime
+static <T> T fromJson(String json, Class<T> type) { /* ... */ return null; }
+User u = fromJson(payload, User.class);
+
+// Workaround 2: "super type token" -- capture a full generic type via an anonymous
+// subclass, because generic SUPERCLASS info IS kept in the class file
+// (Jackson's TypeReference, Guava's TypeToken, Spring's ParameterizedTypeReference)
+List<User> users = mapper.readValue(payload, new TypeReference<List<User>>() {});
+
+// Heap pollution: raw types defeat the compiler's guarantees
+List<String> strings = new ArrayList<>();
+List raw = strings;           // raw type -- unchecked warning
+raw.add(42);                  // compiles!
+String s = strings.get(0);    // ClassCastException far away from the actual bug
+
+// Generic varargs create a T[] under the hood -> unchecked warning.
+// @SafeVarargs promises you never store into or leak that array.
+@SafeVarargs
+static <T> List<T> listOf(T... items) { return List.of(items); }`,
+            },
+            {
+              type: 'callout',
+              kind: 'tip',
+              text: 'Treat every "unchecked" compiler warning as a potential `ClassCastException` waiting to happen in a different file. Never use raw types in new code; if you must suppress a warning, put `@SuppressWarnings("unchecked")` on the smallest possible scope (a single local variable declaration) with a comment proving why it is safe.',
             },
           ],
         },
@@ -408,7 +688,7 @@ static void copy(List<? extends Number> source, List<? super Number> dest) {
           blocks: [
             {
               type: 'mermaid',
-              code: 'flowchart TD\n  T["Throwable"] --> Err["Error\\n(OutOfMemoryError, StackOverflowError)\\nnot meant to be caught"]\n  T --> Exc["Exception"]\n  Exc --> RTE["RuntimeException (UNCHECKED)\\nNullPointerException\\nIllegalArgumentException\\nIndexOutOfBoundsException"]\n  Exc --> Checked["checked exceptions\\nIOException\\nSQLException\\n(must catch or declare throws)"]',
+              code: 'flowchart TD\n  T["Throwable"] --> Err["Error<br/>(OutOfMemoryError, StackOverflowError)<br/>not meant to be caught"]\n  T --> Exc["Exception"]\n  Exc --> RTE["RuntimeException (UNCHECKED)<br/>NullPointerException<br/>IllegalArgumentException<br/>IndexOutOfBoundsException"]\n  Exc --> Checked["checked exceptions<br/>IOException<br/>SQLException<br/>(must catch or declare throws)"]',
             },
             {
               type: 'code',
@@ -446,6 +726,55 @@ try {
               type: 'callout',
               kind: 'pitfall',
               text: 'Never catch an exception and silently discard it (`catch (Exception e) {}`) — it hides real failures and makes debugging production issues far harder. At minimum, log it; ideally, only catch what you can meaningfully handle at that point in the code.',
+            },
+            {
+              type: 'heading',
+              text: 'Production-grade exception handling',
+            },
+            {
+              type: 'list',
+              items: [
+                '**Helpful NullPointerExceptions** (default since JDK 15): the message now names the exact null expression — `Cannot invoke "String.length()" because "user.address.street" is null` — so don\'t catch-and-rethrow NPEs with less information.',
+                '**Suppressed exceptions**: when try-with-resources closes a resource and `close()` also throws, that exception is attached via `addSuppressed` to the primary one. Always log with the full throwable (`log.error("msg", e)`) so suppressed and cause chains appear.',
+                '**Cost**: creating an exception fills in the stack trace by walking the stack — relatively expensive. Using exceptions for normal control flow in hot loops is a real performance bug. For high-frequency, expected failures, return a result type instead.',
+                '**Catch `Exception`, not `Throwable`** at boundaries. Catching `Error` (`OutOfMemoryError`, `StackOverflowError`) and continuing usually leaves the JVM in an undefined state; let it die and restart.',
+                '**`InterruptedException`**: never swallow it. Either propagate it, or restore the flag with `Thread.currentThread().interrupt()` so code higher up can still see the cancellation request.',
+                '**Lambdas and checked exceptions** don\'t mix: `java.util.function` interfaces declare no `throws`. Wrap in `UncheckedIOException` (built for exactly this) or handle inside the lambda.',
+              ],
+            },
+            {
+              type: 'code',
+              language: 'java',
+              title: 'checked exceptions inside streams, and multi-catch',
+              code: `List<String> contents = paths.stream()
+    .map(p -> {
+        try {
+            return Files.readString(p);
+        } catch (IOException e) {
+            throw new UncheckedIOException(e);   // designed for exactly this case
+        }
+    })
+    .toList();
+
+// multi-catch (Java 7+): one handler for unrelated exception types
+try {
+    process();
+} catch (TimeoutException | ConnectException e) {
+    retryLater(e);
+}
+
+// restore interruption status instead of swallowing it
+try {
+    queue.take();
+} catch (InterruptedException e) {
+    Thread.currentThread().interrupt();
+    throw new CancellationException("worker interrupted");
+}`,
+            },
+            {
+              type: 'callout',
+              kind: 'warning',
+              text: 'A `return` (or a throw) inside `finally` silently discards any exception thrown in the `try` block. The compiler permits it, and the original failure vanishes without a trace. Keep `finally` blocks to cleanup only — or better, use try-with-resources.',
             },
           ],
         },
@@ -493,6 +822,60 @@ Queue<Task> byPriority = new PriorityQueue<>(Comparator.comparingInt(Task::prior
               type: 'callout',
               kind: 'tip',
               text: '`Map` deliberately does not extend `Collection` in the type hierarchy (it maps pairs, not single elements) — a frequent quiz question. Its `keySet()`, `values()`, and `entrySet()` views each return a genuine `Collection`/`Set` over the map\'s current contents.',
+            },
+            {
+              type: 'heading',
+              text: 'Inside `HashMap`',
+            },
+            {
+              type: 'list',
+              items: [
+                'Backing store: an array of buckets ("table") whose length is always a power of two. Index = `(hash ^ (hash >>> 16)) & (n - 1)` — the XOR spreads high bits into the low bits that the mask actually uses, defending against poor `hashCode()` implementations.',
+                'Collisions chain in a linked list per bucket. Since Java 8, when one bucket exceeds 8 entries (and the table has at least 64 buckets) it is **treeified** into a red-black tree, so a pathological or attacker-chosen set of colliding keys degrades to O(log n) instead of O(n).',
+                'When size exceeds `capacity × loadFactor` (default 0.75) the table doubles and every entry is redistributed — an O(n) pause. If you know the size up front, presize: `HashMap.newHashMap(expectedSize)` (JDK 19+) does the load-factor math for you.',
+                'Iteration is **fail-fast**: structurally modifying the map while iterating (other than through the iterator) throws `ConcurrentModificationException` on a best-effort basis. It is a bug detector, not a thread-safety mechanism.',
+              ],
+            },
+            {
+              type: 'heading',
+              text: 'Sequenced collections and immutable factories',
+            },
+            {
+              type: 'code',
+              language: 'java',
+              title: 'Java 21 SequencedCollection / SequencedMap, and List.of',
+              code: `// Java 21 finally gave "ordered" collections a common interface
+List<String> list = new ArrayList<>(List.of("a", "b", "c"));
+list.getFirst();        // "a"   (was list.get(0))
+list.getLast();         // "c"   (was list.get(list.size() - 1))
+list.reversed();        // a reversed VIEW, not a copy
+
+LinkedHashMap<String, Integer> scores = new LinkedHashMap<>();
+scores.put("ann", 3);
+scores.putFirst("bob", 5);              // move/insert at the front
+scores.firstEntry();                    // bob=5
+scores.pollLastEntry();                 // removes and returns ann=3
+
+// Unmodifiable factories (Java 9+): compact, null-hostile, truly immutable
+List<String> fixed = List.of("x", "y");
+Map<String, Integer> m = Map.of("one", 1, "two", 2);
+// fixed.add("z");      -> UnsupportedOperationException
+// List.of("a", null);  -> NullPointerException
+// Map.of iteration order is deliberately randomized per JVM run
+
+// Copy vs view: unmodifiableList is a VIEW -- changes to the source show through
+List<String> view = Collections.unmodifiableList(list);
+List<String> snapshot = List.copyOf(list);   // real immutable copy`,
+            },
+            {
+              type: 'callout',
+              kind: 'pitfall',
+              text: '`Arrays.asList(array)` returns a fixed-size list **backed by the array** — `set()` writes through to the array, `add()`/`remove()` throw `UnsupportedOperationException`. And `Collectors.toList()` makes no promise about mutability, whereas `Stream.toList()` (Java 16+) is guaranteed unmodifiable. Know which one you hold before you mutate it.',
+            },
+            {
+              type: 'callout',
+              kind: 'tip',
+              text: 'Default to `ArrayList`, `HashMap`, `HashSet` and `ArrayDeque`. Benchmarks almost never favor `LinkedList`: its 24+ byte node per element and pointer chasing lose to `ArrayList`\'s contiguous memory even for many middle-insertion workloads, thanks to CPU caches and `System.arraycopy`.',
             },
           ],
         },
@@ -551,7 +934,53 @@ Runnable r = () -> System.out.println(counter);  // captured value must be effec
             },
             {
               type: 'mermaid',
-              code: 'flowchart LR\n  Enclosing["enclosing scope:\\nint threshold = 10;"] -.->|"captured BY VALUE\\nat creation time"| Lambda["lambda: n -> n > threshold"]\n  Lambda -->|"compiled to implement"| FI["functional interface\\nPredicate&lt;Integer&gt;"]\n  FI --> Method["its one abstract method:\\nboolean test(Integer n)"]',
+              code: 'flowchart LR\n  Enclosing["enclosing scope:<br/>int threshold = 10;"] -.->|"captured BY VALUE<br/>at creation time"| Lambda["lambda: n -> n > threshold"]\n  Lambda -->|"compiled to implement"| FI["functional interface<br/>Predicate&lt;Integer&gt;"]\n  FI --> Method["its one abstract method:<br/>boolean test(Integer n)"]',
+            },
+            {
+              type: 'heading',
+              text: 'How lambdas are compiled: `invokedynamic`, not anonymous classes',
+            },
+            {
+              type: 'p',
+              text: 'An anonymous class produces a separate `Outer$1.class` file that must be loaded and verified. A lambda instead compiles its body into a private synthetic method on the enclosing class and emits an `invokedynamic` instruction. The first time that instruction runs, a bootstrap method (`LambdaMetafactory`) spins up an implementation class at runtime and links the call site; afterwards it is as cheap as a normal call. A **non-capturing** lambda is typically a cached singleton (no allocation per evaluation); a **capturing** lambda allocates a small object holding the captured values — usually eliminated by escape analysis when inlined.',
+            },
+            {
+              type: 'table',
+              headers: ['Interface', 'Signature', 'Typical use'],
+              rows: [
+                ['`Function<T,R>`', '`R apply(T t)`', 'transform a value'],
+                ['`BiFunction<T,U,R>`', '`R apply(T t, U u)`', 'combine two values'],
+                ['`Predicate<T>`', '`boolean test(T t)`', 'filter / condition'],
+                ['`Supplier<T>`', '`T get()`', 'lazy creation, defaults'],
+                ['`Consumer<T>`', '`void accept(T t)`', 'side effect per element'],
+                ['`UnaryOperator<T>`', '`T apply(T t)`', 'same-type transform'],
+                ['`IntFunction`, `ToIntFunction`, `IntPredicate`, ...', 'primitive-specialized', 'avoid boxing in hot paths'],
+              ],
+            },
+            {
+              type: 'code',
+              language: 'java',
+              title: 'this inside a lambda, composition, and unnamed parameters',
+              code: `class Widget {
+    String name = "widget";
+    Runnable lambda = () -> System.out.println(this.name);   // 'this' = enclosing Widget
+    Runnable anon = new Runnable() {
+        public void run() { System.out.println(this); }       // 'this' = the anonymous Runnable
+    };
+}
+
+// functional composition
+Predicate<String> nonBlank = Predicate.not(String::isBlank);
+Function<String, String> normalize = ((Function<String, String>) String::trim).andThen(String::toLowerCase);
+Comparator<User> byAgeThenName = Comparator.comparingInt(User::age).thenComparing(User::name);
+
+// unnamed variables (Java 22+): say "I deliberately ignore this"
+map.forEach((_, value) -> process(value));`,
+            },
+            {
+              type: 'callout',
+              kind: 'pitfall',
+              text: 'The old comparator idiom `(a, b) -> a - b` (also used in the first example above for string lengths) overflows for large or negative `int`s and silently sorts wrongly — e.g. `Integer.MIN_VALUE - 1` wraps to a large positive number. Use `Integer.compare(a, b)` or `Comparator.comparingInt(...)` instead.',
             },
           ],
         },
@@ -570,7 +999,7 @@ Runnable r = () -> System.out.println(counter);  // captured value must be effec
           blocks: [
             {
               type: 'mermaid',
-              code: 'flowchart LR\n  Source["source: List<Order>"] -->|".stream()"| S0["Stream"]\n  S0 -->|".filter(o -> o.isPaid())\\n(intermediate, LAZY)"| S1["Stream"]\n  S1 -->|".map(Order::total)\\n(intermediate, LAZY)"| S2["Stream"]\n  S2 -->|".collect(toList())\\n(TERMINAL -- triggers execution)"| Result["List<Double>"]',
+              code: 'flowchart LR\n  Source["source: List&lt;Order&gt;"] -->|".stream()"| S0["Stream"]\n  S0 -->|".filter(o -> o.isPaid())<br/>(intermediate, LAZY)"| S1["Stream"]\n  S1 -->|".map(Order::total)<br/>(intermediate, LAZY)"| S2["Stream"]\n  S2 -->|".collect(toList())<br/>(TERMINAL -- triggers execution)"| Result["List&lt;Double&gt;"]',
             },
             {
               type: 'code',
@@ -592,7 +1021,7 @@ List<String> names = orders.stream()
     .distinct()
     .sorted()
     .limit(10)
-    .collect(Collectors.toList());
+    .toList();                             // Java 16+: unmodifiable, shorter than collect(toList())
 
 boolean anyOverdue = orders.stream()
     .anyMatch(Order::isOverdue);           // terminal, short-circuits on first match`,
@@ -606,6 +1035,75 @@ boolean anyOverdue = orders.stream()
               type: 'callout',
               kind: 'tip',
               text: 'Prefer streams for genuinely declarative transformations (filter/map/collect); prefer a plain loop when the logic involves complex branching, early-exit with multiple conditions, or mutating external state — forcing everything into a stream pipeline for its own sake often reads worse than a straightforward loop.',
+            },
+            {
+              type: 'heading',
+              text: 'How a pipeline executes: vertical, not horizontal',
+            },
+            {
+              type: 'p',
+              text: 'A stream does not run `filter` over the whole list, then `map` over the result. Each element travels **through the entire pipeline** before the next one starts — `filter(e1) → map(e1) → sink`, then `filter(e2) → map(e2) → sink`. No intermediate collections are built. The exceptions are **stateful** operations: `sorted()` must see every element before emitting the first, and `distinct()` must remember everything seen so far — both are barriers that buffer, cost memory, and defeat short-circuiting upstream of them.',
+            },
+            {
+              type: 'code',
+              language: 'java',
+              title: 'collectors worth knowing, and Stream Gatherers (Java 24+)',
+              code: `// counting per group, with a sorted result map
+Map<String, Long> ordersPerCustomer = orders.stream()
+    .collect(Collectors.groupingBy(Order::customerId, TreeMap::new, Collectors.counting()));
+
+// toMap: ALWAYS give a merge function if keys can collide -> otherwise IllegalStateException
+Map<String, Order> latestByCustomer = orders.stream()
+    .collect(Collectors.toMap(Order::customerId, o -> o,
+        (a, b) -> a.placedAt().isAfter(b.placedAt()) ? a : b));
+
+// partition into two buckets in one pass
+Map<Boolean, List<Order>> paidVsUnpaid = orders.stream()
+    .collect(Collectors.partitioningBy(Order::isPaid));
+
+// teeing: two collectors over the same stream, then combine (Java 12+)
+double avg = orders.stream().collect(Collectors.teeing(
+    Collectors.summingDouble(Order::total),
+    Collectors.counting(),
+    (sum, n) -> n == 0 ? 0 : sum / n));
+
+// Gatherers: custom INTERMEDIATE operations (final in Java 24)
+List<List<Integer>> windows = Stream.of(1, 2, 3, 4, 5)
+    .gather(Gatherers.windowSliding(3))     // [[1,2,3],[2,3,4],[3,4,5]]
+    .toList();
+
+List<Integer> runningTotals = Stream.of(1, 2, 3, 4)
+    .gather(Gatherers.scan(() -> 0, Integer::sum))   // [1, 3, 6, 10]
+    .toList();
+
+// bounded-concurrency mapping on virtual threads, order preserved
+List<Price> prices = skus.stream()
+    .gather(Gatherers.mapConcurrent(16, sku -> pricingClient.fetch(sku)))
+    .toList();`,
+            },
+            {
+              type: 'heading',
+              text: 'Parallel streams: when they help and when they hurt',
+            },
+            {
+              type: 'table',
+              headers: ['Factor', 'Good for parallel', 'Bad for parallel'],
+              rows: [
+                ['Source', '`ArrayList`, arrays, `IntStream.range` (split cheaply)', '`LinkedList`, `Stream.iterate`, I/O-backed sources'],
+                ['Work per element', 'CPU-heavy, tens of microseconds+', 'trivial arithmetic on small data'],
+                ['Operations', 'stateless `map`/`filter`, associative `reduce`', '`sorted`, `limit` on ordered streams, `findFirst`'],
+                ['Side effects', 'none', 'writing to shared collections, blocking I/O'],
+              ],
+            },
+            {
+              type: 'callout',
+              kind: 'warning',
+              text: 'All parallel streams in a JVM share the **common `ForkJoinPool`** (default parallelism = CPU count − 1). One request doing blocking I/O inside `parallelStream()` can starve every other parallel stream — and `CompletableFuture.supplyAsync` without an executor — in the whole application. In server code, parallel streams are rarely the right tool; measure with JMH before and after.',
+            },
+            {
+              type: 'callout',
+              kind: 'pitfall',
+              text: '`peek()` exists for debugging, not logic: since Java 9 the runtime may skip executing the pipeline entirely when it can compute the result otherwise (e.g. `count()` on a sized source), so side effects in `peek` or `map` may never run.',
             },
           ],
         },
@@ -647,7 +1145,7 @@ findById("u42").ifPresentOrElse(
             },
             {
               type: 'mermaid',
-              code: 'flowchart LR\n  Find["findById(\'u42\')"] --> Opt{"Optional&lt;User&gt;"}\n  Opt -->|"present"| Map1[".map(User::name)"]\n  Map1 --> Map2[".map(String::toUpperCase)"]\n  Map2 --> Merge(("join"))\n  Opt -->|"empty -- skips\\nthe map steps entirely"| Merge\n  Merge --> OrElse[".orElse(\'UNKNOWN USER\')"]',
+              code: 'flowchart LR\n  Find["findById(\'u42\')"] --> Opt{"Optional&lt;User&gt;"}\n  Opt -->|"present"| Map1[".map(User::name)"]\n  Map1 --> Map2[".map(String::toUpperCase)"]\n  Map2 --> Merge(("join"))\n  Opt -->|"empty -- skips<br/>the map steps entirely"| Merge\n  Merge --> OrElse[".orElse(\'UNKNOWN USER\')"]',
             },
             {
               type: 'callout',
@@ -659,13 +1157,40 @@ findById("u42").ifPresentOrElse(
               kind: 'note',
               text: 'Do not use `Optional` as a field type or constructor/method parameter type — it was designed and optimized specifically for return values, is not `Serializable`, and adds an unnecessary wrapper allocation in places a plain nullable reference (with clear documentation, or `@Nullable`) already communicates the same thing.',
             },
+            {
+              type: 'code',
+              language: 'java',
+              title: 'orElse vs orElseGet, flatMap, and stream()',
+              code: `// orElse evaluates its argument EAGERLY -- even when a value is present
+User u1 = findById(id).orElse(createGuestUser());        // createGuestUser() ALWAYS runs
+User u2 = findById(id).orElseGet(this::createGuestUser); // runs only when empty
+
+// flatMap when the mapping function itself returns an Optional
+Optional<String> city = findById(id)
+    .flatMap(User::address)          // Optional<Address> address()
+    .map(Address::city);
+
+// Optional.stream() (Java 9+): drop empties from a stream of lookups
+List<User> found = ids.stream()
+    .map(this::findById)
+    .flatMap(Optional::stream)
+    .toList();
+
+// primitive specializations avoid boxing
+OptionalInt maxAge = users.stream().mapToInt(User::age).max();`,
+            },
+            {
+              type: 'callout',
+              kind: 'tip',
+              text: '`Optional` only documents nullness at return sites. For whole-codebase null-safety, teams increasingly adopt **JSpecify** annotations (`@NullMarked`, `@Nullable`) checked at build time by tools such as NullAway or IDE inspections — JUnit 6 and recent Spring versions annotate their APIs with JSpecify. Language-level null-restricted types are being explored in the OpenJDK Valhalla project but are not in a GA release.',
+            },
           ],
         },
         {
           id: 'records-and-sealed-classes',
           title: 'Records & Sealed Classes — Modern Data Modeling',
           summary:
-            'Records (Java 14+/16 standard) eliminate the boilerplate of an immutable data-holding class, and sealed classes/interfaces (Java 17 standard) let you declare a closed, exhaustively-checkable set of permitted subtypes — together they make Java\'s data modeling look far more like a modern algebraic-data-type language.',
+            'Records (previewed in Java 14–15, final in Java 16) eliminate the boilerplate of an immutable data-holding class, and sealed classes/interfaces (Java 17 standard) let you declare a closed, exhaustively-checkable set of permitted subtypes — together they make Java\'s data modeling look far more like a modern algebraic-data-type language.',
           keyPoints: [
             '`record Point(int x, int y) {}` auto-generates a canonical constructor, private final fields, accessor methods (`x()`, `y()`, not `getX()`), plus correct `equals()`, `hashCode()`, and `toString()`.',
             'Records are implicitly `final` and immutable — there is no way to reassign a record component after construction, matching the immutable-by-default style records are meant to encourage.',
@@ -724,6 +1249,115 @@ static double area(Shape shape) {
               kind: 'tip',
               text: 'Reach for a record whenever a class\'s entire purpose is to hold a fixed set of immutable values (a DTO, a value object, a tuple-like return type) — reach for sealed classes/interfaces whenever you have a genuinely fixed, closed set of variants and want the compiler to catch a missed case at compile time instead of at runtime.',
             },
+            {
+              type: 'heading',
+              text: 'Record pitfalls a senior reviewer catches',
+            },
+            {
+              type: 'list',
+              items: [
+                '**Shallow immutability**: `record Team(List<String> members)` stores whatever list you pass. If the caller keeps a reference and mutates it, your "immutable" record changes. Defensively copy in the compact constructor: `members = List.copyOf(members);`.',
+                '**Arrays break equality**: a record with an `int[]` component uses array *identity* in `equals`/`hashCode`, so two records with equal contents are not equal. Prefer `List<Integer>` or override both methods.',
+                '**JPA entities**: records cannot be JPA entities (no no-arg constructor, final fields, no proxies). They are excellent for DTOs, projections, query results, events, and value objects inside entities (as embeddables, depending on provider support).',
+                '**Serialization**: records serialize via their canonical constructor, so validation runs on deserialization too — safer than classic Java serialization, which bypasses constructors. Jackson supports records natively.',
+                'Records can implement interfaces, declare static fields and methods, nested types, and additional constructors (which must delegate to the canonical one) — but not extra instance fields.',
+              ],
+            },
+            {
+              type: 'code',
+              language: 'java',
+              title: 'defensive copying and "wither" methods',
+              code: `public record Team(String name, List<String> members) {
+    public Team {
+        Objects.requireNonNull(name, "name");
+        members = List.copyOf(members);   // reassigning the PARAMETER before the implicit field assignment
+    }
+
+    // records have no setters -- return a modified copy instead
+    public Team withMember(String m) {
+        var copy = new ArrayList<>(members);
+        copy.add(m);
+        return new Team(name, copy);
+    }
+}`,
+            },
+            {
+              type: 'callout',
+              kind: 'note',
+              text: 'Sealing is enforced by both the compiler **and** the JVM (the `PermittedSubclasses` class-file attribute), so it cannot be bypassed by compiling a rogue subclass separately. Permitted subclasses must live in the same module (or the same package, in the unnamed module). Use `non-sealed` to reopen one branch of a hierarchy deliberately for extension.',
+            },
+          ],
+        },
+        {
+          id: 'pattern-matching',
+          title: 'Pattern Matching: `instanceof`, `switch` & Record Patterns',
+          summary:
+            'Since Java 21, `switch` can match on types and deconstruct records, with guards and compiler-checked exhaustiveness over sealed hierarchies. Combined with records and sealed types this enables data-oriented programming — modeling data as closed sets of immutable variants and writing operations over them as total functions.',
+          keyPoints: [
+            '**Type patterns** for `instanceof` (final in Java 16): `if (obj instanceof String s && !s.isBlank())` tests, casts and binds in one step; the binding is in scope only where the match is definitely true (flow scoping).',
+            '**Pattern matching for `switch`** (final in Java 21): `case Circle c ->`, `case null ->`, guarded patterns with `when`, and exhaustiveness checking for sealed types and enums.',
+            '**Record patterns** (final in Java 21) deconstruct a record into its components, and nest: `case Line(Point(var x1, var y1), Point p2) ->`.',
+            '**Unnamed patterns and variables** (final in Java 22): `_` for components you do not care about — `case Order(_, var total) ->`.',
+            '**Primitive types in patterns** (`case int i when i > 0`, `instanceof byte b`) are still in preview as of JDK 27 — don\'t use them in production code yet.',
+          ],
+          blocks: [
+            {
+              type: 'code',
+              language: 'java',
+              title: 'a sealed domain model and a total function over it',
+              code: `sealed interface PaymentResult permits Approved, Declined, Pending {}
+record Approved(String txId, BigDecimal amount) implements PaymentResult {}
+record Declined(String reason, int code) implements PaymentResult {}
+record Pending(Duration retryAfter) implements PaymentResult {}
+
+String describe(PaymentResult r) {
+    return switch (r) {
+        case Approved(var txId, var amount) when amount.signum() == 0 -> "zero-amount auth " + txId;
+        case Approved(var txId, _)        -> "approved " + txId;
+        case Declined(_, int code) when code >= 500 -> "processor error, retry";
+        case Declined(var reason, _)      -> "declined: " + reason;
+        case Pending(var wait)            -> "retry in " + wait.toSeconds() + "s";
+        // no default: adding a new PaymentResult subtype makes this a COMPILE error
+    };
+}`,
+            },
+            {
+              type: 'heading',
+              text: 'Rules that trip people up',
+            },
+            {
+              type: 'list',
+              items: [
+                '**Dominance**: cases are tested top to bottom, and the compiler rejects a case that can never match because an earlier one covers it (`case CharSequence cs` before `case String s` is an error). Put specific and guarded cases first.',
+                '**Null**: a classic `switch` throws `NullPointerException` on a null selector. With patterns you can add `case null ->` (or `case null, default ->`); without it, the NPE behavior is preserved.',
+                '**Exhaustiveness** is checked for switch *expressions* and for pattern switch *statements*. If a sealed hierarchy gains a subtype at runtime that the compiled code did not know about (separate compilation), the JVM throws `MatchException` rather than falling through silently.',
+                '**Avoid `default` on sealed switches**: it compiles today, but it silences the compiler when someone adds a new variant — exactly the safety net you wanted.',
+                'Guards (`when`) do not count toward exhaustiveness: `case Declined d when d.code() > 500` still needs an unguarded `Declined` case somewhere.',
+              ],
+            },
+            {
+              type: 'mermaid',
+              code: 'flowchart TD\n  Sel["switch (result)"] --> N{"null?"}\n  N -->|"yes, case null present"| CN["case null branch"]\n  N -->|"yes, no case null"| NPE["NullPointerException"]\n  N -->|"no"| C1{"matches case 1<br/>type + guard?"}\n  C1 -->|"yes"| B1["run case 1"]\n  C1 -->|"no"| C2{"matches case 2?"}\n  C2 -->|"yes"| B2["run case 2"]\n  C2 -->|"no ... all cases fail"| ME["MatchException<br/>(only if a new subtype<br/>appeared after compilation)"]',
+            },
+            {
+              type: 'heading',
+              text: 'Pattern matching vs polymorphism (the expression problem)',
+            },
+            {
+              type: 'table',
+              headers: ['', 'Virtual method on each subclass', 'Sealed type + pattern switch'],
+              rows: [
+                ['Adding a new **operation**', 'Touch every subclass', 'Write one new function'],
+                ['Adding a new **variant**', 'Write one new class', 'Compiler flags every switch to update'],
+                ['Best when', 'Variants open-ended, operations stable (plugins, frameworks)', 'Variants closed, operations grow (ASTs, protocol messages, results, events)'],
+                ['Logic lives', 'With the data', 'In the operation, separate from data'],
+              ],
+            },
+            {
+              type: 'callout',
+              kind: 'tip',
+              text: 'Data-oriented programming in Java, in four rules: model data immutably with records, model alternatives with sealed interfaces, make illegal states unrepresentable (validate in compact constructors), and write behavior as exhaustive switches. It is a complement to OOP, not a replacement: keep polymorphism for open extension points.',
+            },
           ],
         },
         {
@@ -736,7 +1370,8 @@ static double area(Shape shape) {
             'String literals are interned in the **string constant pool** — identical literals reuse the same object, so `"abc" == "abc"` is `true`, but `new String("abc") == "abc"` is `false` (a new heap object, not pooled unless `.intern()` is called).',
             'Immutability is what makes `String` safe as a `HashMap` key and safe to share across threads with no synchronization — its hash code is even cached after first computation, since it can never change.',
             'Repeated `+=` concatenation in a loop is O(n²) — each `+` allocates and copies a new string; `StringBuilder` mutates an internal buffer in place, giving O(n) for building a string incrementally.',
-            'Java\'s `+` operator on strings inside a single expression is compiled to use `StringBuilder` automatically — the O(n²) trap is specifically about concatenation *across loop iterations*, not a single expression.',
+            'A single `+` expression is optimized by the compiler — since Java 9 (JEP 280) `javac` emits an `invokedynamic` to `StringConcatFactory`, which sizes the result once (before Java 9 it was a `StringBuilder` chain). The O(n²) trap is specifically about concatenation *across loop iterations*, not a single expression.',
+            'Since Java 9, **compact strings** store Latin-1-only text as one byte per character instead of two (UTF-16), roughly halving memory for typical ASCII-heavy workloads — transparent to your code.',
           ],
           blocks: [
             {
@@ -770,12 +1405,52 @@ String result2 = sb.toString();`,
             },
             {
               type: 'mermaid',
-              code: 'flowchart TB\n  S1["String s1 = \'abc\'"] --> Pool[("String Constant Pool")]\n  S2["String s2 = \'abc\'"] --> Pool\n  S3["String s3 = new String(\'abc\')"] --> Heap[("regular Heap\\n(separate object)")]\n  Pool -.->|"s1 == s2 -> true\\nsame pooled object"| EqTrue["=="]\n  Heap -.->|"s1 == s3 -> false\\ndifferent objects,\\nsame content"| EqFalse["=="]',
+              code: 'flowchart TB\n  S1["String s1 = \'abc\'"] --> Pool[("String Constant Pool")]\n  S2["String s2 = \'abc\'"] --> Pool\n  S3["String s3 = new String(\'abc\')"] --> Heap[("regular Heap<br/>(separate object)")]\n  Pool -.->|"s1 == s2 -> true<br/>same pooled object"| EqTrue["=="]\n  Heap -.->|"s1 == s3 -> false<br/>different objects,<br/>same content"| EqFalse["=="]',
             },
             {
               type: 'callout',
               kind: 'pitfall',
               text: 'Always compare `String`s with `.equals()`, never `==` — literal interning makes `==` appear to "work" for string literals specifically, and that habit then silently breaks for any string built at runtime (from user input, concatenation, `new String(...)`, etc.).',
+            },
+            {
+              type: 'heading',
+              text: 'Modern string features and internals',
+            },
+            {
+              type: 'code',
+              language: 'java',
+              title: 'text blocks, formatted, and useful modern String methods',
+              code: `// Text blocks (Java 15+): multi-line literals, incidental indentation stripped
+String query = """
+    SELECT id, name
+    FROM users
+    WHERE status = ?
+    """;
+
+String json = """
+    {"name": "%s", "age": %d}
+    """.formatted(name, age);
+
+"  hi  ".strip();            // Unicode-aware trim (Java 11+); trim() only strips <= U+0020
+"".isBlank();                // true (Java 11+)
+"a\\nb\\nc".lines().count();   // 3 (Java 11+)
+"ab".repeat(3);              // "ababab" (Java 11+)
+String.join(", ", names);    // simple joining without a StringBuilder`,
+            },
+            {
+              type: 'list',
+              items: [
+                '**Why immutable?** Security (a validated file path or class name cannot be changed after the check), safe sharing across threads, hash-code caching, and making the string pool possible at all.',
+                '**The pool lives on the heap** (since Java 7, not PermGen), so interned strings are garbage-collected when unreachable. Calling `intern()` on high-cardinality runtime data still bloats the pool\'s hash table — prefer your own deduplicating map if you must canonicalize.',
+                '**G1 string deduplication** (`-XX:+UseStringDeduplication`, also supported by other collectors in recent JDKs) makes duplicate `String` objects share one backing array during GC — a cheap win for apps holding many duplicate strings (parsed CSV/JSON).',
+                '**`substring` copies** since Java 7u6. Older JVMs shared the parent\'s char array, which caused memory leaks when a tiny substring kept a huge string alive.',
+                '**String Templates** (`STR."Hello \\{name}"`) previewed in JDK 21–22 and were **withdrawn** in JDK 23 — don\'t use them; `formatted()` / `String.format` and text blocks are the current tools.',
+              ],
+            },
+            {
+              type: 'callout',
+              kind: 'warning',
+              text: 'Never hold passwords or secrets in a `String` if you can avoid it: it is immutable (you cannot wipe it), may be interned, and lingers in heap dumps until GC. Security APIs use `char[]` (e.g. `PBEKeySpec`, `Console.readPassword`) so you can zero it after use. Also beware `toLowerCase()`/`toUpperCase()` without a `Locale` — in the Turkish locale `"TITLE".toLowerCase()` produces a dotless ı; use `Locale.ROOT` for protocol/identifier strings.',
             },
           ],
         },
@@ -794,7 +1469,7 @@ String result2 = sb.toString();`,
           blocks: [
             {
               type: 'mermaid',
-              code: 'flowchart TB\n  subgraph JVM["JVM Memory"]\n    subgraph Heap["Heap (shared across threads)"]\n      Young["Young Generation\\n(Eden + Survivor spaces)\\nnew, short-lived objects"]\n      Old["Old Generation\\n(Tenured)\\nlong-lived, survived GCs"]\n    end\n    subgraph Stacks["Per-thread Stacks"]\n      S1["Thread 1 stack\\nframe: main()\\nframe: process()\\n locals + refs"]\n      S2["Thread 2 stack\\n(independent frames)"]\n    end\n    Meta["Metaspace (native memory)\\nclass metadata, method bytecode"]\n  end\n  S1 -.->|"object references point into"| Heap\n  S2 -.->|"object references point into"| Heap',
+              code: 'flowchart TB\n  subgraph JVM["JVM Memory"]\n    subgraph Heap["Heap (shared across threads)"]\n      Young["Young Generation<br/>(Eden + Survivor spaces)<br/>new, short-lived objects"]\n      Old["Old Generation<br/>(Tenured)<br/>long-lived, survived GCs"]\n    end\n    subgraph Stacks["Per-thread Stacks"]\n      S1["Thread 1 stack<br/>frame: main()<br/>frame: process()<br/> locals + refs"]\n      S2["Thread 2 stack<br/>(independent frames)"]\n    end\n    Meta["Metaspace (native memory)<br/>class metadata, method bytecode"]\n  end\n  S1 -.->|"object references point into"| Heap\n  S2 -.->|"object references point into"| Heap',
             },
             {
               type: 'code',
@@ -812,6 +1487,55 @@ String result2 = sb.toString();`,
               kind: 'note',
               text: 'PermGen (pre-Java 8) had a fixed maximum size and was a notorious source of `OutOfMemoryError: PermGen space`, especially in application servers that reloaded classes repeatedly. Metaspace uses native (off-heap) memory and grows dynamically by default, which mostly eliminated that specific failure mode — though it can still be bounded with `-XX:MaxMetaspaceSize` if unbounded class loading is itself a symptom of a leak.',
             },
+            {
+              type: 'heading',
+              text: 'The heap is not the whole process: native memory',
+            },
+            {
+              type: 'table',
+              headers: ['Region', 'Holds', 'Sized by', 'Typical failure'],
+              rows: [
+                ['Java heap', 'objects and arrays', '`-Xms` / `-Xmx`, or `-XX:MaxRAMPercentage`', '`OutOfMemoryError: Java heap space`'],
+                ['Metaspace', 'class metadata', '`-XX:MaxMetaspaceSize` (unbounded by default)', '`OutOfMemoryError: Metaspace` (classloader leaks)'],
+                ['Thread stacks', 'frames of platform threads', '`-Xss` (commonly 1 MB reserved per thread on 64-bit Linux)', '`StackOverflowError`, or OOM "unable to create native thread"'],
+                ['Code cache', 'JIT-compiled machine code', '`-XX:ReservedCodeCacheSize`', 'JIT stops compiling, sudden slowdown'],
+                ['Direct buffers', '`ByteBuffer.allocateDirect`, Netty, NIO', '`-XX:MaxDirectMemorySize`', '`OutOfMemoryError: Direct buffer memory`'],
+                ['GC & JVM internals', 'card tables, remembered sets, symbol tables', 'collector-dependent', 'container OOM-kill with a "healthy" heap'],
+              ],
+            },
+            {
+              type: 'callout',
+              kind: 'warning',
+              text: 'In Kubernetes, a container memory limit applies to the **whole process**, not just the heap. Setting `-Xmx` equal to the container limit guarantees eventual OOM-kills (exit code 137) with no Java stack trace. The JVM is container-aware (since JDK 10, backported to 8u191) and by default caps the heap at **25% of the container limit** — usually too conservative for a dedicated service. A common starting point is `-XX:MaxRAMPercentage=70` to `75`, then verify with Native Memory Tracking (`-XX:NativeMemoryTracking=summary` + `jcmd <pid> VM.native_memory summary`).',
+            },
+            {
+              type: 'heading',
+              text: 'Object layout, compressed pointers and allocation',
+            },
+            {
+              type: 'list',
+              items: [
+                '**Object header**: a mark word (identity hash, lock state, GC age) plus a class pointer. Traditionally 12 bytes on 64-bit HotSpot with compressed class pointers; **compact object headers** shrink it to 8 bytes (experimental in JDK 24, a product option `-XX:+UseCompactObjectHeaders` in JDK 25, and on by default in JDK 27). For workloads full of small objects that can cut heap usage by double-digit percentages.',
+                '**Compressed oops**: below roughly 32 GB of heap, references are stored as 32-bit offsets instead of 64-bit pointers. Crossing that threshold makes every reference twice as big — a 31 GB heap can hold more live data than a 33 GB one.',
+                '**TLABs** (thread-local allocation buffers): each thread bump-allocates in its own chunk of Eden, so `new` is usually just a pointer increment — no lock, often cheaper than `malloc`.',
+                '**Escape analysis**: if the JIT proves an object never escapes a method (or an inlined call chain), it can **scalar-replace** it — store its fields in registers and never allocate it on the heap at all. "Objects always live on the heap" is the language model; the optimized machine code may never create them.',
+              ],
+            },
+            {
+              type: 'code',
+              language: 'bash',
+              title: 'inspecting memory of a running JVM',
+              code: `jcmd <pid> GC.heap_info                 # heap regions and usage
+jcmd <pid> VM.native_memory summary     # needs -XX:NativeMemoryTracking=summary at startup
+jcmd <pid> GC.class_histogram | head    # which classes dominate the heap right now
+jcmd <pid> GC.heap_dump /tmp/heap.hprof # full dump -> analyze in Eclipse MAT / VisualVM
+
+# start-up flags worth having in production
+java -XX:MaxRAMPercentage=75 \\
+     -XX:+HeapDumpOnOutOfMemoryError -XX:HeapDumpPath=/dumps \\
+     -Xlog:gc*:file=/logs/gc.log:time,uptime:filecount=5,filesize=20m \\
+     -jar app.jar`,
+            },
           ],
         },
         {
@@ -823,22 +1547,23 @@ String result2 = sb.toString();`,
             'GC reclaims objects that are **unreachable** — no live reference chain from a GC root (stack variables, static fields, active threads) reaches them — not objects that are merely unused for a while.',
             'The **generational hypothesis**: most objects become garbage very quickly (a request-scoped object, a loop-local temporary); few survive long. The heap is split into a Young Generation (collected often, cheaply) and an Old Generation (collected rarely, more expensively).',
             'A **minor GC** collects the Young Generation only (fast, frequent); a **major/full GC** collects the Old Generation (or the whole heap) and is far more expensive — the source of most GC-pause complaints.',
-            '**G1 (Garbage First)** is the modern default collector — divides the heap into regions and prioritizes collecting the ones with the most garbage first, aiming for predictable, bounded pause times.',
-            '**ZGC** and **Shenandoah** are low-latency collectors designed for sub-millisecond pause times even on very large (multi-GB to TB-scale) heaps, trading some throughput for that latency guarantee — relevant when GC pauses themselves (not overall throughput) are the problem being solved.',
+            '**G1 (Garbage First)** is the default collector — it divides the heap into regions and prioritizes collecting the ones with the most garbage first, aiming for a pause-time target (`-XX:MaxGCPauseMillis`, default 200 ms). Until JDK 26 the JVM silently picked Serial GC on small machines (under 2 CPUs or under ~1.8 GB RAM); **JDK 27 makes G1 the default in all environments** (JEP 523).',
+            '**ZGC** and **Shenandoah** are concurrent, low-latency collectors that do almost all work (including compaction) while the application runs, keeping pauses typically under a millisecond regardless of heap size, at the cost of some throughput and extra CPU/memory headroom. Both are now **generational**: ZGC has been generational-only since JDK 24, and generational Shenandoah became a product feature in JDK 25.',
           ],
           blocks: [
             {
               type: 'mermaid',
-              code: 'flowchart LR\n  New["new Object()"] --> Eden["Eden space\\n(Young Gen)"]\n  Eden -->|"survives a minor GC"| Survivor["Survivor space"]\n  Survivor -->|"survives several\\nminor GCs"| Old["Old Generation\\n(Tenured)"]\n  Eden -->|"most objects die here\\n(unreachable, reclaimed)"| Reclaimed1["reclaimed"]\n  Survivor -->|"dies before promotion"| Reclaimed2["reclaimed"]\n  Old -->|"major/full GC\\n(rare, expensive)"| Reclaimed3["reclaimed"]',
+              code: 'flowchart LR\n  New["new Object()"] --> Eden["Eden space<br/>(Young Gen)"]\n  Eden -->|"survives a minor GC"| Survivor["Survivor space"]\n  Survivor -->|"survives several<br/>minor GCs"| Old["Old Generation<br/>(Tenured)"]\n  Eden -->|"most objects die here<br/>(unreachable, reclaimed)"| Reclaimed1["reclaimed"]\n  Survivor -->|"dies before promotion"| Reclaimed2["reclaimed"]\n  Old -->|"major/full GC<br/>(rare, expensive)"| Reclaimed3["reclaimed"]',
             },
             {
               type: 'table',
-              headers: ['Collector', 'Best for', 'Trade-off'],
+              headers: ['Collector', 'Flag', 'Best for', 'Trade-off'],
               rows: [
-                ['Serial GC', 'Small heaps, single-core/CLI tools', 'Stop-the-world, single-threaded — simplest, least overhead for tiny workloads'],
-                ['Parallel GC', 'Throughput-focused batch workloads', 'Stop-the-world but multi-threaded — maximizes throughput, pauses can be longer'],
-                ['G1 (default since Java 9)', 'General-purpose server apps', 'Region-based, aims for predictable pause targets, good balance of throughput/latency'],
-                ['ZGC / Shenandoah', 'Very large heaps, latency-sensitive services', 'Sub-millisecond pauses even at huge heap sizes, at some throughput cost'],
+                ['Serial GC', '`-XX:+UseSerialGC`', 'Tiny heaps, CLI tools, 1-CPU containers', 'Stop-the-world, single-threaded — least overhead, pauses grow with heap'],
+                ['Parallel GC', '`-XX:+UseParallelGC`', 'Batch jobs, throughput over latency', 'Stop-the-world but multi-threaded — best raw throughput, long pauses on big heaps'],
+                ['G1 (default since Java 9)', '`-XX:+UseG1GC`', 'General-purpose services, heaps from ~1 GB to tens of GB', 'Region-based, mostly-concurrent marking, pause target; good balance'],
+                ['ZGC (generational)', '`-XX:+UseZGC`', 'Latency-sensitive services, large heaps (to multi-TB)', 'Sub-ms pauses independent of heap size; needs CPU and heap headroom'],
+                ['Shenandoah', '`-XX:+UseShenandoahGC`', 'Same niche as ZGC (not in every vendor build)', 'Concurrent compaction, sub-ms pauses; generational mode since JDK 25'],
               ],
             },
             {
@@ -864,11 +1589,18 @@ public static void invalidate(String id) {
     cache.remove(id);
 }
 
-// FIX 2: let entries become collectible automatically once nothing else
-// in the application still references the key -- WeakHashMap holds its
-// keys with weak references, so the GC is free to reclaim an entry the
-// moment the key becomes otherwise unreachable
-private static final Map<String, Session> cache = new WeakHashMap<>();`,
+// FIX 2 (usually best): a BOUNDED cache with size and time-based eviction,
+// e.g. the Caffeine library
+private static final Cache<String, Session> sessions = Caffeine.newBuilder()
+    .maximumSize(100_000)
+    .expireAfterAccess(Duration.ofMinutes(30))
+    .build();
+
+// CAUTION with WeakHashMap: entries vanish when the KEY OBJECT becomes
+// unreachable. With String keys that are literals or interned, the key
+// never becomes unreachable (leak persists); with freshly-built String keys
+// the entry can disappear immediately. WeakHashMap fits identity-keyed
+// metadata (e.g. extra data attached to objects you don't own), not caches.`,
             },
             {
               type: 'callout',
@@ -880,6 +1612,39 @@ private static final Map<String, Session> cache = new WeakHashMap<>();`,
               kind: 'note',
               text: 'GC only reclaims **unreachable** objects — it does not detect or fix logical memory leaks where a live reference (e.g., an ever-growing static `List`, or listeners never unregistered) keeps objects reachable forever. That kind of leak is a design bug GC cannot help with; heap-dump analysis (not GC tuning) is the right diagnostic tool.',
             },
+            {
+              type: 'heading',
+              text: 'How a collector finds live objects',
+            },
+            {
+              type: 'list',
+              items: [
+                '**Marking**: starting from GC roots (thread stacks, static fields, JNI handles), the collector traverses the object graph and marks everything reachable. Cost scales with **live** data, not with garbage — which is why a young collection over mostly-dead objects is cheap.',
+                '**Copying/compacting**: survivors are evacuated to fresh regions, leaving whole regions empty to reuse. This eliminates fragmentation and is what makes bump-pointer allocation possible.',
+                '**Write barriers and card tables / remembered sets**: to collect the young generation without scanning the whole old generation, the JVM tracks old-to-young pointers via a small piece of code run on every reference store. Concurrent collectors also use **load barriers** (ZGC) or similar to let the app run while objects move.',
+                '**Safepoints**: stop-the-world phases need all threads paused at known points. Time-to-safepoint (a thread stuck in a long counted loop) can add latency that GC logs attribute to "pause" even though the collector itself was quick.',
+              ],
+            },
+            {
+              type: 'heading',
+              text: 'Choosing and tuning, in order',
+            },
+            {
+              type: 'list',
+              ordered: true,
+              items: [
+                'Start with defaults (G1) and a correctly sized heap — most "GC problems" are an undersized heap or an allocation-heavy hot path, not the wrong collector.',
+                'Turn on GC logging (`-Xlog:gc*`) and measure pause percentiles and allocation rate under realistic load; JDK Flight Recorder shows *which code* allocates.',
+                'If p99/p999 latency is dominated by GC pauses and you have CPU headroom, try generational ZGC (`-XX:+UseZGC`). If the job is pure batch throughput, try Parallel GC.',
+                'Reduce allocation before tuning flags: avoid boxing, reuse buffers in hot loops, presize collections. Fewer allocated bytes per request beats any flag.',
+                'Avoid cargo-cult flags copied from old blog posts (`-XX:+UseConcMarkSweepGC` — CMS was removed in JDK 14; `-XX:NewRatio` fiddling with G1 defeats its adaptive sizing).',
+              ],
+            },
+            {
+              type: 'callout',
+              kind: 'pitfall',
+              text: '`System.gc()` is a hint that, on most collectors, triggers a full stop-the-world collection — and libraries sometimes call it (RMI historically did periodically). Never call it in application code; `-XX:+DisableExplicitGC` exists for a reason, though be aware it also affects code that uses it to reclaim direct buffers.',
+            },
           ],
         },
         {
@@ -889,7 +1654,7 @@ private static final Map<String, Session> cache = new WeakHashMap<>();`,
             'Classes are loaded lazily, on first use, by a hierarchy of classloaders that delegate upward before trying to load anything themselves — a design that keeps core Java classes tamper-resistant and enables powerful runtime plugin/isolation patterns.',
           keyPoints: [
             'The **Bootstrap classloader** (native code, no Java parent) loads the core JDK classes (`java.lang.*`, `java.util.*`) from the runtime\'s core modules.',
-            'The **Platform/Extension classloader** loads certain platform-provided modules; the **Application (System) classloader** loads classes from the application classpath — your own compiled code and its declared dependencies.',
+            'The **Platform classloader** (which replaced the old Extension classloader and the `jre/lib/ext` mechanism in Java 9) loads certain platform-provided modules; the **Application (System) classloader** loads classes from the application classpath — your own compiled code and its declared dependencies.',
             'The **delegation model**: before a classloader loads a class itself, it asks its parent to try first — a request only "falls" to a lower classloader if every ancestor fails to find the class.',
             'This delegation is what prevents a malicious or accidental `java.lang.String` defined in application code from ever shadowing the real JDK one — the bootstrap loader always gets first chance and already has it loaded.',
             'A class is uniquely identified at runtime by **both** its fully-qualified name *and* the classloader that loaded it — the same class name loaded by two different classloaders is treated as two distinct, incompatible types, the root cause of many `ClassCastException`s in plugin/application-server environments.',
@@ -897,7 +1662,7 @@ private static final Map<String, Session> cache = new WeakHashMap<>();`,
           blocks: [
             {
               type: 'mermaid',
-              code: 'flowchart TB\n  App["Application (System) ClassLoader\\nloads YOUR code from the classpath"] -->|"delegates first"| Platform["Platform/Extension ClassLoader\\nloads certain platform modules"]\n  Platform -->|"delegates first"| Boot["Bootstrap ClassLoader (native)\\nloads java.lang.*, java.util.*, core JDK classes"]\n  Boot -.->|"class found? use it.\\nnot found? fall back down"| Platform\n  Platform -.->|"class found? use it.\\nnot found? fall back down"| App\n  App -.->|"only loads it itself\\nif no ancestor found it"| Loaded["class loaded"]',
+              code: 'flowchart TB\n  App["Application (System) ClassLoader<br/>loads YOUR code from the classpath"] -->|"delegates first"| Platform["Platform/Extension ClassLoader<br/>loads certain platform modules"]\n  Platform -->|"delegates first"| Boot["Bootstrap ClassLoader (native)<br/>loads java.lang.*, java.util.*, core JDK classes"]\n  Boot -.->|"class found? use it.<br/>not found? fall back down"| Platform\n  Platform -.->|"class found? use it.<br/>not found? fall back down"| App\n  App -.->|"only loads it itself<br/>if no ancestor found it"| Loaded["class loaded"]',
             },
             {
               type: 'p',
@@ -938,6 +1703,128 @@ Object instanceFromA = pluginClassA.getDeclaredConstructor().newInstance();
               type: 'callout',
               kind: 'note',
               text: 'Application servers, plugin systems, and hot-reload tooling deliberately break strict delegation (each plugin gets its own classloader with limited or reordered delegation) specifically to isolate plugins from each other\'s dependency versions — the classic "two plugins each need a different version of the same library" problem. This is also exactly why a `ClassCastException` between what looks like "the same class" is possible: the two instances were loaded by different classloaders and the JVM correctly treats them as different types.',
+            },
+            {
+              type: 'heading',
+              text: 'Loading, linking, initialization',
+            },
+            {
+              type: 'mermaid',
+              code: 'flowchart LR\n  L["Loading<br/>find bytes, create Class object"] --> V["Verification<br/>bytecode is type-safe"]\n  V --> P["Preparation<br/>static fields get default values"]\n  P --> R["Resolution<br/>symbolic refs to real refs<br/>(often lazy)"]\n  R --> I["Initialization<br/>static initializers and<br/>static field assignments run"]',
+            },
+            {
+              type: 'list',
+              items: [
+                '**Initialization** happens exactly once, on first active use (instance creation, static method call, non-constant static field access), and the JVM guarantees it is thread-safe — which is why the *initialization-on-demand holder* idiom is a correct lazy singleton with no explicit locking.',
+                'An exception thrown in a static initializer surfaces as `ExceptionInInitializerError` the first time, and as `NoClassDefFoundError: Could not initialize class X` on every later attempt — a confusing production symptom whose root cause is in the *first* error in the log.',
+                '`ClassNotFoundException` (checked) means a class requested by name at runtime (`Class.forName`, a classloader) was not found; `NoClassDefFoundError` means a class present at compile time is missing or failed to initialize at runtime — usually a classpath/dependency-version problem.',
+                '**Classloader leaks**: a class is unloaded only when its classloader becomes unreachable. One lingering reference (a `ThreadLocal` on a pooled thread, a JDBC driver registered in `DriverManager`, a static cache in a parent loader) pins the whole loader and every class it loaded — the classic Metaspace leak on application-server redeploys.',
+              ],
+            },
+            {
+              type: 'code',
+              language: 'java',
+              title: 'thread-safe lazy initialization courtesy of class initialization',
+              code: `public final class Config {
+    private Config() { /* expensive load */ }
+
+    private static final class Holder {        // not initialized until first getInstance()
+        static final Config INSTANCE = new Config();
+    }
+
+    public static Config getInstance() {
+        return Holder.INSTANCE;                // JVM guarantees one, safely published, instance
+    }
+}`,
+            },
+            {
+              type: 'callout',
+              kind: 'note',
+              text: 'The **Java Platform Module System** (Java 9) adds a layer above packages: a `module-info.java` declares what a module `requires` and which packages it `exports`. Its biggest practical effect is **strong encapsulation of JDK internals** (enforced by default since JDK 16/17): reflective access into non-exported packages fails unless explicitly opened with `--add-opens`. Many applications still run on the classpath (the "unnamed module") rather than fully modularizing, and that is fine — but tools like `jlink` (custom minimal runtimes) need modules.',
+            },
+          ],
+        },
+        {
+          id: 'jit-compilation-and-startup',
+          title: 'JIT Compilation, Warm-up & Startup (AOT Cache, Native Image)',
+          summary:
+            'HotSpot starts by interpreting bytecode, profiles it, and progressively compiles hot code with two JIT compilers. That design gives excellent peak performance but slow warm-up — and the modern answers (Project Leyden\'s AOT cache, CRaC, GraalVM Native Image) trade flexibility for startup in different ways.',
+          keyPoints: [
+            '**Tiered compilation**: code starts in the interpreter, gets compiled quickly by **C1** (client compiler) with profiling, and the hottest methods are recompiled by **C2** (server compiler) with aggressive, profile-guided optimizations.',
+            'Key C2 optimizations: **inlining** (the mother of all optimizations — it enables the rest), escape analysis/scalar replacement, loop unrolling, intrinsics (hand-written machine code for things like `System.arraycopy`, `Math` and crypto), and lock elision.',
+            'JIT code is **speculative**; when an assumption breaks (a new subclass loads, an "impossible" branch is taken), the JVM **deoptimizes** to the interpreter and recompiles later.',
+            '**AOT cache** (Project Leyden, JDK 24+): a training run records loaded/linked classes (and since JDK 25 method profiles) into a cache file that later runs reuse — faster startup and warm-up with no change in program semantics.',
+            '**GraalVM Native Image** compiles the whole app ahead of time into a standalone executable — millisecond startup and small footprint, but a closed-world assumption (reflection, proxies, resources must be declared) and typically lower peak throughput than a warmed-up C2.',
+          ],
+          blocks: [
+            {
+              type: 'mermaid',
+              code: 'flowchart LR\n  T0["Tier 0<br/>interpreter"] -->|"invocation and<br/>loop counters"| T3["Tier 3<br/>C1 + full profiling"]\n  T3 -->|"hot + profile ready"| T4["Tier 4<br/>C2 optimized code"]\n  T4 -->|"speculation failed"| D["deoptimize"]\n  D --> T0\n  T0 -.->|"trivial methods"| T1["Tier 1<br/>C1, no profiling"]',
+            },
+            {
+              type: 'heading',
+              text: 'Why your micro-benchmark is lying',
+            },
+            {
+              type: 'p',
+              text: 'Timing a loop with `System.nanoTime()` measures a mixture of interpreter, C1 and C2 code, plus whatever the JIT eliminated: if the result of a computation is never used, C2 can delete the computation entirely (dead-code elimination), and constant inputs can be folded at compile time. Use **JMH** (the OpenJDK micro-benchmark harness): it forks fresh JVMs, runs warm-up iterations, and provides `Blackhole` to defeat dead-code elimination.',
+            },
+            {
+              type: 'code',
+              language: 'java',
+              title: 'a minimal JMH benchmark',
+              code: `@State(Scope.Benchmark)
+@BenchmarkMode(Mode.AverageTime)
+@OutputTimeUnit(TimeUnit.NANOSECONDS)
+@Warmup(iterations = 5)
+@Measurement(iterations = 5)
+@Fork(2)
+public class ConcatBenchmark {
+    String a = "hello", b = "world";
+
+    @Benchmark
+    public String plus() {
+        return a + " " + b;          // returning the value prevents dead-code elimination
+    }
+
+    @Benchmark
+    public void builder(Blackhole bh) {
+        bh.consume(new StringBuilder().append(a).append(' ').append(b).toString());
+    }
+}`,
+            },
+            {
+              type: 'heading',
+              text: 'Startup options compared',
+            },
+            {
+              type: 'table',
+              headers: ['Approach', 'Startup / warm-up', 'Peak throughput', 'Constraints'],
+              rows: [
+                ['Plain JVM (JIT)', 'Slowest; seconds for large frameworks', 'Best (profile-guided C2)', 'None'],
+                ['AOT cache (JDK 24+), CDS', 'Noticeably faster startup; JDK 25 profiles also speed warm-up', 'Same as JIT', 'Training run; same JDK and classpath at runtime'],
+                ['CRaC (checkpoint/restore)', 'Near-instant: restore a warmed-up process snapshot', 'Same as JIT, already warm', 'Linux, supporting JDK builds, app must handle checkpoint (sockets, secrets)'],
+                ['GraalVM Native Image', 'Milliseconds, low RSS', 'Usually lower than C2; PGO narrows the gap', 'Closed world: reflection config, longer builds, no dynamic class loading'],
+              ],
+            },
+            {
+              type: 'code',
+              language: 'bash',
+              title: 'creating and using an AOT cache',
+              code: `# JDK 25+: one-step training run that writes the cache on exit
+java -XX:AOTCacheOutput=app.aot -jar app.jar     # exercise typical startup paths, then stop
+
+# production runs reuse it (same JDK build, same jars)
+java -XX:AOTCache=app.aot -jar app.jar
+
+# JDK 24 needed two steps:
+#   java -XX:AOTMode=record -XX:AOTConfiguration=app.aotconf -jar app.jar
+#   java -XX:AOTMode=create -XX:AOTConfiguration=app.aotconf -XX:AOTCache=app.aot -jar app.jar`,
+            },
+            {
+              type: 'callout',
+              kind: 'tip',
+              text: 'Warm-up matters operationally: a freshly deployed instance running interpreted code can blow your latency SLO for its first minutes. Mitigations — synthetic warm-up traffic before the readiness probe passes, gradual traffic shifting, an AOT cache, and adequate CPU during startup (JIT compiler threads compete with your app; a 1-CPU container limit makes warm-up dramatically slower).',
             },
           ],
         },
@@ -989,7 +1876,68 @@ class FixedFlag {
             },
             {
               type: 'mermaid',
-              code: 'sequenceDiagram\n  participant T1 as Thread 1\n  participant T2 as Thread 2\n  T1->>T1: data = 42 (plain write)\n  T1->>T1: volatile write: ready = true\n  Note over T1,T2: happens-before edge\n  T2->>T2: volatile read: while(!ready)\n  T2->>T2: reads data -- GUARANTEED to see 42\n  Note right of T2: the volatile write/read pair makes\\nEVERYTHING written before it visible too',
+              code: 'sequenceDiagram\n  participant T1 as Thread 1\n  participant T2 as Thread 2\n  T1->>T1: data = 42 (plain write)\n  T1->>T1: volatile write: ready = true\n  Note over T1,T2: happens-before edge\n  T2->>T2: volatile read: while(!ready)\n  T2->>T2: reads data -- GUARANTEED to see 42\n  Note right of T2: the volatile write/read pair makes<br/>EVERYTHING written before it visible too',
+            },
+            {
+              type: 'heading',
+              text: 'Why the JMM exists: reordering at every layer',
+            },
+            {
+              type: 'p',
+              text: 'Three layers may reorder or cache your memory operations: `javac` (rarely), the **JIT** (hoisting a field read out of a loop — exactly what makes the non-volatile `while (!ready)` loop spin forever), and the **CPU** (store buffers, out-of-order execution; ARM and other weakly-ordered architectures reorder far more than x86). The JMM is a contract: write *data-race-free* programs — every shared mutable access ordered by happens-before — and you get **sequential consistency**, as if all threads interleaved on one CPU. Write a data race and almost anything is permitted. Code that "works on my x86 laptop" can fail on ARM servers (AWS Graviton, Apple silicon) precisely because x86 hides many races.',
+            },
+            {
+              type: 'heading',
+              text: 'Safe publication and `final` fields',
+            },
+            {
+              type: 'list',
+              items: [
+                '**Publishing** an object means making a reference to it visible to another thread. If the reference is written to a plain field with no happens-before edge, another thread may see the reference but **stale field values** inside the object (e.g. defaults of `0`/`null`) — a partially constructed object.',
+                'Safe publication idioms: store the reference in a `volatile` field or an `AtomicReference`; in a field guarded by a lock; in a `final` field of a properly constructed object; via static initialization; or through a thread-safe collection (`ConcurrentHashMap`, `BlockingQueue`) — the concurrent collections document their happens-before guarantees.',
+                '**`final` field semantics**: once a constructor completes (without `this` escaping), any thread that sees the object reference is guaranteed to see the correct values of its `final` fields, even if the reference itself was published racily. This is why immutable objects with all-`final` fields are thread-safe "for free".',
+              ],
+            },
+            {
+              type: 'code',
+              language: 'java',
+              title: 'double-checked locking: broken without volatile',
+              code: `class Registry {
+    private static volatile Registry instance;   // volatile is ESSENTIAL here
+
+    static Registry get() {
+        Registry local = instance;                // single volatile read on the fast path
+        if (local == null) {
+            synchronized (Registry.class) {
+                local = instance;
+                if (local == null) {
+                    instance = local = new Registry();
+                }
+            }
+        }
+        return local;
+    }
+}
+// Without volatile, "instance = new Registry()" can become visible to another
+// thread BEFORE the constructor's writes -- that thread skips the lock and
+// uses a half-built object. Prefer the holder idiom (see Class Loading) or an enum.`,
+            },
+            {
+              type: 'table',
+              headers: ['Tool', 'Visibility', 'Atomic compound ops', 'Blocks threads'],
+              rows: [
+                ['plain field', 'no guarantee', 'no', 'no'],
+                ['`volatile`', 'yes', 'no (single read/write only)', 'no'],
+                ['`AtomicInteger` / `AtomicReference`', 'yes', 'yes (CAS: `incrementAndGet`, `compareAndSet`, `updateAndGet`)', 'no (lock-free)'],
+                ['`LongAdder`', 'yes (on `sum()`)', 'increments only', 'no — striped cells, scales under heavy contention'],
+                ['`synchronized` / `Lock`', 'yes', 'yes (any code in the block)', 'yes'],
+                ['`VarHandle`', 'per access mode', 'yes (CAS, getAndAdd)', 'no — low-level, for library authors'],
+              ],
+            },
+            {
+              type: 'callout',
+              kind: 'tip',
+              text: 'For hot counters updated by many threads (metrics, request counts), `LongAdder` vastly outperforms `AtomicLong`: instead of every thread fighting over one cache line with CAS retries, it spreads increments across per-thread cells and sums them on read.',
             },
           ],
         },
@@ -1040,12 +1988,74 @@ void safeUpdate() {
             },
             {
               type: 'mermaid',
-              code: 'stateDiagram-v2\n  [*] --> New : new Thread(task)\n  New --> Runnable : start()\n  Runnable --> Running : scheduler assigns a CPU\n  Running --> Runnable : time slice ends / yield()\n  Running --> Blocked : waiting to enter a\\nsynchronized block\n  Blocked --> Runnable : lock acquired\n  Running --> Waiting : wait() / join() / park()\n  Waiting --> Runnable : notify() / notifyAll() / unpark()\n  Running --> Terminated : run() completes\\n(normally or via exception)\n  Terminated --> [*]',
+              code: 'stateDiagram-v2\n  [*] --> New : new Thread(task)\n  New --> Runnable : start()\n  Runnable --> Running : scheduler assigns a CPU\n  Running --> Runnable : time slice ends / yield()\n  Running --> Blocked : waiting to enter a<br/>synchronized block\n  Blocked --> Runnable : lock acquired\n  Running --> Waiting : wait() / join() / park()\n  Waiting --> Runnable : notify() / notifyAll() / unpark()\n  Running --> Terminated : run() completes<br/>(normally or via exception)\n  Terminated --> [*]',
             },
             {
               type: 'callout',
               kind: 'pitfall',
               text: 'Forgetting `finally { lock.unlock(); }` with an explicit `Lock` is a severe bug: if the critical section throws, the lock is never released and every other thread waiting on it blocks forever. `synchronized` doesn\'t have this failure mode — the intrinsic lock is always released automatically, even on an exception, which is one real advantage it has over explicit locks despite being less flexible.',
+            },
+            {
+              type: 'callout',
+              kind: 'note',
+              text: 'The diagram above is conceptual. The actual `Thread.State` enum has six values: `NEW`, `RUNNABLE` (covers both "ready" and "running" — and also a thread blocked in native I/O!), `BLOCKED` (waiting for a monitor), `WAITING`, `TIMED_WAITING` (`sleep`, `wait(ms)`, `parkNanos`), and `TERMINATED`. These are what you see in thread dumps.',
+            },
+            {
+              type: 'heading',
+              text: 'Interruption: Java\'s cooperative cancellation',
+            },
+            {
+              type: 'p',
+              text: 'There is no safe way to forcibly kill a thread — `Thread.stop()` was deprecated for decades and since JDK 20 simply throws `UnsupportedOperationException`. Instead, `thread.interrupt()` sets a flag; blocking methods (`sleep`, `wait`, `join`, `BlockingQueue.take`, `Future.get`) respond by throwing `InterruptedException` and clearing the flag; CPU-bound loops must poll `Thread.currentThread().isInterrupted()` themselves. Executors use interruption for `shutdownNow()` and `Future.cancel(true)`, so code that swallows `InterruptedException` makes services impossible to shut down cleanly.',
+            },
+            {
+              type: 'code',
+              language: 'java',
+              title: 'modern thread creation, interruption, and condition waiting',
+              code: `// Thread builders (Java 21+): named, configured threads in one expression
+Thread worker = Thread.ofPlatform().name("indexer-", 0).daemon(true).start(this::indexLoop);
+Thread light  = Thread.ofVirtual().name("req-handler").start(() -> handle(request));
+
+void indexLoop() {
+    while (!Thread.currentThread().isInterrupted()) {
+        try {
+            Doc d = queue.take();          // throws InterruptedException when interrupted
+            index(d);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();   // preserve the flag, then exit the loop
+            return;
+        }
+    }
+}
+
+// wait/notify: ALWAYS wait in a loop (spurious wakeups, and the condition may
+// have changed again before you reacquire the lock)
+synchronized void awaitReady() throws InterruptedException {
+    while (!ready) {
+        wait();
+    }
+}
+synchronized void markReady() {
+    ready = true;
+    notifyAll();                           // prefer notifyAll unless you can prove notify is safe
+}`,
+            },
+            {
+              type: 'table',
+              headers: ['', '`synchronized`', '`ReentrantLock`'],
+              rows: [
+                ['Release on exception', 'Automatic', 'Manual, in `finally`'],
+                ['Try with timeout / interruptible acquire', 'No', '`tryLock(timeout)`, `lockInterruptibly()`'],
+                ['Multiple wait conditions', 'One per monitor (`wait`/`notify`)', 'Many `Condition` objects'],
+                ['Fairness', 'No', 'Optional (slower)'],
+                ['Virtual threads', 'No longer pins since JDK 24', 'Never pinned'],
+                ['Read/write split', 'No', '`ReentrantReadWriteLock`, or `StampedLock` for optimistic reads'],
+              ],
+            },
+            {
+              type: 'callout',
+              kind: 'tip',
+              text: 'Lock on a **private final** object (`private final Object lock = new Object();`), not on `this` or a public object: anyone holding a reference to your instance can `synchronized` on it too and interfere with your locking. And never synchronize on boxed values or string literals — they are shared/cached across the whole JVM.',
             },
           ],
         },
@@ -1092,12 +2102,230 @@ CompletableFuture<Integer> sum = a.thenCombine(b, Integer::sum);`,
             },
             {
               type: 'mermaid',
-              code: 'flowchart LR\n  Submit["submit tasks"] --> Queue["task queue"]\n  Queue --> W1["worker thread 1"]\n  Queue --> W2["worker thread 2"]\n  Queue --> W3["worker thread N"]\n  W1 --> Done1["Future/CompletableFuture\\ncompletes"]\n  W2 --> Done2["completes"]\n  W3 --> Done3["completes"]',
+              code: 'flowchart LR\n  Submit["submit tasks"] --> Queue["task queue"]\n  Queue --> W1["worker thread 1"]\n  Queue --> W2["worker thread 2"]\n  Queue --> W3["worker thread N"]\n  W1 --> Done1["Future/CompletableFuture<br/>completes"]\n  W2 --> Done2["completes"]\n  W3 --> Done3["completes"]',
             },
             {
               type: 'callout',
               kind: 'tip',
-              text: 'Java 21 introduced **virtual threads** (Project Loom) — extremely lightweight threads managed by the JVM rather than mapped 1:1 to OS threads, letting you write simple blocking-style code (`Thread.sleep`, blocking I/O) at massive concurrency (hundreds of thousands of threads) without the memory/context-switch cost of platform threads. `Executors.newVirtualThreadPerTaskExecutor()` is the entry point.',
+              text: 'Java 21 introduced **virtual threads** (Project Loom) — extremely lightweight threads managed by the JVM rather than mapped 1:1 to OS threads, letting you write simple blocking-style code (`Thread.sleep`, blocking I/O) at massive concurrency (hundreds of thousands of threads) without the memory/context-switch cost of platform threads. `Executors.newVirtualThreadPerTaskExecutor()` is the entry point — see the dedicated Virtual Threads topic.',
+            },
+            {
+              type: 'heading',
+              text: 'Configuring pools for production',
+            },
+            {
+              type: 'code',
+              language: 'java',
+              title: 'a bounded ThreadPoolExecutor, and ExecutorService as AutoCloseable',
+              code: `// The Executors.newFixedThreadPool / newCachedThreadPool factories hide dangerous defaults:
+//  - fixed pool: UNBOUNDED LinkedBlockingQueue -> memory grows without limit under overload
+//  - cached pool: UNBOUNDED thread count -> thousands of platform threads under a spike
+ThreadPoolExecutor pool = new ThreadPoolExecutor(
+    8, 8,                                        // core and max threads
+    60, TimeUnit.SECONDS,                        // idle keep-alive (for threads above core)
+    new ArrayBlockingQueue<>(1_000),             // BOUNDED queue = backpressure
+    Thread.ofPlatform().name("pricing-", 0).factory(),
+    new ThreadPoolExecutor.CallerRunsPolicy());  // when full, the caller runs the task (slows producers)
+
+// Java 19+: ExecutorService is AutoCloseable; close() = shutdown + await termination
+try (ExecutorService exec = Executors.newFixedThreadPool(4)) {
+    exec.submit(this::jobA);
+    exec.submit(this::jobB);
+}   // blocks here until both jobs finish
+
+// CompletableFuture: pass YOUR executor; never block the common pool with I/O
+CompletableFuture<User> user = CompletableFuture
+    .supplyAsync(() -> userClient.fetch(id), ioExecutor)
+    .orTimeout(2, TimeUnit.SECONDS)                       // Java 9+
+    .exceptionally(ex -> User.anonymous());
+
+// wait for many, then gather results
+List<CompletableFuture<Price>> futures = skus.stream()
+    .map(s -> CompletableFuture.supplyAsync(() -> pricing.fetch(s), ioExecutor))
+    .toList();
+CompletableFuture.allOf(futures.toArray(CompletableFuture[]::new)).join();
+List<Price> prices = futures.stream().map(CompletableFuture::join).toList();`,
+            },
+            {
+              type: 'table',
+              headers: ['Method', 'Function returns', 'Use when'],
+              rows: [
+                ['`thenApply`', 'a plain value `U`', 'synchronous transform (like `map`)'],
+                ['`thenCompose`', 'a `CompletionStage<U>`', 'next step is itself async (like `flatMap`)'],
+                ['`thenCombine`', 'combines two results', 'two independent futures both needed'],
+                ['`handle` / `whenComplete`', 'sees value or exception', 'recover from or observe failures'],
+                ['`...Async` variants', 'same, on another executor', 'callback is slow; avoid running it on the completing thread'],
+              ],
+            },
+            {
+              type: 'callout',
+              kind: 'pitfall',
+              text: 'Exceptions inside a `CompletableFuture` chain are wrapped in `CompletionException` (from `join()`) or `ExecutionException` (from `get()`) — unwrap `getCause()` before checking types. And a future nobody joins or attaches a handler to fails **silently**: an exception in a fire-and-forget `runAsync` disappears without a log line. Likewise, `submit()` on an executor captures exceptions in the returned `Future`; if you never call `get()`, you never see them (`execute()` lets them reach the thread\'s uncaught exception handler).',
+            },
+            {
+              type: 'callout',
+              kind: 'tip',
+              text: 'Pool sizing heuristic: CPU-bound work wants roughly as many threads as cores; I/O-bound work on platform threads wants `cores × (1 + wait time / compute time)` — often hundreds, which is exactly where virtual threads are now the better answer. Whatever you choose, bound the queue and decide explicitly what happens when it is full.',
+            },
+          ],
+        },
+        {
+          id: 'virtual-threads',
+          title: 'Virtual Threads (Project Loom) in Depth',
+          summary:
+            'Virtual threads (final in Java 21) are cheap, JVM-scheduled threads that make the simple thread-per-request, blocking style scale to hundreds of thousands of concurrent tasks — they improve throughput for I/O-bound work, not the speed of CPU-bound code.',
+          keyPoints: [
+            'A virtual thread is a `java.lang.Thread` whose stack lives on the heap as a growable chunk; it is **mounted** onto a small pool of platform **carrier threads** (a `ForkJoinPool`, by default sized to the CPU count) while running and **unmounted** when it blocks.',
+            'When a virtual thread blocks on I/O, `sleep`, a `BlockingQueue` or a `java.util.concurrent` lock, the JDK parks it and frees the carrier — so blocking code no longer wastes an OS thread.',
+            'Creating one costs roughly a few hundred bytes to a few KB, versus ~1 MB of reserved stack and an OS thread for a platform thread: **never pool virtual threads** — create one per task.',
+            '**Pinning**: a virtual thread that cannot unmount holds its carrier. Since **JDK 24 (JEP 491)** blocking inside `synchronized` no longer pins; remaining cases include blocking inside native/JNI frames and some class-initialization paths.',
+            'Little\'s Law explains the win: concurrency = throughput × latency. With 100 ms of I/O per request, 10,000 requests/second needs 1,000 requests in flight — trivial with virtual threads, expensive with platform threads.',
+          ],
+          blocks: [
+            {
+              type: 'mermaid',
+              code: 'flowchart TB\n  subgraph VT["Virtual threads (millions possible)"]\n    V1["VT 1<br/>running"]\n    V2["VT 2<br/>blocked on socket<br/>(stack parked on heap)"]\n    V3["VT 3<br/>running"]\n    V4["VT 4<br/>runnable, waiting<br/>for a carrier"]\n  end\n  subgraph Carriers["Carrier threads (ForkJoinPool, about one per core)"]\n    C1["carrier 1"]\n    C2["carrier 2"]\n  end\n  V1 -->|"mounted"| C1\n  V3 -->|"mounted"| C2\n  C1 --> OS["OS threads / CPU cores"]\n  C2 --> OS',
+            },
+            {
+              type: 'code',
+              language: 'java',
+              title: 'thread-per-task on virtual threads',
+              code: `// 10,000 concurrent blocking calls -- on platform threads this would need
+// 10,000 OS threads; here it needs about as many carriers as you have cores
+try (var executor = Executors.newVirtualThreadPerTaskExecutor()) {
+    List<Future<String>> results = IntStream.range(0, 10_000)
+        .mapToObj(i -> executor.submit(() -> {
+            Thread.sleep(Duration.ofSeconds(1));      // parks, frees the carrier
+            return httpClient.send(requestFor(i), BodyHandlers.ofString()).body();
+        }))
+        .toList();
+    for (Future<String> f : results) {
+        process(f.get());
+    }
+}
+
+// Spring Boot 3.2+: one property switches request handling to virtual threads
+//   spring.threads.virtual.enabled=true`,
+            },
+            {
+              type: 'heading',
+              text: 'Limit the resource, not the threads',
+            },
+            {
+              type: 'p',
+              text: 'With platform threads, the pool size silently acted as a concurrency limit protecting downstream systems. With virtual threads, 50,000 requests can all reach your database at once — and exhaust its connection pool or crash it. Make limits explicit: a `Semaphore` around a scarce resource, a properly sized connection pool (requests then wait for a connection, which is cheap on a virtual thread), or rate limiters.',
+            },
+            {
+              type: 'code',
+              language: 'java',
+              title: 'bounding access to a downstream service',
+              code: `private final Semaphore inventoryPermits = new Semaphore(50);   // at most 50 concurrent calls
+
+Stock checkStock(String sku) throws InterruptedException {
+    inventoryPermits.acquire();          // a waiting virtual thread costs almost nothing
+    try {
+        return inventoryClient.get(sku);
+    } finally {
+        inventoryPermits.release();
+    }
+}`,
+            },
+            {
+              type: 'table',
+              headers: ['Concern', 'Platform threads', 'Virtual threads'],
+              rows: [
+                ['Creation cost', 'High (OS thread, ~1 MB reserved stack)', 'Very low (heap-allocated stack chunks)'],
+                ['Practical count', 'Thousands', 'Millions'],
+                ['Pooling', 'Required', 'Anti-pattern — one per task'],
+                ['Best for', 'CPU-bound work, long-lived background threads', 'I/O-bound, high-concurrency request handling'],
+                ['`ThreadLocal`', 'Fine in pools (careful with leaks)', 'Works, but millions of copies can blow memory — prefer `ScopedValue`'],
+                ['Scheduling', 'OS, preemptive', 'JVM, unmount on blocking; not time-sliced'],
+              ],
+            },
+            {
+              type: 'callout',
+              kind: 'warning',
+              text: 'Virtual threads do **not** make CPU-bound code faster — there are still only as many carriers as cores, and a virtual thread doing a long computation keeps its carrier busy (they are not preempted on a time slice). Use a platform-thread pool sized to the core count for heavy computation, and keep virtual threads for waiting.',
+            },
+            {
+              type: 'callout',
+              kind: 'pitfall',
+              text: 'Diagnosing pinning and stalls: JDK Flight Recorder emits a `jdk.VirtualThreadPinned` event when a virtual thread blocks while pinned, and `jcmd <pid> Thread.dump_to_file -format=json dump.json` produces a thread dump that includes virtual threads (classic `jstack` output does not show them all). Also audit libraries that cache expensive objects in `ThreadLocal`s assuming a small, fixed pool of threads.',
+            },
+          ],
+        },
+        {
+          id: 'structured-concurrency-scoped-values',
+          title: 'Structured Concurrency & Scoped Values',
+          summary:
+            'Structured concurrency treats a group of concurrent subtasks as one unit of work with a clear lifetime — if one fails, the others are cancelled, and none outlives its parent. Scoped values are the immutable, bounded-lifetime replacement for `ThreadLocal` that fits this model. Scoped values are final in Java 25; structured concurrency is still a preview API as of JDK 27.',
+          keyPoints: [
+            '**Unstructured** concurrency (`ExecutorService.submit`, `CompletableFuture`) lets tasks outlive the code that started them: if one subtask fails, siblings keep running and leak; cancellation and error propagation are manual.',
+            '**`StructuredTaskScope`** (preview: JDK 21 onward, reworked in JDK 25, seventh preview in JDK 27) forks subtasks — each on its own virtual thread by default — and joins them in the same block; the scope cannot be exited while children are still running.',
+            'A **Joiner** policy decides the outcome: e.g. all must succeed (fail fast and cancel the rest), or the first success wins (cancel the losers). Thread dumps show the parent/child task tree.',
+            '**`ScopedValue`** (final in Java 25, JEP 506) binds a value for the dynamic extent of a call: readable by everything called within it — including subtasks forked in a structured scope — immutable, and automatically unbound when the scope ends.',
+            'Compared with `ThreadLocal`: no `set()`, no leaks from forgetting `remove()`, no expensive copying into child threads (`InheritableThreadLocal`), and cheaper lookups.',
+          ],
+          blocks: [
+            {
+              type: 'code',
+              language: 'java',
+              title: 'structured fan-out (preview API, JDK 25+ shape)',
+              code: `// requires --enable-preview; the API changed between previews, so check your JDK's Javadoc
+Response handle(String userId) throws InterruptedException {
+    try (var scope = StructuredTaskScope.open()) {        // default: all must succeed
+        Subtask<User>        user   = scope.fork(() -> userService.find(userId));
+        Subtask<List<Order>> orders = scope.fork(() -> orderService.recent(userId));
+
+        scope.join();          // waits for both; if either throws, the other is CANCELLED
+                               // and join() throws, with the failure as the cause
+        return new Response(user.get(), orders.get());
+    }                          // scope closed: no subtask can outlive this block
+}`,
+            },
+            {
+              type: 'mermaid',
+              code: 'flowchart TD\n  H["handle(userId)<br/>opens scope"] --> F1["fork: find user"]\n  H --> F2["fork: recent orders"]\n  F1 --> J{"join()"}\n  F2 --> J\n  J -->|"both succeed"| R["build Response"]\n  J -->|"one fails"| C["cancel the sibling<br/>(interrupt)"]\n  C --> E["join() throws<br/>scope closes cleanly"]',
+            },
+            {
+              type: 'code',
+              language: 'java',
+              title: 'ScopedValue instead of ThreadLocal (final in Java 25)',
+              code: `public final class RequestContext {
+    public static final ScopedValue<Principal> PRINCIPAL = ScopedValue.newInstance();
+}
+
+// framework/edge code binds the value for the duration of the call
+void serve(Request req) {
+    Principal p = authenticate(req);
+    ScopedValue.where(RequestContext.PRINCIPAL, p)
+               .run(() -> controller.handle(req));    // bound only inside run()
+}
+
+// anywhere deeper in the call stack (or in forked structured subtasks)
+void audit(String action) {
+    Principal who = RequestContext.PRINCIPAL.get();   // throws NoSuchElementException if unbound
+    log.info("{} performed {}", who.getName(), action);
+}
+
+// rebinding for a nested scope -- the outer value is restored afterwards
+ScopedValue.where(RequestContext.PRINCIPAL, systemPrincipal).run(this::runAsSystem);`,
+            },
+            {
+              type: 'table',
+              headers: ['', '`ThreadLocal`', '`ScopedValue`'],
+              rows: [
+                ['Mutability', '`set()` anytime', 'Immutable within a binding; rebind in a nested scope'],
+                ['Lifetime', 'Until `remove()` or thread death — leaks on pooled threads', 'Exactly the `run()`/`call()` extent'],
+                ['Inheritance to children', '`InheritableThreadLocal` copies values', 'Shared automatically with structured subtasks, no copy'],
+                ['Cost with millions of virtual threads', 'One map entry per thread', 'Designed for it'],
+                ['Status', 'Since Java 1.2', 'Final in Java 25'],
+              ],
+            },
+            {
+              type: 'callout',
+              kind: 'warning',
+              text: 'Because `StructuredTaskScope` is still a preview API (its shape changed significantly in JDK 25 and has continued to evolve), it requires `--enable-preview` and code written against one JDK may not compile on the next. Use it in experiments and internal tooling; for production today, `ExecutorService` with try-with-resources plus explicit cancellation, or a framework abstraction, is the stable choice.',
             },
           ],
         },
@@ -1132,7 +2360,7 @@ class SafeCounter {
             },
             {
               type: 'mermaid',
-              code: 'sequenceDiagram\n  participant T1 as Thread 1\n  participant T2 as Thread 2\n  T1->>T1: acquires Lock A\n  T2->>T2: acquires Lock B\n  T1->>T2: waits for Lock B (held by T2)\n  T2->>T1: waits for Lock A (held by T1)\n  Note over T1,T2: DEADLOCK -- each waits forever\\nfor a lock the other already holds',
+              code: 'sequenceDiagram\n  participant T1 as Thread 1\n  participant T2 as Thread 2\n  T1->>T1: acquires Lock A\n  T2->>T2: acquires Lock B\n  T1->>T2: waits for Lock B (held by T2)\n  T2->>T1: waits for Lock A (held by T1)\n  Note over T1,T2: DEADLOCK -- each waits forever<br/>for a lock the other already holds',
             },
             {
               type: 'code',
@@ -1172,7 +2400,7 @@ void transferMoneySafe(Account a, Account b, double amount) {
           id: 'junit5-testing',
           title: 'JUnit 5 Fundamentals',
           summary:
-            'JUnit 5 is the standard testing framework for Java — a small set of annotations and assertion methods cover the vast majority of unit-testing needs, from a single assertion to a fully parameterized test matrix.',
+            'JUnit (Jupiter API, shared by JUnit 5 and JUnit 6; JUnit 6 is the current line and requires Java 17) is the standard testing framework for Java — a small set of annotations and assertion methods cover the vast majority of unit-testing needs, from a single assertion to a fully parameterized test matrix.',
           keyPoints: [
             '`@Test` marks a method as a test case; `Assertions.assertEquals(expected, actual)`, `assertTrue`, `assertThrows`, and friends verify outcomes and fail the test with a clear message if they don\'t hold.',
             'Lifecycle annotations: `@BeforeEach`/`@AfterEach` run before/after every test method; `@BeforeAll`/`@AfterAll` run once for the whole test class (and must be `static` by default).',
@@ -1222,12 +2450,51 @@ void transferMoneySafe(Account a, Account b, double amount) {
             },
             {
               type: 'mermaid',
-              code: 'flowchart LR\n  BA["@BeforeAll\\n(once, static)"] --> BE1["@BeforeEach"]\n  BE1 --> T1["@Test method 1"]\n  T1 --> AE1["@AfterEach"]\n  AE1 --> BE2["@BeforeEach"]\n  BE2 --> T2["@Test method 2"]\n  T2 --> AE2["@AfterEach"]\n  AE2 --> AA["@AfterAll\\n(once, static)"]',
+              code: 'flowchart LR\n  BA["@BeforeAll<br/>(once, static)"] --> BE1["@BeforeEach"]\n  BE1 --> T1["@Test method 1"]\n  T1 --> AE1["@AfterEach"]\n  AE1 --> BE2["@BeforeEach"]\n  BE2 --> T2["@Test method 2"]\n  T2 --> AE2["@AfterEach"]\n  AE2 --> AA["@AfterAll<br/>(once, static)"]',
             },
             {
               type: 'callout',
               kind: 'tip',
               text: 'Keep each test focused on one behavior and independent of test execution order — `@BeforeEach` resetting shared fixture state (rather than reusing mutated state across tests) is what makes tests reliable regardless of the order the runner happens to execute them in.',
+            },
+            {
+              type: 'code',
+              language: 'java',
+              title: 'more Jupiter features worth knowing',
+              code: `@Test
+void groupedAssertionsReportAllFailures() {
+    assertAll("user",
+        () -> assertEquals("Ada", user.name()),
+        () -> assertTrue(user.age() > 0),
+        () -> assertNotNull(user.email()));
+}
+
+@Test
+@Timeout(value = 2, unit = TimeUnit.SECONDS)
+void finishesQuickly() { /* ... */ }
+
+@Test
+void usesTempFiles(@TempDir Path dir) throws IOException {
+    Files.writeString(dir.resolve("a.txt"), "hello");   // deleted automatically afterwards
+}
+
+@ParameterizedTest
+@MethodSource("invalidEmails")
+void rejectsInvalidEmails(String email) {
+    assertThrows(ValidationException.class, () -> Email.parse(email));
+}
+static Stream<String> invalidEmails() { return Stream.of("", "a@", "@b.com", "no-at-sign"); }
+
+@RepeatedTest(3)
+void repeated() { /* ... */ }`,
+            },
+            {
+              type: 'list',
+              items: [
+                '**JUnit 6** (September 2025) raised the baseline to Java 17, unified the version numbers of Platform, Jupiter and Vintage, adopted JSpecify nullability annotations, and removed the JUnit 4 runner module — Jupiter test code written for JUnit 5 largely carries over unchanged.',
+                '**Test naming and style**: describe behavior (`rejectsExpiredToken`), one reason to fail per test, Arrange-Act-Assert structure. Use AssertJ (`assertThat(list).containsExactly(...)`) for readable fluent assertions on collections and objects.',
+                '**Test slices of the pyramid**: many fast unit tests, fewer integration tests with real infrastructure (Testcontainers), few end-to-end tests. Parallel test execution is available in Jupiter (`junit.jupiter.execution.parallel.enabled`) but only works if tests share no mutable state.',
+              ],
             },
           ],
         },
@@ -1285,6 +2552,38 @@ class OrderServiceTest {
               kind: 'pitfall',
               text: 'Over-mocking — stubbing so many internal collaborators that the test just re-describes the implementation step by step — produces brittle tests that break on any refactor even when behavior is unchanged. Mock at the boundary of what the unit genuinely doesn\'t own (a database, an external HTTP client), not every internal collaborator.',
             },
+            {
+              type: 'code',
+              language: 'java',
+              title: 'argument captors, strict stubs and BDD style',
+              code: `@Test
+void sendsWelcomeEmailWithUserAddress() {
+    ArgumentCaptor<Email> captor = ArgumentCaptor.forClass(Email.class);
+
+    service.register(new User("ada@example.com"));
+
+    verify(mailer).send(captor.capture());            // capture what was actually passed
+    assertEquals("ada@example.com", captor.getValue().to());
+    verifyNoMoreInteractions(mailer);
+}
+
+// BDD flavour
+given(repository.findById("u1")).willReturn(Optional.of(user));
+then(repository).should(times(1)).findById("u1");
+
+// spy: real object, selectively stubbed -- use sparingly
+List<String> spyList = spy(new ArrayList<>());
+doReturn("stubbed").when(spyList).get(0);   // doReturn avoids calling the real get(0)`,
+            },
+            {
+              type: 'list',
+              items: [
+                '`MockitoExtension` uses **strict stubs**: an unused stubbing fails the test (`UnnecessaryStubbingException`), which keeps tests honest.',
+                'Mockito uses a bytecode agent (ByteBuddy) with the **inline mock maker** (default since Mockito 5) so final classes and methods can be mocked. Since JDK 21, loading agents dynamically prints a warning; configure Mockito as an explicit `-javaagent` in your build to avoid it and to be ready for future JDKs that restrict dynamic loading.',
+                'You cannot mock `static` methods or constructors with plain `when`; `mockStatic` / `mockConstruction` exist but are a design smell — prefer injecting a collaborator.',
+                'Prefer **fakes** (a real in-memory implementation) or **Testcontainers** (a real database in Docker) for repository-style dependencies — they catch SQL, mapping and transaction bugs that a mock never will. Mocks verify interactions; they do not verify that the dependency actually works.',
+              ],
+            },
           ],
         },
         {
@@ -1319,12 +2618,12 @@ class OrderServiceTest {
   <dependency>
     <groupId>org.springframework.boot</groupId>
     <artifactId>spring-boot-starter-web</artifactId>
-    <version>3.2.0</version>
+    <!-- version omitted: managed by the spring-boot-starter-parent / BOM -->
   </dependency>
   <dependency>
     <groupId>org.junit.jupiter</groupId>
     <artifactId>junit-jupiter</artifactId>
-    <version>5.10.0</version>
+    <version>6.0.0</version>
     <scope>test</scope>
   </dependency>
 </dependencies>`,
@@ -1334,18 +2633,33 @@ class OrderServiceTest {
               language: 'groovy',
               title: 'the equivalent in Gradle (Groovy DSL)',
               code: `dependencies {
-    implementation 'org.springframework.boot:spring-boot-starter-web:3.2.0'
-    testImplementation 'org.junit.jupiter:junit-jupiter:5.10.0'
+    implementation 'org.springframework.boot:spring-boot-starter-web'
+    testImplementation 'org.junit.jupiter:junit-jupiter:6.0.0'
 }`,
             },
             {
               type: 'mermaid',
-              code: 'flowchart LR\n  Validate["validate"] --> Compile["compile"]\n  Compile --> TestPhase["test"]\n  TestPhase --> Package["package\\n(JAR / WAR)"]\n  Package --> Verify["verify"]\n  Verify --> Install["install\\n(local repo)"]\n  Install --> Deploy["deploy\\n(remote repo)"]',
+              code: 'flowchart LR\n  Validate["validate"] --> Compile["compile"]\n  Compile --> TestPhase["test"]\n  TestPhase --> Package["package<br/>(JAR / WAR)"]\n  Package --> Verify["verify"]\n  Verify --> Install["install<br/>(local repo)"]\n  Install --> Deploy["deploy<br/>(remote repo)"]',
             },
             {
               type: 'callout',
               kind: 'note',
               text: 'Both tools resolve the same underlying problem — reproducible builds and consistent dependency versions across every developer machine and CI runner — which matters more than the syntax choice itself: without a build tool, "works on my machine" regularly means someone has a different, uncoordinated set of JARs on their manual classpath.',
+            },
+            {
+              type: 'list',
+              items: [
+                '**Dependency scopes**: Maven `compile`/`provided`/`runtime`/`test`; Gradle `implementation` (not exposed to consumers), `api` (exposed, via `java-library`), `compileOnly`, `runtimeOnly`, `testImplementation`. Prefer `implementation` — it keeps your transitive surface small and speeds incremental builds.',
+                '**Version conflicts**: both tools pick one version when two paths disagree (Maven: nearest-wins; Gradle: highest version). Use a BOM / platform (`dependencyManagement`, Gradle `platform(...)`) to align families such as Spring or Jackson, and inspect with `mvn dependency:tree` or `gradle dependencies`.',
+                '**Wrappers**: commit `mvnw` / `gradlew` so every machine and CI runner uses the same tool version.',
+                '**Maven 4** has been in release-candidate builds for a long time (it adds a new build/consumer POM split and build improvements); check the official release page for GA status before adopting it. Gradle supports the Kotlin DSL (`build.gradle.kts`) as the recommended default for new builds.',
+                '**Reproducibility and supply chain**: pin versions, verify checksums/signatures where supported, run a dependency vulnerability scan (OWASP Dependency-Check, Dependabot/Renovate), and generate an SBOM (CycloneDX) in CI.',
+              ],
+            },
+            {
+              type: 'callout',
+              kind: 'tip',
+              text: 'Compile with `--release` matching your target JDK (Maven `maven.compiler.release`, Gradle `java { toolchain { languageVersion = JavaLanguageVersion.of(25) } }`). Gradle toolchains and Maven toolchains decouple the JDK that runs the build from the JDK you compile and test against.',
             },
           ],
         },
@@ -1479,6 +2793,71 @@ class OrderServiceTest {
               question: 'Why can a lambda only capture effectively final local variables?',
               answer:
                 'A lambda captures variables from its enclosing scope by value, at the moment it is created — it doesn\'t hold a live reference into the enclosing method\'s stack frame (which, for a local variable, may not even exist anymore by the time the lambda actually runs, e.g. if it outlives the method call). Because there is no mechanism for the lambda to observe a later reassignment of that variable, Java requires captured local variables to be effectively final (assigned exactly once) specifically to prevent code that would misleadingly suggest the lambda sees live updates it actually cannot. Fields and array/collection contents are different — a lambda can freely mutate an object\'s fields or a collection\'s contents, since only reassignment of the local variable itself is restricted, not mutation of what it points to.',
+            },
+            {
+              question: 'What are virtual threads, how are they scheduled, and when would you NOT use them?',
+              answer:
+                'A virtual thread (final in Java 21) is a `Thread` whose stack is stored on the heap and which is multiplexed onto a small pool of carrier platform threads by a `ForkJoinPool` scheduler. When it blocks in a JDK-aware operation (socket I/O, `sleep`, `BlockingQueue`, `java.util.concurrent` locks) it is unmounted and its carrier runs another virtual thread, so blocking costs almost nothing. That makes the simple thread-per-request style scale to very high concurrency for I/O-bound workloads (Little\'s Law: concurrency = throughput × latency). Do not use them for CPU-bound work (still limited by cores, no time-slice preemption), do not pool them (create one per task), and be careful about implicit concurrency limits that disappear: a fixed platform thread pool used to protect your database; now you need a `Semaphore` or connection pool bound. Pinning (a virtual thread holding its carrier while blocked) used to be a major issue with `synchronized`; since JDK 24 that case is fixed, though native frames can still pin. Also audit heavy `ThreadLocal` use, since millions of threads means millions of copies.',
+            },
+            {
+              question: 'Compare `synchronized`, `ReentrantLock`, `volatile` and atomics. How do you choose?',
+              answer:
+                '`volatile` gives visibility and ordering for single reads/writes but no atomic read-modify-write. Atomics (`AtomicInteger`, `AtomicReference`, `LongAdder`) give lock-free atomic updates via compare-and-swap and are ideal for counters and single-variable state; `LongAdder` scales better under heavy write contention. `synchronized` gives mutual exclusion plus visibility, is released automatically, and since JDK 24 no longer pins virtual threads; it is the simplest correct choice for guarding multi-field invariants. `ReentrantLock` adds `tryLock` with timeout, interruptible acquisition, multiple `Condition`s and optional fairness, at the price of manual `finally { unlock(); }`. Choose the weakest tool that covers the invariant: confine data to one thread if possible, then immutability, then atomics for one variable, then `synchronized`, then `ReentrantLock`/`StampedLock` when you need its extra features. Invariants spanning several variables need a single lock, not several atomics.',
+            },
+            {
+              question: 'How does `ConcurrentHashMap` achieve thread safety in modern Java, and what pitfalls remain?',
+              answer:
+                'Since Java 8 it no longer uses segments: it locks individual bins (synchronizing on the first node of a bucket) for writes, uses CAS to insert into empty bins, and performs reads without locking via `volatile` semantics; contended bins can be treeified like `HashMap`. Resizing is cooperative: multiple threads help transfer bins. Atomic compound operations (`computeIfAbsent`, `merge`, `compute`) run atomically per key, but the mapping function must be short, must not block and must not modify the map (it can deadlock or throw `IllegalStateException`) because it runs while the bin is locked. Pitfalls: `check-then-act` sequences made of separate calls (`if (!map.containsKey(k)) map.put(k, v)`) are still races — use `putIfAbsent`/`computeIfAbsent`; `size()` is an estimate under concurrent updates; iterators are weakly consistent; and it rejects null keys and values.',
+            },
+            {
+              question: 'Explain how HashMap works internally, including resize and treeification.',
+              answer:
+                'It holds an array of buckets whose length is a power of two. The key\'s `hashCode()` is spread (`h ^ (h >>> 16)`) and masked with `length - 1` to pick a bucket. Collisions form a linked list; since Java 8, a bucket that grows past 8 nodes (with table capacity at least 64) is converted into a red-black tree, bounding worst-case lookup to O(log n) — a defense against hash-collision denial-of-service. When the entry count exceeds capacity × load factor (0.75 by default) the table doubles and entries are redistributed (an O(n) pause), so presizing (`HashMap.newHashMap(n)` in JDK 19+) avoids repeated resizes. Keys must be effectively immutable with consistent `equals`/`hashCode`, and the map is not thread-safe: concurrent writers can lose updates or corrupt structure, so use `ConcurrentHashMap` instead.',
+            },
+            {
+              question: 'What changed about garbage collection defaults and options in recent Java versions?',
+              answer:
+                'G1 has been the default collector since Java 9, but the JVM used to fall back to Serial GC automatically on machines it judged "small" (fewer than 2 CPUs or under about 1.8 GB of memory), which hurt containers; JDK 27 makes G1 the default everywhere (JEP 523). CMS was removed in JDK 14. ZGC went generational (JDK 21 as an option) and is generational-only from JDK 24; generational Shenandoah became a product feature in JDK 25 (availability depends on the vendor build). G1 has had steady throughput work, for example reduced synchronization in JDK 26. Practical guidance: keep G1 unless measured p99 latency is dominated by GC pauses (then try generational ZGC) or the job is batch (then Parallel GC); size the heap properly in containers with `-XX:MaxRAMPercentage`; and turn on `-Xlog:gc*` before tuning anything.',
+            },
+            {
+              question: 'Your Java service in Kubernetes is OOM-killed (exit 137) but heap usage looked fine. How do you investigate?',
+              answer:
+                'The container limit covers the entire process, not only the Java heap. Non-heap consumers include metaspace, thread stacks (thousands of platform threads at ~1 MB reserved each), the JIT code cache, direct/NIO buffers (Netty, gRPC), GC data structures, and native libraries or glibc arena fragmentation. I would enable Native Memory Tracking (`-XX:NativeMemoryTracking=summary`, then `jcmd <pid> VM.native_memory summary`) and compare against RSS, check thread counts, cap direct memory (`-XX:MaxDirectMemorySize`), and set `-XX:MaxRAMPercentage` to leave headroom (typically 70–75%, not 100%). Also examine whether the leak is a classloader leak (growing metaspace) or a growing native buffer pool. `-XX:+HeapDumpOnOutOfMemoryError` only helps for Java-heap OOMs; a kernel OOM-kill produces no dump, so monitor RSS and add alerts before the limit.',
+            },
+            {
+              question: 'How would you diagnose a production Java service that is slow, spiking CPU, or hung?',
+              answer:
+                'Start from observation, not guesses. For CPU spikes, take 3 thread dumps a few seconds apart (`jcmd <pid> Thread.print`, or `Thread.dump_to_file -format=json` to include virtual threads) and look for hot or repeated stacks; use JDK Flight Recorder (`jcmd <pid> JFR.start duration=60s filename=rec.jfr`) for low-overhead profiling of CPU, allocation, lock contention and GC, then open it in JDK Mission Control. For a hang, thread dumps show `BLOCKED` threads and `jcmd` reports detected deadlocks with the lock cycle. For latency, correlate GC logs (pause times, allocation rate, humongous allocations in G1) with request latency; if the GC is healthy look at lock contention events and downstream calls. For memory growth, take a class histogram, then a heap dump analyzed in Eclipse MAT looking for dominator trees and GC-root paths. Reproduce with realistic load, change one variable at a time, and verify with JMH when micro-optimizing.',
+            },
+            {
+              question: 'What is the JIT\'s role, and why does Java have a warm-up period?',
+              answer:
+                'HotSpot starts in the bytecode interpreter, counts invocations and loop back-edges, compiles warm methods with C1 (with profiling), then recompiles the hottest with C2 using the collected profile for aggressive optimizations like inlining, escape analysis, loop transformations and intrinsics. Because these optimizations are speculative they can be undone by deoptimization if assumptions break. Consequently a new JVM is slow initially, which affects autoscaling, serverless, and benchmark validity. Remedies: AOT cache (Project Leyden, JDK 24+, with method profiles added in JDK 25), Class Data Sharing, CRaC checkpoint/restore, warm-up traffic before declaring readiness, or GraalVM Native Image if you can accept closed-world constraints and lower peak throughput.',
+            },
+            {
+              question: 'Explain pattern matching for `switch` with sealed types. Why is it preferable to a visitor or an `instanceof` chain?',
+              answer:
+                'A sealed interface declares its permitted subtypes (enforced by the compiler and the JVM), so a `switch` expression over it can be checked for exhaustiveness: omitting a case is a compile error and no `default` is needed. Record patterns deconstruct components in the case label (`case Circle(var r) ->`), `when` guards add conditions, and `case null` handles nulls explicitly. Compared with a visitor, there is no `accept` boilerplate and the operation lives in one function; compared with an `instanceof` chain, the compiler verifies completeness and flags dominated or unreachable cases. When a new variant is added, every switch without `default` fails to compile, which is exactly the safety you want. Trade-offs: it suits closed hierarchies with growing operations; for open extension points (plugins), virtual methods remain better. Separate compilation can still produce a `MatchException` at runtime if a subtype is added without recompiling the switch.',
+            },
+            {
+              question: 'What does Java\'s memory model guarantee about safe publication and `final` fields?',
+              answer:
+                'Without a happens-before edge, a thread that obtains a reference to an object may see stale or default values for its fields, even though the reference itself arrived. Safe publication means establishing that edge: storing the reference in a `volatile` or atomic reference, under a common lock, in a static initializer, or through a concurrent collection or queue. `final` fields get a special guarantee: after the constructor finishes (provided `this` did not escape during construction), every thread that sees the reference also sees the final fields\' correct values, even if the reference was published through a data race. This is why immutable classes with all-final fields are inherently thread-safe, and why leaking `this` from a constructor (registering a listener, starting a thread) is dangerous. Double-checked locking needs a `volatile` field for exactly these reasons.',
+            },
+            {
+              question: 'Why can\'t you rely on `hashCode()` of a mutable field-based key, and what are the options for JPA entities?',
+              answer:
+                'A hash container stores an entry in the bucket for the key\'s hash at insertion time. If a field participating in `hashCode` later changes, lookups compute a different bucket and the entry becomes unreachable though still present (a silent leak, and `contains` returns false). For plain value types, make them immutable (records are ideal). For JPA entities the generated id is null until persisted, so id-based hashing changes lifecycle mid-life. Options: use an immutable business/natural key, assign the id client-side (UUID/ULID) at construction so it never changes, or use id-based `equals` with a stable constant `hashCode` such as `getClass().hashCode()` (correct but degrades large hash sets). Also use `instanceof`-style comparisons that tolerate Hibernate proxies rather than `getClass()` comparisons.',
+            },
+            {
+              question: 'Which Java versions matter for a modern project, and how do you plan upgrades?',
+              answer:
+                'Production should target an LTS release; as of October 2026 that is Java 25 (LTS releases are 8, 11, 17, 21, 25, then every two years), while JDK 27 is the newest feature release. Many frameworks (Spring Framework 6/Boot 3, JUnit 6) already require Java 17 or newer, so Java 8 holds back dependencies and security posture. Upgrade strategy: compile with `--release`, run `jdeps --jdk-internals` to find encapsulation breakers, upgrade build plugins and bytecode libraries (ASM, ByteBuddy, Lombok, Mockito) first, run the full test suite on the new JDK in CI, review startup flags removed or deprecated (e.g. CMS-era flags), watch new warnings (dynamic agent loading, reflective mutation of final fields in JDK 26), then canary-deploy while comparing GC logs and latency. Keep CI on the latest feature release too so breakages surface early, and avoid shipping preview features.',
+            },
+            {
+              question: 'What is the difference between `Stream.toList()`, `Collectors.toList()` and `List.copyOf()`?',
+              answer:
+                '`Collectors.toList()` returns an unspecified, in practice mutable `ArrayList` with no guarantees, and permits nulls. `Stream.toList()` (Java 16+) returns an unmodifiable list that also allows nulls; it is shorter and signals intent. `List.copyOf(coll)` makes an unmodifiable snapshot, rejects null elements, and returns the same instance if the argument is already an immutable list. `Collections.unmodifiableList(list)` is not a copy but a read-only *view*: later changes to the backing list show through. Knowing which you hold prevents both accidental `UnsupportedOperationException` and accidental aliasing of a supposedly immutable collection exposed from a record or API.',
             },
           ],
         },
