@@ -82,7 +82,8 @@ export const systemDesignPatternsSection = {
             'CAP: when a network partition happens, a distributed data system must choose between Consistency (every read sees the latest write) and Availability (every request gets a non-error response) — it cannot guarantee both.',
             'Partition tolerance is not really a design choice for a distributed system — networks partition regardless of what you want, so the real, ongoing decision is CP vs AP for how the system behaves *when* one happens.',
             'CP systems (etcd, ZooKeeper, HBase, MongoDB in its default majority-write config) refuse to serve a request rather than risk returning stale or conflicting data when they cannot reach a quorum.',
-            'AP systems (Cassandra, DynamoDB, Riak) keep serving reads and writes through a partition and reconcile divergent replicas afterward (read repair, last-write-wins, CRDTs).',
+            'AP systems (Cassandra, Riak, DynamoDB global tables in their default multi-Region eventual mode) keep serving reads and writes through a partition and reconcile divergent replicas afterward (read repair, last-write-wins, CRDTs).',
+            'CP vs AP is usually a per-operation or per-table setting, not a property of a product: Cassandra at `QUORUM` behaves very differently from Cassandra at `ONE`, and DynamoDB offers strongly consistent reads and (since mid-2025) multi-Region strong consistency as an opt-in mode.',
             'CAP only describes behavior *during* a partition — outside of one, a well-built system delivers both consistency and availability, which is exactly why the tradeoff is easy to state wrong in an interview.',
             'PACELC extends CAP: even with no partition (Else), a system still trades Latency against Consistency on every request.',
           ],
@@ -108,9 +109,17 @@ export const systemDesignPatternsSection = {
               headers: ['System', 'Choice during a partition', 'Concrete behavior'],
               rows: [
                 ['etcd / ZooKeeper / Consul', 'CP', 'Reject writes (and often reads) on the minority side of a partition until quorum is restored — exactly why they are used for leader election and config, not general-purpose app data.'],
-                ['Cassandra / DynamoDB (default config)', 'AP', 'Keep accepting reads/writes on both sides during a partition; reconcile conflicting versions afterward via read repair, vector clocks, or last-write-wins.'],
+                ['Cassandra (consistency level `ONE`) / Riak', 'AP', 'Keep accepting reads/writes on both sides during a partition; reconcile afterward. Cassandra resolves conflicts per cell with last-write-wins timestamps (not vector clocks); Riak uses dotted version vectors and can surface siblings for the app to merge.'],
+                ['DynamoDB global tables (MREC, the default)', 'AP across Regions', 'Each Region accepts writes locally and replicates asynchronously (typically under a second); concurrent writes to the same item in different Regions are resolved last-writer-wins.'],
+                ['DynamoDB global tables (MRSC, GA June 2025)', 'CP across Regions', 'A write is synchronously replicated to at least one other Region before it is acknowledged, giving RPO zero and strongly consistent reads in any replica — at the cost of higher write latency. The mode is chosen at table creation.'],
+                ['Postgres primary + synchronous standby', 'CP-ish', 'With `synchronous_commit` waiting on a standby, the primary stalls writes if the standby is unreachable — consistency over availability, unless an operator relaxes it.'],
                 ['A traditional single-node RDBMS', 'N/A', 'Not a distributed system in the CAP sense — no partition is possible with one node, so the theorem does not apply until replicas are added.'],
               ],
+            },
+            {
+              type: 'callout',
+              kind: 'note',
+              text: 'The "C" in CAP is **linearizability** — a much stronger property than the "C" in ACID (which means "invariants are preserved"). Mixing the two up is a common source of confused interview answers. The next topic covers the full spectrum of consistency models between linearizable and eventual.',
             },
             {
               type: 'callout',
@@ -120,7 +129,104 @@ export const systemDesignPatternsSection = {
             {
               type: 'callout',
               kind: 'tip',
-              text: '**PACELC** (Daniel Abadi) is the more complete version working system designers actually reach for: **if P**artitioned, choose **A**vailability or **C**onsistency (that\'s CAP); **E**lse (no partition, normal operation), choose **L**atency or **C**onsistency — because even a healthy-network synchronous quorum write to guarantee consistency adds latency versus an async, eventually-consistent write. This is why, e.g., DynamoDB is roughly "PA/EL" (available under partition, low-latency/eventually-consistent normally) while a system requiring synchronous quorum writes is "PC/EC" even when nothing is partitioned.',
+              text: '**PACELC** (Daniel Abadi) is the more complete version working system designers actually reach for: **if P**artitioned, choose **A**vailability or **C**onsistency (that\'s CAP); **E**lse (no partition, normal operation), choose **L**atency or **C**onsistency — because even a healthy-network synchronous quorum write to guarantee consistency adds latency versus an async, eventually-consistent write. This is why, e.g., Cassandra and DynamoDB in their default modes are roughly "PA/EL" (available under partition, low-latency/eventually-consistent normally) while Spanner, etcd, or a system requiring synchronous quorum writes is "PC/EC" even when nothing is partitioned.',
+            },
+            {
+              type: 'callout',
+              kind: 'tip',
+              text: '**How interviewers probe this**: "Your service is AP — what does a user actually see during a partition?" A strong answer is concrete: "the cart may show an item they removed on their other device, and we merge carts as a union on heal" — not just "eventual consistency." Always pair the letter with the user-visible anomaly and the reconciliation rule.',
+            },
+          ],
+        },
+        {
+          id: 'consistency-models-clocks',
+          title: 'Consistency Models, Time, and Ordering',
+          summary:
+            'Between "linearizable" and "eventually consistent" sits a whole spectrum of guarantees — and because physical clocks cannot be trusted, distributed systems use logical clocks to reason about ordering.',
+          keyPoints: [
+            'Linearizability: every operation appears to take effect atomically at a single instant between its start and end, in real-time order. Strongest single-object model; requires consensus or a single leader.',
+            'Serializability is about multi-object transactions (result equals *some* serial order); strict serializability = serializable + linearizable (Spanner, CockroachDB, FoundationDB).',
+            'Session guarantees — read-your-writes, monotonic reads, monotonic writes, writes-follow-reads — fix the anomalies users actually notice, and are much cheaper than linearizability.',
+            'Causal consistency is the strongest model that remains available under partition; it preserves "happened-before" but lets concurrent writes be seen in different orders.',
+            'Wall clocks drift and jump (NTP corrections, leap seconds, VM pauses), so "latest timestamp wins" silently loses writes. Lamport clocks give a total order consistent with causality; vector clocks detect concurrency; hybrid logical clocks (HLC) blend both with physical time.',
+          ],
+          blocks: [
+            {
+              type: 'p',
+              text: 'Saying "eventually consistent" is the start of a conversation, not the end of one. Eventual consistency only promises that *if writes stop*, replicas *eventually* converge — it says nothing about what a reader sees in the meantime, including seeing a value go backwards in time. Real systems pick a more precise point on the spectrum below, and the choice determines which bugs your users can hit.',
+            },
+            {
+              type: 'table',
+              headers: ['Model', 'Guarantee', 'Available under partition?', 'Typical implementation'],
+              rows: [
+                ['Strict serializability', 'Transactions appear in a single serial order that respects real time', 'No', 'Spanner (TrueTime), CockroachDB, FoundationDB'],
+                ['Linearizability', 'Single-object ops appear atomic and in real-time order; once a read sees a value, all later reads do too', 'No', 'Raft/Paxos log (etcd, ZooKeeper writes), single leader with sync replication'],
+                ['Sequential consistency', 'All nodes see the same order, consistent with each client\'s program order, but not necessarily real time', 'No', 'ZooKeeper reads (without `sync`)'],
+                ['Causal consistency', 'If A happened-before B, everyone sees A before B; concurrent ops may be seen in any order', 'Yes', 'MongoDB causally consistent sessions, COPS-style systems, CRDT-based stores'],
+                ['Session guarantees', 'Read-your-writes, monotonic reads, etc., scoped to one client session', 'Mostly (sticky to a replica)', 'Sticky routing, client-carried version tokens / LSNs'],
+                ['Eventual consistency', 'Replicas converge if writes stop; no ordering promise meanwhile', 'Yes', 'Cassandra at `ONE`, DNS, async read replicas'],
+              ],
+            },
+            {
+              type: 'heading',
+              text: 'The Anomalies Users Actually Notice',
+            },
+            {
+              type: 'list',
+              items: [
+                '**Read-your-writes violation**: a user edits their profile, the page reloads from a lagging replica, and the edit "disappears." Fix: route a user\'s reads to the leader for N seconds after a write, or have the client carry the write\'s log position (LSN/version) and only read from replicas that have caught up to it.',
+                '**Monotonic-reads violation**: two refreshes hit two replicas with different lag; a comment appears, then vanishes, then reappears. Fix: pin a session to one replica (hash user ID to replica).',
+                '**Causality violation**: in a chat, a reply is visible before the message it answers. Fix: causal metadata (vector clocks / dependency tracking) or a single ordered log per conversation.',
+              ],
+            },
+            {
+              type: 'heading',
+              text: 'Why You Cannot Trust Wall Clocks',
+            },
+            {
+              type: 'p',
+              text: 'Physical clocks on different machines drift by milliseconds, NTP can step a clock backwards, and a GC pause or VM migration can freeze a process for seconds without it noticing. So "compare timestamps to decide which write is newer" (last-write-wins) can discard a write that really happened later. Spanner solves this with special hardware (GPS + atomic clocks) and an explicit uncertainty interval — it *waits out* the uncertainty before committing. Everyone else uses **logical clocks**.',
+            },
+            {
+              type: 'code',
+              language: 'ts',
+              title: 'Lamport clock vs vector clock (minimal)',
+              code: `// Lamport clock: a single counter. Gives a total order consistent with causality,
+// but cannot tell you whether two events were concurrent.
+class LamportClock {
+  private t = 0;
+  tick(): number { return ++this.t; }                        // local event / send
+  receive(remote: number): number {                          // on message receipt
+    this.t = Math.max(this.t, remote) + 1;
+    return this.t;
+  }
+}
+
+// Vector clock: one counter per node. Can detect concurrency (a conflict).
+type VC = Record<string, number>;
+
+function compare(a: VC, b: VC): 'before' | 'after' | 'equal' | 'concurrent' {
+  let aLess = false, bLess = false;
+  for (const k of new Set([...Object.keys(a), ...Object.keys(b)])) {
+    const x = a[k] ?? 0, y = b[k] ?? 0;
+    if (x < y) aLess = true;
+    if (y < x) bLess = true;
+  }
+  if (aLess && bLess) return 'concurrent';   // true conflict: must merge (or keep siblings)
+  if (aLess) return 'before';
+  if (bLess) return 'after';
+  return 'equal';
+}`,
+            },
+            {
+              type: 'callout',
+              kind: 'tip',
+              text: '**Hybrid Logical Clocks (HLC)**, used by CockroachDB and YugabyteDB, combine a physical timestamp with a logical counter: they stay close to wall-clock time (useful for humans and for MVCC snapshot reads) while still never going backwards and always respecting causality. Naming HLC when asked "how do you order events across nodes without TrueTime?" is a strong signal.',
+            },
+            {
+              type: 'callout',
+              kind: 'pitfall',
+              text: '**CRDTs** (conflict-free replicated data types — G-counters, OR-sets, LWW-registers, sequence CRDTs used by collaborative editors) guarantee convergence without coordination, but only for operations that are commutative by design. They do not help with invariants like "balance must not go below zero" — anything that needs a global check still needs coordination.',
             },
           ],
         },
@@ -174,6 +280,57 @@ export const systemDesignPatternsSection = {
               kind: 'note',
               text: 'Partitioning and replication solve different problems and are almost always used together: partitioning splits data up to scale storage/throughput across machines; replication copies each partition onto multiple machines for durability and availability. A production cluster shards the dataset into partitions *and* replicates each partition — see the next two topics.',
             },
+            {
+              type: 'heading',
+              text: 'Choosing the Shard Key — the Decision You Cannot Easily Undo',
+            },
+            {
+              type: 'p',
+              text: 'The shard key determines which queries are cheap (single-shard) and which are expensive (scatter-gather across every shard). Pick it from the dominant access pattern: a multi-tenant SaaS shards by `tenant_id` so every tenant query hits one shard; a chat app shards messages by `conversation_id` so a conversation\'s history is one range scan. Changing it later means rewriting every row, so it is the single highest-stakes decision in a sharded design.',
+            },
+            {
+              type: 'table',
+              headers: ['Concern', 'What goes wrong', 'Mitigation'],
+              rows: [
+                ['Hot key / celebrity problem', 'One key (a viral post, a giant tenant) gets far more traffic than any shard can absorb; hashing does not help because it is one key.', 'Split the key with a suffix (`post:123#0..15`) and aggregate on read; cache it aggressively; give whale tenants dedicated shards.'],
+                ['Monotonic keys', 'Auto-increment IDs or timestamps under range partitioning send all inserts to the last shard.', 'Hash-prefix the key, use random/UUIDv7-with-hash IDs, or compound keys like `(tenant_id, created_at)`.'],
+                ['Cross-shard queries', 'Queries not keyed by the shard key must fan out to every shard; tail latency becomes the slowest shard.', 'Denormalize a second copy keyed differently, or maintain a global secondary index.'],
+                ['Cross-shard transactions', 'An operation touching two shards loses single-node ACID.', 'Design aggregates to live on one shard; otherwise use a Saga or a database with distributed transactions (Spanner, CockroachDB, Vitess with 2PC).'],
+                ['Resharding', 'Splitting a shard while it serves traffic risks downtime or lost writes.', 'Pre-split into many more logical partitions than physical nodes (e.g. 1,024 logical shards on 8 machines) and move whole logical partitions; use online copy + CDC catch-up + cutover.'],
+              ],
+            },
+            {
+              type: 'heading',
+              text: 'Local vs Global Secondary Indexes',
+            },
+            {
+              type: 'p',
+              text: 'A **local** (document-partitioned) index lives on each shard and only indexes that shard\'s rows — writes stay single-shard and cheap, but a query by the indexed column must scatter-gather to all shards (Cassandra/Elasticsearch-style). A **global** (term-partitioned) index is itself partitioned by the indexed value — a lookup hits one index shard, but every write now touches two places, so the index is usually updated asynchronously and is eventually consistent (DynamoDB GSIs work this way). Name the tradeoff explicitly when an interviewer asks "how would you look up orders by email if you shard by user ID?"',
+            },
+            {
+              type: 'code',
+              language: 'ts',
+              title: 'Logical shards decouple the key from physical placement',
+              code: `const LOGICAL_SHARDS = 1024; // fixed forever; never changes
+
+// Stable: a key always maps to the same logical shard.
+function logicalShard(tenantId: string): number {
+  return murmur3(tenantId) % LOGICAL_SHARDS;
+}
+
+// Mutable: a small directory (stored in etcd / a config table, cached in every router)
+// maps logical shards to physical clusters. Rebalancing = moving entries here.
+const directory: Map<number, string> = loadShardDirectory(); // e.g. 0-127 -> "pg-cluster-a"
+
+function routeFor(tenantId: string): string {
+  return directory.get(logicalShard(tenantId))!;
+}`,
+            },
+            {
+              type: 'callout',
+              kind: 'warning',
+              text: 'Do not shard prematurely. A single well-tuned Postgres or MySQL primary with read replicas handles far more than most teams assume (multiple terabytes and tens of thousands of transactions per second on modern hardware). Exhaust vertical scaling, read replicas, caching, and archiving cold data first — sharding permanently taxes every feature you build afterward.',
+            },
           ],
         },
         {
@@ -207,12 +364,62 @@ export const systemDesignPatternsSection = {
             },
             {
               type: 'p',
-              text: 'A raw hash ring can still be unbalanced (a node might land on a large arc of the ring by chance, or a small one). Production systems (DynamoDB, Cassandra) assign each physical node **many virtual nodes** (e.g., 100-256) scattered around the ring, so load balances statistically across physical nodes regardless of ring geometry, and losing one physical node spreads its load thinly across many other nodes instead of dumping it all on one neighbor.',
+              text: 'A raw hash ring can still be unbalanced (a node might land on a large arc of the ring by chance, or a small one). Production systems assign each physical node **many virtual nodes** (tokens) scattered around the ring, so load balances statistically across physical nodes regardless of ring geometry, and losing one physical node spreads its load thinly across many other nodes instead of dumping it all on one neighbor. Virtual nodes also let you give a bigger machine proportionally more tokens.',
+            },
+            {
+              type: 'callout',
+              kind: 'note',
+              text: '**Real-world numbers change over time**: Cassandra used 256 tokens per node by default for years, but Cassandra 4.0 lowered the default `num_tokens` to 16 combined with a smarter token-allocation algorithm, because very high vnode counts made repairs and streaming slower and hurt availability with many nodes. And the managed DynamoDB service does not use a literal hash ring at all — it hashes the partition key into partitions whose placement is tracked by a metadata/routing service (the original 2007 Dynamo paper is where the ring-with-vnodes design comes from).',
+            },
+            {
+              type: 'code',
+              language: 'ts',
+              title: 'A consistent-hash ring with virtual nodes',
+              code: `import { createHash } from 'node:crypto';
+
+const h = (s: string) => createHash('md5').update(s).digest().readUInt32BE(0);
+
+class HashRing {
+  private ring: { pos: number; node: string }[] = [];
+  constructor(nodes: string[], private vnodes = 128) { nodes.forEach((n) => this.add(n)); }
+
+  add(node: string) {
+    for (let i = 0; i < this.vnodes; i++) this.ring.push({ pos: h(\`\${node}#\${i}\`), node });
+    this.ring.sort((a, b) => a.pos - b.pos);
+  }
+
+  remove(node: string) { this.ring = this.ring.filter((v) => v.node !== node); }
+
+  // First vnode clockwise from the key's position (binary search), wrapping around.
+  get(key: string): string {
+    const p = h(key);
+    let lo = 0, hi = this.ring.length;
+    while (lo < hi) { const mid = (lo + hi) >> 1; this.ring[mid].pos < p ? (lo = mid + 1) : (hi = mid); }
+    return this.ring[lo % this.ring.length].node;
+  }
+
+  // Replication: walk clockwise collecting N *distinct physical* nodes.
+  preferenceList(key: string, n: number): string[] {
+    const out: string[] = [];
+    let i = this.ring.findIndex((v) => v.pos >= h(key));
+    if (i < 0) i = 0;
+    for (let j = 0; out.length < n && j < this.ring.length; j++) {
+      const node = this.ring[(i + j) % this.ring.length].node;
+      if (!out.includes(node)) out.push(node);
+    }
+    return out;
+  }
+}`,
             },
             {
               type: 'callout',
               kind: 'tip',
-              text: 'If you say "we hash mod N" for a system expected to scale/rebalance, that\'s a flag. Reaching for consistent hashing (or explicitly saying "range-based with a routing/config service that tracks shard boundaries," which DynamoDB/HBase/many systems actually use in practice instead of literal consistent hashing) is the senior-level answer.',
+              text: 'Alternatives worth naming: **rendezvous (highest-random-weight) hashing** — each key picks the node with the highest `hash(key, node)`; no ring, minimal remapping, popular for picking cache/CDN nodes — and **jump consistent hash** (Google, 2014), which is tiny and perfectly balanced but only supports adding/removing nodes at the end of a numbered list. Envoy offers ring-hash and Maglev load-balancing policies built on these ideas.',
+            },
+            {
+              type: 'callout',
+              kind: 'tip',
+              text: 'If you say "we hash mod N" for a system expected to scale/rebalance, that\'s a flag. Reaching for consistent hashing (or explicitly saying "partitions tracked by a routing/config service that maps partitions or key ranges to nodes," which DynamoDB, HBase, Bigtable, CockroachDB, and Vitess actually use in practice instead of a literal ring) is the senior-level answer.',
             },
           ],
         },
@@ -243,7 +450,37 @@ export const systemDesignPatternsSection = {
             {
               type: 'callout',
               kind: 'note',
-              text: '**Follow-up interviewers ask**: "what if two replicas disagree on a read?" → read repair (return the latest by version/timestamp, and asynchronously push the correct value to the stale replica) or hinted handoff (if a replica was down during a write, another node temporarily holds the write on its behalf and delivers it once the original comes back).',
+              text: '**Follow-up interviewers ask**: "what if two replicas disagree on a read?" → read repair (return the latest by version/timestamp, and push the correct value to the stale replica), hinted handoff (if a replica was down during a write, another node temporarily holds the write on its behalf and delivers it once the original comes back), and periodic **anti-entropy repair** using Merkle trees to find and fix divergent ranges without comparing every row.',
+            },
+            {
+              type: 'heading',
+              text: 'Synchronous vs Asynchronous Replication',
+            },
+            {
+              type: 'table',
+              headers: ['Mode', 'Durability on leader crash', 'Write latency', 'Availability'],
+              rows: [
+                ['Asynchronous', 'Acknowledged writes not yet shipped are lost (RPO > 0)', 'Lowest', 'Highest — followers never block writes'],
+                ['Synchronous (all followers)', 'No loss', 'Highest, bounded by slowest follower', 'Poor — any follower outage blocks writes'],
+                ['Semi-synchronous / quorum (e.g. 1 of N standbys, `ANY 1 (s1, s2)` in Postgres)', 'No loss if the acked standby survives', 'One extra round trip to the fastest standby', 'Good — tolerates individual follower failures'],
+              ],
+            },
+            {
+              type: 'heading',
+              text: 'Failover Is Where Replication Gets Dangerous',
+            },
+            {
+              type: 'list',
+              items: [
+                '**Split brain**: the old leader was only partitioned, not dead, and keeps accepting writes after a new leader is promoted. Prevent with consensus-based leader election plus **fencing** (the old leader\'s writes are rejected because its epoch/term is stale), or STONITH in classic HA setups.',
+                '**Lost writes on async failover**: the promoted follower was behind; writes the old leader acknowledged vanish. If those IDs were already used elsewhere (e.g. cached, sent in emails), you get duplicate or dangling references — a real GitHub outage in 2012 was caused by exactly this with auto-increment keys.',
+                '**Failure detection is a guess**: a timeout too short causes needless failovers under load spikes (which add more load); too long extends outages. Tools like Patroni (Postgres, backed by etcd/Consul) or managed services (Aurora, Cloud SQL HA) encode these tradeoffs for you.',
+              ],
+            },
+            {
+              type: 'callout',
+              kind: 'pitfall',
+              text: '`W + R > N` does not by itself give linearizability. With sloppy quorums (hinted handoff to nodes outside the preference list), concurrent writes, or a write that failed on some replicas but succeeded on others, a quorum read can still return stale or flip-flopping values. Treat Dynamo-style quorums as "usually fresh," and use a consensus-based store or lightweight transactions (Cassandra `IF` / Paxos) when you need a real compare-and-set.',
             },
           ],
         },
@@ -348,6 +585,123 @@ export const systemDesignPatternsSection = {
               kind: 'tip',
               text: '**Why this matters practically**: whenever your HLD answer includes "a distributed lock," "leader election," "a strongly consistent config store," or "a replicated log for a database," the mechanism underneath is Raft (or Paxos) — naming it, and knowing it needs a majority quorum to make progress (hence deploying an odd number of nodes: 3 or 5, tolerating 1 or 2 failures respectively), is a strong senior/staff signal.',
             },
+            {
+              type: 'heading',
+              text: 'Terms, Commit Rules, and Linearizable Reads',
+            },
+            {
+              type: 'list',
+              items: [
+                '**Terms** are Raft\'s logical clock: every election increments the term, and any message carrying a stale term is rejected. This is what stops a deposed leader that wakes up from a GC pause from corrupting the log.',
+                '**Election restriction**: a node only votes for a candidate whose log is at least as up to date as its own, so a newly elected leader always contains every committed entry.',
+                '**Commit**: an entry is committed once stored on a majority; the leader only counts replicas toward committing entries from its *own* term (earlier-term entries commit indirectly), a subtle rule that closes a real safety hole.',
+                '**Reads are not free**: a leader that serves reads from local state might already have been deposed. Linearizable reads use a **ReadIndex** round (confirm leadership with a heartbeat quorum) or a **leader lease** (which relies on bounded clock drift). etcd defaults to linearizable reads and offers a cheaper `serializable` read option that may be stale.',
+              ],
+            },
+            {
+              type: 'mermaid',
+              code: 'sequenceDiagram\n    participant C as Client\n    participant L as Leader (term 7)\n    participant F1 as Follower 1\n    participant F2 as Follower 2\n    C->>L: SET x=5\n    L->>L: append entry #42 (term 7)\n    par replicate\n        L->>F1: AppendEntries #42\n        L->>F2: AppendEntries #42\n    end\n    F1-->>L: ok\n    Note over L: 2 of 3 have #42 -> committed\n    L->>L: apply to state machine\n    L-->>C: OK\n    F2-->>L: ok (late, harmless)',
+            },
+            {
+              type: 'table',
+              headers: ['Where consensus shows up (2026)', 'Notes'],
+              rows: [
+                ['etcd (Kubernetes control plane)', 'Raft; every Kubernetes object lives here, which is why etcd latency and disk fsync speed matter for cluster health.'],
+                ['Apache Kafka (KRaft)', 'Kafka 4.0 (2025) removed ZooKeeper entirely; cluster metadata is a Raft-replicated log managed by controller nodes.'],
+                ['CockroachDB, TiKV, YugabyteDB', 'Multi-Raft: one Raft group per data range, thousands per cluster, so consensus scales horizontally.'],
+                ['Google Spanner, Chubby', 'Paxos (Multi-Paxos) per split; Chubby is the lock service that inspired ZooKeeper.'],
+                ['ZooKeeper', 'ZAB (ZooKeeper Atomic Broadcast) — a Paxos-family protocol; still used by HBase, older Kafka, Solr.'],
+              ],
+            },
+            {
+              type: 'callout',
+              kind: 'warning',
+              text: 'Consensus tolerates **crash** failures, not malicious (**Byzantine**) ones — a node that lies breaks Raft. Byzantine fault tolerance (PBFT, Tendermint, HotStuff) needs 3f+1 nodes to tolerate f liars and is mostly relevant to blockchains and cross-organization systems, not to a typical backend. Also: never stretch a 3-node Raft cluster across 2 data centers — losing the DC with 2 nodes takes the whole cluster down. Use 3 zones (or 5 nodes across 3 zones).',
+            },
+          ],
+        },
+        {
+          id: 'distributed-locks-leases',
+          title: 'Distributed Locks, Leases, Leader Election, and Fencing Tokens',
+          summary:
+            'Mutual exclusion across machines is harder than it looks: a lock holder can pause, lose its lease, and keep writing. Leases bound the damage; fencing tokens are what actually make it safe.',
+          keyPoints: [
+            'A distributed lock must have a lease (TTL) — otherwise a crashed holder blocks everyone forever. But a lease means a slow holder can lose the lock without knowing it.',
+            'Process pauses (GC, VM steal, page faults, a blocked syscall) can last longer than any lease, so "check I hold the lock, then write" is a race no matter how careful the client is.',
+            'Fencing tokens fix it: the lock service hands out a monotonically increasing number with each grant, and the protected resource rejects any write carrying a token lower than one it has already seen.',
+            'Efficiency locks (avoid doing work twice; occasional overlap is harmless) can use a single Redis `SET NX PX`. Correctness locks (overlap corrupts data) need a consensus-backed service (etcd, ZooKeeper, Consul) plus fencing.',
+            'Often the best lock is no lock: a conditional write (`UPDATE ... WHERE version = ?`), a unique constraint, or single-writer partitioning removes the need for one entirely.',
+          ],
+          blocks: [
+            {
+              type: 'p',
+              text: 'Typical needs: "only one instance should run the nightly billing job," "only one worker should process this user\'s ledger at a time," "only one replica should be the active scheduler." The naive implementation — acquire a lock in Redis, do the work, release it — works in the demo and fails in production in a specific, well-documented way.',
+            },
+            {
+              type: 'mermaid',
+              code: 'sequenceDiagram\n    participant A as Client A\n    participant L as Lock Service\n    participant B as Client B\n    participant S as Storage\n    A->>L: acquire (lease 10s)\n    L-->>A: granted, token=33\n    Note over A: long GC pause (15s)\n    Note over L: lease expires\n    B->>L: acquire\n    L-->>B: granted, token=34\n    B->>S: write(data, token=34)\n    S-->>B: ok, highest seen = 34\n    Note over A: wakes up, still thinks it holds the lock\n    A->>S: write(data, token=33)\n    S-->>A: REJECTED: 33 < 34',
+            },
+            {
+              type: 'p',
+              text: 'Without the token check in the storage layer, Client A\'s stale write would silently overwrite Client B\'s — both clients believed they held the lock at the moment they wrote. No amount of re-checking on the client side closes this window, because the pause can happen between the check and the write. This is the core of Martin Kleppmann\'s well-known critique of using Redlock for correctness.',
+            },
+            {
+              type: 'code',
+              language: 'sql',
+              title: 'Fencing enforced by the resource (Postgres)',
+              code: `-- The protected row remembers the highest fencing token that has written to it.
+UPDATE jobs
+SET    state = 'done',
+       result = $1,
+       fence_token = $2
+WHERE  id = $3
+  AND  fence_token < $2;      -- stale holder => 0 rows updated => abort
+
+-- The same idea without a lock service at all: optimistic concurrency.
+UPDATE accounts
+SET    balance = balance - 50, version = version + 1
+WHERE  id = 42 AND version = 17;  -- 0 rows => someone else won; reload and retry`,
+            },
+            {
+              type: 'code',
+              language: 'ts',
+              title: 'Efficiency lock in Redis: acquire with NX + PX, release only if still the owner',
+              code: `import { randomUUID } from 'node:crypto';
+
+const RELEASE = \`
+if redis.call('GET', KEYS[1]) == ARGV[1] then
+  return redis.call('DEL', KEYS[1])
+end
+return 0\`;
+
+async function withLock<T>(redis: Redis, key: string, ttlMs: number, fn: () => Promise<T>) {
+  const owner = randomUUID();
+  const ok = await redis.set(key, owner, 'PX', ttlMs, 'NX');   // atomic acquire
+  if (ok !== 'OK') return null;                               // someone else has it
+  try {
+    return await fn();   // must finish well within ttlMs, or extend the lease
+  } finally {
+    // Compare-and-delete atomically, so we never delete a lock someone else now owns.
+    await redis.eval(RELEASE, 1, key, owner);
+  }
+}`,
+            },
+            {
+              type: 'table',
+              headers: ['Option', 'Safety', 'When to use'],
+              rows: [
+                ['Single Redis/Valkey `SET NX PX`', 'Lost on failover (async replication); no fencing token', 'Efficiency only: dedupe cron runs, rate-limit expensive recomputes'],
+                ['Redlock (N independent Redis masters)', 'Depends on bounded clock drift and pauses; still no fencing token', 'Rarely worth the complexity; if you need correctness use consensus'],
+                ['etcd lease + revision / ZooKeeper ephemeral sequential node', 'Linearizable; revision or zxid usable as fencing token', 'Correctness locks, leader election (Kubernetes `Lease` objects are built on this)'],
+                ['Database row lock / advisory lock (`pg_advisory_lock`)', 'As strong as the DB; held only while the session lives', 'When the protected work is in the same database anyway'],
+                ['Conditional write / unique constraint', 'Strongest and simplest', 'Whenever the invariant can be expressed as a single atomic write'],
+              ],
+            },
+            {
+              type: 'callout',
+              kind: 'tip',
+              text: '**Leader election is just a long-lived lock with heartbeats.** In Kubernetes, controllers use a `coordination.k8s.io/v1` Lease object: the leader renews it periodically; standbys take over if it is not renewed within the lease duration. The same fencing caveat applies — a deposed leader must stop acting the moment it fails to renew, and downstream systems should reject its stale epoch.',
+            },
           ],
         },
         {
@@ -381,6 +735,262 @@ export const systemDesignPatternsSection = {
               type: 'callout',
               kind: 'note',
               text: 'A retried request that a load balancer routes to a *different* backend than the one that timed out is exactly the ambiguous-failure scenario from the idempotency topic later in this guide — the client cannot assume the first backend didn\'t already process it.',
+            },
+            {
+              type: 'heading',
+              text: 'Beyond Round Robin: Algorithms Production Proxies Actually Use',
+            },
+            {
+              type: 'table',
+              headers: ['Algorithm', 'How it decides', 'Strength', 'Weakness'],
+              rows: [
+                ['Round robin / weighted RR', 'Next server in order (weights for bigger boxes)', 'Trivial, stateless', 'Blind to slow or overloaded backends'],
+                ['Least connections / least request', 'Fewest in-flight requests', 'Adapts to uneven request cost', 'Needs global view; many LBs each see only their own traffic'],
+                ['Power of two choices (P2C)', 'Pick 2 random backends, send to the less loaded', 'Near-optimal balance with no global state; avoids herding onto one "best" server', 'Slightly worse than perfect information (which you never have anyway)'],
+                ['Peak EWMA / latency-aware', 'Weight by exponentially weighted moving average of latency', 'Routes around slow (not just dead) instances', 'Can oscillate; needs tuning'],
+                ['Ring hash / Maglev', 'Consistent hash on a header, cookie, or key', 'Cache affinity, sticky sessions', 'Hot keys overload one backend'],
+              ],
+            },
+            {
+              type: 'p',
+              text: 'Envoy\'s `LEAST_REQUEST` policy is, by default, P2C over in-flight requests (`choice_count` defaults to 2), which is why it behaves well even with many independent proxies (one per pod in a service mesh). The deeper insight: in a fleet with many load balancers, "send to the globally least-loaded server" causes every LB to pick the same server at once — randomization is a feature, not a compromise.',
+            },
+            {
+              type: 'heading',
+              text: 'Where Load Balancing Lives',
+            },
+            {
+              type: 'list',
+              items: [
+                '**DNS / GeoDNS / anycast** (Route 53 latency routing, Cloudflare anycast): picks a region or PoP. Coarse and slow to change because of DNS caching and TTLs.',
+                '**L4 network LB** (AWS NLB, Google Maglev, Katran/IPVS): millions of connections per second, preserves client IP, cannot see HTTP.',
+                '**L7 edge proxy / API gateway** (ALB, Envoy, NGINX, HAProxy, cloud API gateways): TLS termination, path/header routing, auth, rate limiting.',
+                '**Client-side / sidecar LB** (gRPC client LB, service mesh sidecars): each caller balances across instances discovered from a registry. Essential for gRPC, because HTTP/2 multiplexes many requests over one long-lived TCP connection — an L4 balancer would pin all of a client\'s traffic to one backend.',
+              ],
+            },
+            {
+              type: 'callout',
+              kind: 'pitfall',
+              text: '**Health checks that check too much**: if `/health` also verifies the database, a brief DB blip makes every instance fail its check at once and the LB ejects the entire fleet — turning a partial outage into a total one. Keep liveness checks shallow (is this process able to serve?), use readiness checks for warm-up, and configure a **panic threshold** (Envoy routes to all hosts anyway if too many are marked unhealthy).',
+            },
+          ],
+        },
+        {
+          id: 'resilience-patterns',
+          title: 'Resilience Patterns: Timeouts, Retries, Circuit Breakers, and Bulkheads',
+          summary:
+            'In a call graph of dozens of services, something is always failing. These patterns stop a local failure from becoming a cascading, system-wide outage.',
+          keyPoints: [
+            'Every remote call needs a timeout, and timeouts must shrink as you go deeper in the call chain (deadline propagation) — otherwise upstream gives up while downstream keeps burning resources.',
+            'Retries need exponential backoff with jitter, a small attempt cap, a retry budget, and idempotent targets — naive retries multiply load exactly when the system is weakest (retry storms).',
+            'A circuit breaker stops calling a dependency that is clearly failing (open), probes it occasionally (half-open), and resumes when it recovers (closed) — failing fast instead of queueing.',
+            'Bulkheads isolate resources (thread pools, connection pools, concurrency limits, even whole cells) so one slow dependency cannot exhaust capacity needed by everything else.',
+            'Graceful degradation and load shedding decide in advance what to drop under stress: serve stale cache, hide recommendations, reject low-priority traffic first.',
+            'Today these usually live in the platform (Envoy/Istio, gRPC service config, Resilience4j, Polly) rather than hand-written in every service — but you still must choose the numbers.',
+          ],
+          blocks: [
+            {
+              type: 'p',
+              text: 'The classic cascading failure: Service C slows down. B\'s threads all block waiting on C. A\'s threads block waiting on B. Clients retry, tripling the load. Within minutes, every service is down even though only C had a problem. Each pattern below cuts one link in that chain.',
+            },
+            {
+              type: 'mermaid',
+              code: 'stateDiagram-v2\n    [*] --> Closed\n    Closed --> Open : failure rate over threshold<br/>in rolling window\n    Open --> HalfOpen : cool-down timer elapses\n    HalfOpen --> Closed : trial requests succeed\n    HalfOpen --> Open : any trial request fails\n    note right of Open : fail fast, return fallback,<br/>do not touch dependency',
+            },
+            {
+              type: 'heading',
+              text: 'Timeouts and Deadline Propagation',
+            },
+            {
+              type: 'p',
+              text: 'Set timeouts from measured latency (e.g. a little above the dependency\'s p99.9), not from round numbers like 30 seconds. Better still, propagate a **deadline**: the edge sets "this request must finish by T," every hop passes the remaining budget along (gRPC does this natively with `grpc-timeout`), and a service that receives a request with no time left rejects it immediately instead of doing useless work.',
+            },
+            {
+              type: 'heading',
+              text: 'Retries Done Right',
+            },
+            {
+              type: 'code',
+              language: 'ts',
+              title: 'Capped exponential backoff with full jitter and a retry budget',
+              code: `const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+// Token-bucket style budget: retries may add at most ~10% extra load.
+class RetryBudget {
+  private tokens = 10;
+  onSuccess() { this.tokens = Math.min(10, this.tokens + 0.1); }
+  tryRetry(): boolean { if (this.tokens >= 1) { this.tokens -= 1; return true; } return false; }
+}
+
+const RETRYABLE = new Set([408, 429, 502, 503, 504]); // never blindly retry 4xx like 400/409
+
+async function callWithRetry<T>(fn: () => Promise<T>, budget: RetryBudget, maxAttempts = 3) {
+  const base = 100, cap = 2_000;
+  for (let attempt = 1; ; attempt++) {
+    try {
+      const res = await fn();
+      budget.onSuccess();
+      return res;
+    } catch (err: any) {
+      const retryable = RETRYABLE.has(err.status) || err.code === 'ECONNRESET';
+      if (!retryable || attempt >= maxAttempts || !budget.tryRetry()) throw err;
+      // Full jitter: random in [0, min(cap, base * 2^attempt)] — desynchronizes clients.
+      const backoff = Math.random() * Math.min(cap, base * 2 ** attempt);
+      const retryAfter = Number(err.headers?.['retry-after']) * 1000 || 0;
+      await sleep(Math.max(backoff, retryAfter));
+    }
+  }
+}`,
+            },
+            {
+              type: 'callout',
+              kind: 'pitfall',
+              text: '**Retry amplification**: if each of 4 layers retries 3 times, one failing call at the bottom becomes 3^4 = 81 calls. Retry at **one** layer (usually closest to the failure or at the edge), not at every hop, and only for idempotent operations or ones protected by an idempotency key.',
+            },
+            {
+              type: 'heading',
+              text: 'Bulkheads, Load Shedding, and Cells',
+            },
+            {
+              type: 'list',
+              items: [
+                '**Bulkhead**: separate connection pools / concurrency limits per dependency, so a hung payment provider can only tie up the 20 slots reserved for it, not all 200 request threads.',
+                '**Adaptive concurrency limits** (Netflix `concurrency-limits`, Envoy adaptive concurrency filter): measure latency and automatically shrink the allowed in-flight requests when the service starts queueing — TCP congestion control applied to RPC.',
+                '**Load shedding**: when saturated, reject early and cheaply (HTTP 503 / 429 with `Retry-After`) rather than accepting work you will time out on. Prioritize: shed analytics and prefetch before checkout.',
+                '**Graceful degradation**: define fallbacks per dependency — stale cached data, a default recommendation list, "estimated delivery unavailable" — so a non-critical failure degrades a feature, not the page.',
+                '**Cell-based architecture**: partition the whole stack into independent cells (each with its own services and data) serving a subset of customers, behind a thin routing layer. A bad deploy or poison request only hurts one cell. AWS uses cells and **shuffle sharding** (assign each customer a random small subset of workers so two customers rarely share all of them) to limit blast radius.',
+              ],
+            },
+            {
+              type: 'code',
+              language: 'yaml',
+              title: 'The same policies declared in a service mesh (Istio)',
+              code: `apiVersion: networking.istio.io/v1
+kind: DestinationRule
+metadata:
+  name: payments
+spec:
+  host: payments.prod.svc.cluster.local
+  trafficPolicy:
+    connectionPool:            # bulkhead
+      tcp: { maxConnections: 100 }
+      http: { http2MaxRequests: 200, maxRequestsPerConnection: 50 }
+    outlierDetection:          # passive health check / per-host circuit breaker
+      consecutive5xxErrors: 5
+      interval: 10s
+      baseEjectionTime: 30s
+      maxEjectionPercent: 50
+---
+apiVersion: networking.istio.io/v1
+kind: VirtualService
+metadata:
+  name: payments
+spec:
+  hosts: [payments.prod.svc.cluster.local]
+  http:
+    - route: [{ destination: { host: payments.prod.svc.cluster.local } }]
+      timeout: 2s
+      retries:
+        attempts: 2
+        perTryTimeout: 800ms
+        retryOn: connect-failure,refused-stream,unavailable,503`,
+            },
+            {
+              type: 'callout',
+              kind: 'note',
+              text: 'Note that Envoy/Istio "circuit breaking" is mostly connection-pool limits plus outlier ejection of individual hosts — not the classic Hystrix-style per-dependency open/half-open state machine. If you need fallbacks with business logic ("return cached price"), that still belongs in application code (Resilience4j for Java, Polly for .NET, `cockatiel` or `opossum` for Node). Hystrix itself has been in maintenance mode since 2018.',
+            },
+            {
+              type: 'callout',
+              kind: 'tip',
+              text: 'Interviewers love "what happens when this dependency is slow (not down)?" Slow is worse than down: down fails fast, slow holds resources. Answer with timeouts, a bulkhead, a circuit breaker on latency/error rate, and a named fallback.',
+            },
+          ],
+        },
+        {
+          id: 'rate-limiting-backpressure',
+          title: 'Rate Limiting, Throttling, and Backpressure',
+          summary:
+            'Protect shared capacity and enforce fairness: the main limiter algorithms, how to implement them atomically in a distributed setting, and how backpressure propagates overload upstream instead of letting queues explode.',
+          keyPoints: [
+            'Token bucket allows controlled bursts up to the bucket size while enforcing an average rate — the most common choice for APIs.',
+            'Fixed window is simple but allows 2x bursts at window boundaries; sliding window log is exact but memory-heavy; sliding window counter approximates it cheaply.',
+            'A distributed limiter needs atomic check-and-decrement — a Redis Lua script or a native limiter — and must decide whether to fail open or fail closed when the limiter store is down.',
+            'Return `429 Too Many Requests` with `Retry-After` (and ideally `RateLimit-*` headers) so well-behaved clients back off.',
+            'Backpressure means a consumer signals "slow down" to its producer (bounded queues, pull-based consumption, flow control) — unbounded queues just convert overload into latency and then memory exhaustion.',
+          ],
+          blocks: [
+            {
+              type: 'table',
+              headers: ['Algorithm', 'State per key', 'Burst behavior', 'Notes'],
+              rows: [
+                ['Fixed window counter', '1 counter', 'Up to 2x limit across a window boundary', 'Simplest; fine for coarse daily quotas'],
+                ['Sliding window log', 'Timestamp of every request', 'Exact', 'Memory grows with rate; use Redis sorted sets'],
+                ['Sliding window counter', '2 counters', 'Approximate, smooth', 'Weighted blend of current + previous window; good default for distributed limits'],
+                ['Token bucket', 'Tokens + last refill time', 'Bursts up to bucket capacity, then steady rate', 'Used by AWS API Gateway, Stripe, Envoy local rate limit'],
+                ['Leaky bucket (queue)', 'Queue', 'Smooths output to a constant rate', 'Shapes traffic to a fragile downstream; adds latency'],
+                ['GCRA', '1 timestamp (theoretical arrival time)', 'Like token bucket', 'Elegant, single-value state; used by `redis-cell` and several CDN limiters'],
+              ],
+            },
+            {
+              type: 'code',
+              language: 'ts',
+              title: 'Atomic token bucket in Redis (Lua runs atomically on the server)',
+              code: `const TOKEN_BUCKET = \`
+local key      = KEYS[1]
+local capacity = tonumber(ARGV[1])   -- max burst
+local rate     = tonumber(ARGV[2])   -- tokens per second
+local now      = tonumber(ARGV[3])   -- ms, passed in from the caller
+local cost     = tonumber(ARGV[4])
+
+local b = redis.call('HMGET', key, 'tokens', 'ts')
+local tokens = tonumber(b[1]) or capacity
+local ts     = tonumber(b[2]) or now
+
+tokens = math.min(capacity, tokens + (now - ts) / 1000 * rate)
+local allowed = tokens >= cost
+if allowed then tokens = tokens - cost end
+
+redis.call('HSET', key, 'tokens', tokens, 'ts', now)
+redis.call('PEXPIRE', key, math.ceil(capacity / rate * 1000) + 1000)
+return { allowed and 1 or 0, tokens }\`;
+
+export async function allow(redis: Redis, clientId: string, capacity = 100, ratePerSec = 10) {
+  const [ok] = (await redis.eval(TOKEN_BUCKET, 1, \`rl:\${clientId}\`,
+    capacity, ratePerSec, Date.now(), 1)) as [number, number];
+  return ok === 1;
+}`,
+            },
+            {
+              type: 'callout',
+              kind: 'warning',
+              text: 'Passing `now` from many app servers means clock skew between them slightly distorts the rate. For strict limits, use the Redis server clock (`redis.call(\'TIME\')`) inside the script instead. In Redis Cluster, all keys a script touches must hash to the same slot — keep one key per limiter, or use hash tags like `rl:{client42}:minute`.',
+            },
+            {
+              type: 'heading',
+              text: 'Design Decisions Interviewers Probe',
+            },
+            {
+              type: 'list',
+              items: [
+                '**Where to limit**: at the edge (API gateway / CDN / WAF) for abuse and per-API-key quotas; inside services for protecting specific dependencies; both in practice.',
+                '**Global vs local**: an exact global limit costs a network round trip per request. Many systems use local in-memory buckets per instance (limit / instance count) and accept imprecision, or sync counts asynchronously in batches.',
+                '**Fail open vs fail closed**: if Redis is down, do you allow all traffic (availability, risk of overload) or block it (safety, self-inflicted outage)? Most public APIs fail open with a local fallback limiter.',
+                '**What key**: API key, user ID, IP (beware NAT and IPv6 ranges), tenant, or endpoint cost class. Weight expensive endpoints with a higher `cost`.',
+              ],
+            },
+            {
+              type: 'heading',
+              text: 'Backpressure',
+            },
+            {
+              type: 'p',
+              text: 'Rate limiting is a policy you impose; **backpressure** is a signal that flows from an overloaded consumer to its producers. Mechanisms: bounded queues that block or reject when full; pull-based consumption (Kafka consumers fetch only what they can handle, so a slow consumer builds *lag*, not memory pressure); reactive-streams demand signaling; and transport flow control (TCP windows, HTTP/2 and gRPC stream flow control). The anti-pattern is the unbounded in-memory queue: it hides overload as rising latency until the process runs out of memory, and then you lose everything in it.',
+            },
+            {
+              type: 'callout',
+              kind: 'tip',
+              text: 'Little\'s Law (`L = λ × W`: items in system = arrival rate × time in system) is the quick sanity check: if a queue receives 1,000 msg/s and each takes 50 ms with 20 workers, capacity is 400 msg/s — the queue will grow by 600 msg/s forever. No queue size fixes that; only more capacity or shedding does.',
             },
           ],
         },
@@ -416,6 +1026,81 @@ export const systemDesignPatternsSection = {
               type: 'callout',
               kind: 'pitfall',
               text: '**Cache stampede / dogpile**: many concurrent requests miss the cache for the same key simultaneously (e.g., right after expiry) and all hit the DB at once. Mitigate with request coalescing (a mutex/promise per key so only one request repopulates the cache while others wait on it), or probabilistic early expiration (refresh slightly before actual TTL, staggered per request, to spread out refreshes).',
+            },
+            {
+              type: 'heading',
+              text: 'Cache-Aside, Implemented Properly',
+            },
+            {
+              type: 'code',
+              language: 'ts',
+              title: 'Cache-aside with single-flight, TTL jitter, and negative caching',
+              code: `const inflight = new Map<string, Promise<Product | null>>();
+const NOT_FOUND = '__nf__';
+
+async function getProduct(id: string): Promise<Product | null> {
+  const key = \`product:v3:\${id}\`;                 // version the key with the schema
+  const cached = await redis.get(key);
+  if (cached === NOT_FOUND) return null;           // negative cache: stops "miss" floods
+  if (cached) return JSON.parse(cached);
+
+  // Single-flight: concurrent misses in THIS process share one DB query.
+  if (!inflight.has(key)) {
+    inflight.set(key, (async () => {
+      try {
+        const row = await db.products.findById(id);
+        const ttl = 300 + Math.floor(Math.random() * 60);   // jitter: avoid synchronized expiry
+        await redis.set(key, row ? JSON.stringify(row) : NOT_FOUND, 'EX', row ? ttl : 30);
+        return row;
+      } finally {
+        inflight.delete(key);
+      }
+    })());
+  }
+  return inflight.get(key)!;
+}
+
+// On write: update the source of truth FIRST, then DELETE (not set) the cache entry.
+async function updateProduct(p: Product) {
+  await db.products.update(p);
+  await redis.del(\`product:v3:\${p.id}\`);
+}`,
+            },
+            {
+              type: 'heading',
+              text: 'Invalidation: The Genuinely Hard Part',
+            },
+            {
+              type: 'list',
+              items: [
+                '**Delete, don\'t set, on write.** If two writers each update the DB then `SET` the cache, their cache writes can land in the opposite order to their DB writes, leaving the cache permanently wrong until TTL. Deleting is order-insensitive.',
+                '**The read-write race still exists**: a reader misses, reads the old row, stalls; a writer updates the DB and deletes the key; the reader then writes the stale row into the cache. Mitigations: short TTLs as a safety net, a delayed second delete ("double delete"), or versioned values with a compare-and-set (only write if newer version).',
+                '**Invalidate from the database\'s change stream, not the app.** Driving cache deletes from CDC (Debezium reading the WAL/binlog) catches every writer — including batch jobs and manual fixes — that app-level invalidation misses. Meta\'s published work on cache consistency (TAO/Memcache) is built on this idea.',
+                '**Always set a TTL** — even with perfect invalidation logic — so any bug self-heals in bounded time.',
+                '**Hot keys**: one key receiving huge read volume overloads one cache shard. Use a small in-process L1 cache (seconds of TTL) in front of Redis, or replicate the key under several suffixes and pick one randomly.',
+                '**Large values and big keys** block single-threaded Redis command processing; keep values small and avoid `KEYS *` or huge `HGETALL` in production.',
+              ],
+            },
+            {
+              type: 'table',
+              headers: ['Strategy', 'Read path', 'Write path', 'Consistency risk', 'Typical use'],
+              rows: [
+                ['Cache-aside', 'App: cache, then DB on miss', 'App writes DB, deletes key', 'Stale window + read/write race', 'The default for most web apps'],
+                ['Read-through', 'Cache loads from DB on miss', 'Usually combined with write-through or invalidation', 'Same as cache-aside', 'Libraries/caches with loaders (Caffeine, DAX, NCache)'],
+                ['Write-through', 'Cache', 'Cache writes DB synchronously', 'Low, but a failed DB write must not leave the cache updated', 'Read-after-write-heavy data'],
+                ['Write-behind', 'Cache', 'Cache acks, flushes to DB async', 'Data loss on cache failure; ordering issues', 'Counters, metrics, write-coalescing'],
+                ['Refresh-ahead', 'Cache', 'Background refresh before expiry', 'Wasted refreshes for keys no longer used', 'Small set of very hot keys'],
+              ],
+            },
+            {
+              type: 'callout',
+              kind: 'note',
+              text: 'Ecosystem note: after Redis changed its license in 2024, the Linux Foundation fork **Valkey** became the default in several clouds (e.g. AWS ElastiCache and MemoryDB offer it), and Redis 8 later added AGPLv3 as a licensing option. For design discussions they are interchangeable — the patterns above apply to both, and to Memcached for pure caching.',
+            },
+            {
+              type: 'callout',
+              kind: 'pitfall',
+              text: '**Treating the cache as a database.** If your system cannot survive the cache being flushed (cold start, failover, eviction under memory pressure), you have built an unreplicated primary datastore by accident. Capacity-plan the DB for a realistic cold-cache scenario, or warm caches gradually and shed load during recovery.',
             },
           ],
         },
@@ -458,6 +1143,193 @@ export const systemDesignPatternsSection = {
               type: 'mermaid',
               code: 'flowchart LR\n    Client --> Router{Routing / Facade Layer}\n    Router -->|capability not yet migrated| Monolith[Legacy Monolith]\n    Router -->|capability A: migrated| ServiceA[New Service: Capability A]\n    Router -.->|capability B: next to extract| Monolith\n\n    ServiceA -.->|monolith code path for A<br/>eventually decommissioned| Monolith',
             },
+            {
+              type: 'p',
+              text: 'The hard part of a strangler migration is almost never the routing — it is the **data**. The extracted service needs its own database, but the monolith still reads and writes those tables. The usual sequence: (1) extract the code behind an interface inside the monolith, (2) give the new service its own schema and keep it in sync with CDC or dual-writes-via-outbox while both run, (3) shadow or canary traffic and compare results, (4) flip the source of truth, (5) delete the monolith\'s copy. An **anti-corruption layer** translates between the legacy model and the new service\'s cleaner model so legacy concepts do not leak in.',
+            },
+            {
+              type: 'heading',
+              text: 'The Modular Monolith: the Underrated Middle Ground',
+            },
+            {
+              type: 'p',
+              text: 'A **modular monolith** is one deployable with strictly enforced internal module boundaries: each module owns its tables, exposes a narrow public API, and other modules may not reach into its internals (enforced with tooling such as ArchUnit, Spring Modulith, Nx module boundaries, or Packwerk for Rails). You get most of the design benefits of microservices — clear ownership, low coupling — with none of the network tax, and a well-bounded module can later be extracted into a service with little drama. Shopify is the well-known large-scale example. Many teams that went "microservices first" have publicly consolidated back toward this shape.',
+            },
+            {
+              type: 'heading',
+              text: 'Drawing Service Boundaries',
+            },
+            {
+              type: 'list',
+              items: [
+                '**Use bounded contexts from Domain-Driven Design**: a boundary is where the meaning of a word changes ("Product" in Catalog is a description and images; in Inventory it is a SKU count; in Shipping it is weight and dimensions).',
+                '**Database per service**: each service owns its data and others access it only through its API or events. A shared database is the most common way teams build a **distributed monolith** — every schema change requires coordinated deploys.',
+                '**Optimize for change, not for nouns**: things that change together should live together. If every feature requires changing three services in lockstep, the boundaries are wrong.',
+                '**Prefer async between contexts, sync within a request only when the user is waiting**: long synchronous call chains multiply latency and multiply failure probability (five services at 99.9% each give roughly 99.5% end to end).',
+              ],
+            },
+            {
+              type: 'callout',
+              kind: 'note',
+              text: 'Serverless has matured: cold starts are much less of an issue than they once were thanks to provisioned concurrency, AWS Lambda SnapStart (snapshot-restore, now available for Java, Python and .NET), lighter runtimes, and container-based serverless (Cloud Run, Azure Container Apps, AWS Fargate) that blurs the line with "regular" containers. The enduring tradeoffs are execution-time limits, per-invocation cost at sustained high load, connection-pool exhaustion against relational databases (use a proxy such as RDS Proxy), and harder local testing.',
+            },
+            {
+              type: 'callout',
+              kind: 'pitfall',
+              text: '**Signs you have a distributed monolith**: services share a database; you cannot deploy one without deploying others; a single user request makes a long synchronous chain of calls; one service going down takes most features down. The fix is usually fewer, larger services with real ownership — not more services.',
+            },
+          ],
+        },
+        {
+          id: 'api-gateway-bff-service-mesh',
+          title: 'API Gateway, Backend-for-Frontend, Service Discovery, and Service Mesh',
+          summary:
+            'How traffic gets into and around a microservice system: the edge gateway and BFF patterns for north-south traffic, and service discovery plus sidecar or sidecarless meshes for east-west traffic.',
+          keyPoints: [
+            'An API gateway is the single entry point that handles cross-cutting edge concerns: TLS, authentication, rate limiting, routing, request shaping — but must not accumulate business logic.',
+            'Backend-for-Frontend (BFF) gives each client type (web, iOS, partner API) its own thin aggregation layer, owned by the team that builds that client.',
+            'Service discovery maps logical service names to live instances — via DNS (Kubernetes Services), a registry (Consul, Eureka), or xDS from a control plane.',
+            'A service mesh moves mTLS, retries, timeouts, load balancing, and telemetry out of application code into proxies managed by a control plane.',
+            'Sidecarless meshes (Istio ambient mode, Cilium) reduce the per-pod resource and operational cost that made classic sidecar meshes expensive.',
+            'Do not adopt a mesh for a handful of services; its value scales with the number of services and teams, and its operational cost is real.',
+          ],
+          blocks: [
+            {
+              type: 'mermaid',
+              code: 'flowchart LR\n    Web[Web app] --> WebBFF["Web BFF"]\n    Mobile[Mobile app] --> MobileBFF["Mobile BFF"]\n    Partner[Partner integrations] --> GW\n    WebBFF --> GW["API Gateway<br/>TLS, authN, rate limits"]\n    MobileBFF --> GW\n    GW --> Orders[Orders]\n    GW --> Catalog[Catalog]\n    subgraph Mesh["Service mesh: mTLS, retries, telemetry"]\n        Orders <--> Payments[Payments]\n        Orders <--> Inventory[Inventory]\n        Catalog <--> Pricing[Pricing]\n    end\n    CP["Control plane<br/>(istiod / Linkerd)"] -.->|config, certs via xDS| Mesh',
+            },
+            {
+              type: 'heading',
+              text: 'API Gateway',
+            },
+            {
+              type: 'p',
+              text: 'Responsibilities: TLS termination, authentication and coarse authorization (validate the JWT or session once), rate limiting and quotas, routing and versioning, request/response transformation, caching of public responses, WAF/bot protection, and observability at the edge. Implementations: managed (AWS API Gateway, Azure API Management, Google Apigee/API Gateway), self-hosted (Kong, Envoy Gateway, NGINX, Traefik), and the Kubernetes **Gateway API**, which has largely superseded the older Ingress resource as the standard way to configure L7 routing in clusters.',
+            },
+            {
+              type: 'callout',
+              kind: 'pitfall',
+              text: '**The "smart gateway" anti-pattern**: once orchestration and business rules creep into the gateway (the ESB problem of the 2000s), it becomes a shared bottleneck every team must change and deploy. Keep the gateway generic and push composition into BFFs or services.',
+            },
+            {
+              type: 'heading',
+              text: 'Backend-for-Frontend',
+            },
+            {
+              type: 'p',
+              text: 'A mobile screen might need data from five services shaped very differently than the web page does. A BFF per client type aggregates those calls server-side (one round trip over the slow mobile network instead of five), trims payloads, and evolves at the pace of its client. The rule: the BFF is owned by the client team and contains presentation-oriented composition only. A GraphQL layer (often federated across services) is a common alternative that lets clients specify the shape themselves, at the cost of query-cost control and caching complexity.',
+            },
+            {
+              type: 'heading',
+              text: 'Service Discovery',
+            },
+            {
+              type: 'table',
+              headers: ['Approach', 'How it works', 'Tradeoff'],
+              rows: [
+                ['DNS-based (Kubernetes Service)', 'Stable virtual IP or DNS name; kube-proxy / eBPF routes to ready pods', 'Simple and universal; L4 only, DNS caching can lag'],
+                ['Client-side registry (Consul, Eureka)', 'Instances register and heartbeat; clients query and balance', 'Rich, fast-updating; client libraries per language'],
+                ['Control-plane push (xDS)', 'Control plane streams endpoints and policy to proxies (Envoy) or gRPC clients (proxyless)', 'Powerful and dynamic; the control plane is critical infrastructure'],
+              ],
+            },
+            {
+              type: 'heading',
+              text: 'Service Mesh: Sidecar vs Sidecarless',
+            },
+            {
+              type: 'p',
+              text: 'In the classic **sidecar** model (Istio, Linkerd), every pod runs a proxy that intercepts traffic, giving uniform mTLS, retries, timeouts, traffic splitting for canaries, and golden-signal metrics without code changes. The cost is a proxy per pod (memory, CPU, latency per hop) and sidecar lifecycle issues. **Istio ambient mode** (generally available since Istio 1.24) splits this into a per-node L4 proxy (ztunnel) handling mTLS and an optional per-namespace L7 "waypoint" proxy only where L7 features are needed. Cilium provides mesh features using eBPF in the kernel plus a per-node Envoy.',
+            },
+            {
+              type: 'callout',
+              kind: 'tip',
+              text: 'Interview framing: "north-south" traffic (clients into the system) goes through the gateway; "east-west" traffic (service to service) is governed by the mesh. The mesh gives you zero-trust mTLS identity between services (SPIFFE IDs) — which is how "downstream services trust the caller" is actually enforced, rather than trusting the network.',
+            },
+          ],
+        },
+        {
+          id: 'messaging-queues-streams',
+          title: 'Messaging: Queues vs Logs, Partitions, Ordering, and Dead-Letter Queues',
+          summary:
+            'Message queues and event logs look similar but have different semantics. Understanding partitions, consumer groups, offsets, and poison messages is what makes asynchronous designs actually work.',
+          keyPoints: [
+            'A queue (SQS, RabbitMQ) hands each message to one consumer and deletes it on ack; a log (Kafka, Kinesis, Pulsar, Redpanda) retains messages and lets each consumer group track its own position (offset), so events can be replayed.',
+            'Ordering is only guaranteed within a partition; choose the partition key (e.g. `orderId`) so events that must stay ordered share a partition.',
+            'Parallelism of a Kafka consumer group is capped by the partition count — over-partitioning has costs, under-partitioning caps throughput.',
+            'Commit the offset only after processing succeeds (at-least-once), and make handlers idempotent; committing first gives at-most-once.',
+            'Poison messages need retry topics with backoff and a dead-letter queue, plus alerting and a redrive tool — otherwise one bad message blocks a whole partition.',
+            'Kafka transactions give exactly-once for read-process-write within Kafka; side effects in external systems still need idempotency or the outbox pattern.',
+          ],
+          blocks: [
+            {
+              type: 'table',
+              headers: ['', 'Work queue (SQS, RabbitMQ classic queues)', 'Event log (Kafka, Kinesis, Pulsar)'],
+              rows: [
+                ['Consumption model', 'Competing consumers; message deleted after ack', 'Each consumer group reads independently; data retained by time/size'],
+                ['Replay', 'No (once acked, gone)', 'Yes — reset offsets to reprocess or bootstrap a new service'],
+                ['Ordering', 'Best effort (SQS standard) or per message group (SQS FIFO)', 'Strict per partition'],
+                ['Scaling consumers', 'Add consumers freely', 'At most one active consumer per partition per group (share groups, KIP-932, introduced in the Kafka 4.x line, add queue-like consumption)'],
+                ['Per-message retry/delay', 'Built in (visibility timeout, redrive policy)', 'Must build retry topics yourself; a stuck message blocks its partition'],
+                ['Best for', 'Task distribution, background jobs', 'Event streaming, CDC, event sourcing, fan-out to many independent consumers'],
+              ],
+            },
+            {
+              type: 'mermaid',
+              code: 'flowchart LR\n    P[Producer<br/>key = orderId] --> T\n    subgraph T["Topic: orders (3 partitions)"]\n        P0["P0: o1, o4, o1"]\n        P1["P1: o2, o5"]\n        P2["P2: o3, o6, o3"]\n    end\n    subgraph G1["Group: billing"]\n        C1[consumer 1]\n        C2[consumer 2]\n    end\n    subgraph G2["Group: analytics"]\n        C3[consumer 1]\n    end\n    P0 --> C1\n    P1 --> C1\n    P2 --> C2\n    P0 --> C3\n    P1 --> C3\n    P2 --> C3',
+            },
+            {
+              type: 'heading',
+              text: 'A Correct Consumer Loop',
+            },
+            {
+              type: 'code',
+              language: 'java',
+              title: 'Kafka consumer: process, then commit; dedupe with an inbox table',
+              code: `props.put("enable.auto.commit", "false");
+props.put("isolation.level", "read_committed");   // skip aborted transactional writes
+
+try (var consumer = new KafkaConsumer<String, OrderEvent>(props)) {
+  consumer.subscribe(List.of("orders"));
+  while (running) {
+    var records = consumer.poll(Duration.ofMillis(500));
+    for (var rec : records) {
+      try {
+        tx.execute(() -> {
+          // Inbox / processed-messages table makes redelivery a no-op.
+          boolean firstTime = jdbc.update(
+              "INSERT INTO processed_events(event_id) VALUES (?) ON CONFLICT DO NOTHING",
+              rec.value().eventId()) == 1;
+          if (firstTime) billing.apply(rec.value());   // same DB transaction as the inbox row
+        });
+      } catch (RetryableException e) {
+        retryProducer.send(new ProducerRecord<>("orders.retry.1m", rec.key(), rec.value()));
+      } catch (Exception poison) {
+        dlqProducer.send(new ProducerRecord<>("orders.dlq", rec.key(), rec.value()));
+      }
+    }
+    consumer.commitSync();   // only after the whole batch is handled
+  }
+}`,
+            },
+            {
+              type: 'list',
+              items: [
+                '**Producer settings**: `acks=all` plus `enable.idempotence=true` (the default since Kafka 3.0) prevents duplicates and reordering from producer retries within a partition. Use `min.insync.replicas=2` with replication factor 3 so an ack really means two copies.',
+                '**Rebalances**: when consumers join or leave, partitions move. Processing that is not finished before a rebalance may be redone by the new owner — another reason handlers must be idempotent. Cooperative rebalancing and the newer consumer group protocol (KIP-848, generally available in Kafka 4.0 and enabled on clients via `group.protocol=consumer`) reduce the stop-the-world pauses.',
+                '**Consumer lag** (latest offset minus committed offset) is the key health metric; alert on its growth rate, not on a fixed number.',
+                '**Retry topics**: moving a failing message to `orders.retry.1m` frees the partition but breaks per-key ordering for that key. If order matters, park the whole key (or pause the partition) instead.',
+              ],
+            },
+            {
+              type: 'callout',
+              kind: 'pitfall',
+              text: '**Choosing a partition key with low cardinality or heavy skew** (e.g. `country` when 60% of traffic is one country) creates a hot partition that no amount of consumers can fix, since only one consumer per group can read it. Also note that increasing the partition count later changes the key-to-partition mapping for new messages, breaking per-key ordering across the change — choose a generous count up front.',
+            },
+            {
+              type: 'callout',
+              kind: 'note',
+              text: 'Kafka\'s exactly-once semantics (idempotent producer + transactions + `read_committed` consumers) covers consume-from-Kafka, process, produce-to-Kafka loops such as Kafka Streams jobs. The moment your handler sends an email, calls Stripe, or writes to a different database, you are back to at-least-once and need idempotency keys or an inbox table on that side.',
+            },
           ],
         },
         {
@@ -499,6 +1371,72 @@ export const systemDesignPatternsSection = {
             {
               type: 'mermaid',
               code: 'flowchart LR\n    Command[Command: WithdrawMoney] --> WriteModel[Write Model<br/>validates business rules]\n    WriteModel --> EventStore[(Event Store<br/>AccountOpened, MoneyDeposited, MoneyWithdrawn...)]\n    EventStore --> Projector[Projector /<br/>Read Model Builder]\n    Projector --> ReadModel1[(Read Model:<br/>Account Balance View)]\n    Projector --> ReadModel2[(Read Model:<br/>Transaction History View)]\n    Query[Query: GetBalance] --> ReadModel1',
+            },
+            {
+              type: 'heading',
+              text: 'Event Sourcing Mechanics: Append with Optimistic Concurrency',
+            },
+            {
+              type: 'code',
+              language: 'ts',
+              title: 'Aggregate rehydration, invariant check, and a version-checked append',
+              code: `type Event =
+  | { type: 'AccountOpened'; v: 1; owner: string }
+  | { type: 'MoneyDeposited'; v: 1; amount: number }
+  | { type: 'MoneyWithdrawn'; v: 1; amount: number };
+
+function evolve(balance: number, e: Event): number {
+  switch (e.type) {
+    case 'AccountOpened':  return 0;
+    case 'MoneyDeposited': return balance + e.amount;
+    case 'MoneyWithdrawn': return balance - e.amount;
+  }
+}
+
+async function withdraw(accountId: string, amount: number) {
+  // 1. Load latest snapshot (if any) plus the events after it.
+  const snap = await snapshots.latest(accountId);          // { balance, version } | null
+  const events = await store.read(accountId, { fromVersion: snap?.version ?? 0 });
+  const balance = events.reduce((b, e) => evolve(b, e.data), snap?.balance ?? 0);
+  const version = events.at(-1)?.version ?? snap?.version ?? 0;
+
+  // 2. Enforce the invariant against current state.
+  if (balance < amount) throw new Error('InsufficientFunds');
+
+  // 3. Append ONLY if nobody else appended since we read (expected version).
+  //    A concurrent withdrawal makes this fail; the caller reloads and retries.
+  await store.append(accountId, [{ type: 'MoneyWithdrawn', v: 1, amount }],
+                     { expectedVersion: version });
+}`,
+            },
+            {
+              type: 'list',
+              items: [
+                '**Optimistic concurrency per stream** (expected version) is what protects invariants; implemented as a unique constraint on `(stream_id, version)` in Postgres, or natively in EventStoreDB/Kurrent, Axon, Marten.',
+                '**Snapshots** every N events bound rehydration cost. They are a cache: you must be able to throw them away and rebuild.',
+                '**Upcasting** converts old event versions to the current shape when read, so handlers only know the latest schema. Never edit stored events in place; for GDPR erasure, use **crypto-shredding** (encrypt personal data per subject and delete the key).',
+                '**Projections must be idempotent and rebuildable**: track the last processed position per projection, and be able to rebuild a read model from position 0 into a new table, then swap.',
+                '**Events are facts in past tense** (`OrderPlaced`), not commands (`PlaceOrder`). Distinguish internal domain events (fine-grained, private) from integration events published to other services (stable, versioned contract).',
+              ],
+            },
+            {
+              type: 'table',
+              headers: ['Technique', 'Use it when', 'Avoid when'],
+              rows: [
+                ['Event-driven integration', 'Many independent consumers react to business facts; producers should not know them', 'The caller needs an immediate answer to proceed'],
+                ['CQRS (separate read models)', 'Read shapes differ wildly from write shapes, or reads outscale writes massively', 'Simple CRUD — a read replica or a SQL view is enough'],
+                ['Event sourcing', 'Audit is a core requirement, temporal queries, complex domain with valuable history (ledgers, workflows)', 'You mainly need current state and ad-hoc querying; team new to the pattern'],
+              ],
+            },
+            {
+              type: 'callout',
+              kind: 'pitfall',
+              text: '**Event notification vs event-carried state transfer**: a thin event ("order 42 changed") forces every consumer to call back the producer for details, recreating synchronous coupling and load spikes. A fat event carrying the relevant state lets consumers build local copies — at the cost of a larger, harder-to-evolve contract. Pick deliberately, and register schemas (Avro/Protobuf/JSON Schema in a schema registry with compatibility rules) so producers cannot break consumers.',
+            },
+            {
+              type: 'callout',
+              kind: 'warning',
+              text: 'CQRS and event sourcing are independent: you can have CQRS without event sourcing (write to normal tables, project via CDC into a search index) and, less commonly, event sourcing without separate read models. Do not adopt both for a whole system — apply them to the one or two bounded contexts that genuinely need them.',
             },
           ],
         },
@@ -553,6 +1491,48 @@ export const systemDesignPatternsSection = {
             {
               type: 'p',
               text: 'Some operations are naturally idempotent without any extra machinery — `SET x = 5` produces the same end state no matter how many times it runs — while others are not by default — `increment balance by 5` applied twice is a bug. An idempotency key (or an equivalent, like a unique constraint on a `request_id` column) is what turns a naturally non-idempotent operation into a safely-retryable one.',
+            },
+            {
+              type: 'code',
+              language: 'sql',
+              title: 'Server-side idempotency store (Postgres)',
+              code: `CREATE TABLE idempotency_keys (
+  client_id     text        NOT NULL,
+  key           text        NOT NULL,
+  request_hash  text        NOT NULL,         -- detect same key reused with a different body
+  status        text        NOT NULL,         -- 'in_progress' | 'completed'
+  response_code int,
+  response_body jsonb,
+  locked_until  timestamptz,                  -- recover from a crash mid-request
+  created_at    timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (client_id, key)
+);
+
+-- Step 1: claim the key atomically. 1 row inserted => we own it; 0 rows => seen before.
+INSERT INTO idempotency_keys (client_id, key, request_hash, status, locked_until)
+VALUES ($1, $2, $3, 'in_progress', now() + interval '30 seconds')
+ON CONFLICT (client_id, key) DO NOTHING;
+
+-- Step 2 (we own it): do the work AND record the result in the SAME local transaction
+-- as the business change, so "charged but result not stored" cannot happen.
+UPDATE idempotency_keys
+SET status = 'completed', response_code = $4, response_body = $5
+WHERE client_id = $1 AND key = $2;
+
+-- If 0 rows were inserted in step 1:
+--   completed + same hash   -> replay the stored response
+--   completed + other hash  -> 422: key reused with a different payload
+--   in_progress, not expired -> 409: concurrent duplicate, retry later`,
+            },
+            {
+              type: 'list',
+              items: [
+                '**Scope keys per client/tenant** so two customers cannot collide, and expire them after a documented window (Stripe documents that keys can be pruned after at least 24 hours).',
+                '**Store the result atomically with the side effect** whenever the side effect is in your own database. When the side effect is external (a payment provider), pass your key through to *their* idempotency mechanism so the guarantee holds end to end.',
+                '**Natural idempotency keys beat synthetic ones** where available: an `order_id` for "charge order", an `event_id` for a consumer, a `(user_id, day)` for a daily reward.',
+                '**Prefer state transitions over deltas**: "set status from PENDING to PAID where status = PENDING" is idempotent by construction; "add 50 to balance" is not.',
+                '**The `Idempotency-Key` HTTP header** is being standardized by the IETF HTTPAPI working group (`draft-ietf-httpapi-idempotency-key-header`), codifying the conventions popularized by Stripe and others.',
+              ],
             },
             {
               type: 'callout',
@@ -610,6 +1590,157 @@ export const systemDesignPatternsSection = {
               kind: 'note',
               text: 'This is the standard answer to "how do you handle a checkout flow that spans Inventory, Payment, and Shipping services without a shared database transaction." Notice both `ChargeCard` and its compensation `RefundPayment` need to be safe to retry — if the orchestrator itself crashes and resumes, it may re-issue a step it already ran. That safety is exactly the idempotency guarantee from the previous topic; a Saga without idempotent steps is not actually safe.',
             },
+            {
+              type: 'heading',
+              text: 'Designing a Saga That Survives Production',
+            },
+            {
+              type: 'list',
+              items: [
+                '**Order steps by reversibility**: put compensatable steps first, then the **pivot transaction** (the go/no-go point, often the payment capture), then **retriable** steps that must eventually succeed and are never compensated (send confirmation, create shipment request). Hard-to-undo steps go after the pivot.',
+                '**Compensation is semantic, not a rollback**: you cannot un-send an email; you send a correction. A refund is a new transaction, visible on the customer\'s statement. Design compensations with the business.',
+                '**Sagas lack isolation (the "I" in ACID)**: other transactions see intermediate states. Countermeasures: a **semantic lock** (order status `PENDING` that other flows respect), commutative updates, re-reading values before acting, and reservations with expiry instead of hard decrements.',
+                '**Compensations can fail too**: they must be retried until they succeed, and an un-compensatable failure goes to a human-handled queue with full context.',
+                '**Persist orchestrator state durably** before each step, so a crash resumes rather than restarts. This is exactly what durable-execution engines provide.',
+              ],
+            },
+            {
+              type: 'code',
+              language: 'ts',
+              title: 'Orchestrated saga as a durable workflow (Temporal TypeScript SDK style)',
+              code: `import { proxyActivities } from '@temporalio/workflow';
+import type * as acts from './activities';
+
+const { reserveStock, releaseStock, chargeCard, refundCard, createShipment } =
+  proxyActivities<typeof acts>({
+    startToCloseTimeout: '30 seconds',
+    retry: { maximumAttempts: 5, backoffCoefficient: 2 },  // activities must be idempotent
+  });
+
+export async function checkoutWorkflow(order: Order): Promise<string> {
+  const compensations: Array<() => Promise<void>> = [];
+  try {
+    await reserveStock(order.id, order.items);
+    compensations.unshift(() => releaseStock(order.id));
+
+    await chargeCard(order.id, order.total);          // pivot: idempotency key = order.id
+    compensations.unshift(() => refundCard(order.id));
+
+    await createShipment(order.id);                   // retriable, past the pivot
+    return 'COMPLETED';
+  } catch (err) {
+    for (const undo of compensations) await undo();   // run in reverse order
+    return 'FAILED';
+  }
+}
+// The workflow's progress is event-sourced by the engine: if the worker crashes after
+// chargeCard, a new worker replays history and continues at createShipment.`,
+            },
+            {
+              type: 'table',
+              headers: ['Approach', 'Atomicity', 'Availability / coupling', 'Real-world fit'],
+              rows: [
+                ['2PC / XA', 'Atomic', 'Blocking on coordinator failure; all participants must support the protocol', 'Within one database vendor or tightly coupled infra; rarely across services'],
+                ['Distributed SQL (Spanner, CockroachDB, YugabyteDB)', 'Atomic, serializable', 'Consensus-replicated, so no single blocking coordinator; higher write latency', 'When the data can live in one distributed database'],
+                ['Saga (orchestrated)', 'Eventual via compensation', 'Loosely coupled; central workflow state', 'Complex multi-step business flows, external parties'],
+                ['Saga (choreographed)', 'Eventual via compensation', 'Most decoupled; flow is implicit', 'Short flows with 2-4 steps and stable ownership'],
+              ],
+            },
+            {
+              type: 'callout',
+              kind: 'tip',
+              text: 'Durable-execution engines — Temporal, AWS Step Functions, Azure Durable Functions, Restate, and Cadence — have become the mainstream way to implement orchestrated sagas, replacing hand-rolled state machines over a database table. In interviews, naming one and explaining *why* it works (persisted event history, deterministic replay, activity retries with idempotency) is stronger than drawing the boxes.',
+            },
+            {
+              type: 'callout',
+              kind: 'warning',
+              text: 'Every saga step that "updates my database and then publishes an event" hides the **dual-write problem** — the process can crash between the two. The next topic, the transactional outbox, is the standard fix and is essentially mandatory for choreographed sagas.',
+            },
+          ],
+        },
+        {
+          id: 'transactional-outbox-cdc',
+          title: 'The Dual-Write Problem: Transactional Outbox, Inbox, and Change Data Capture',
+          summary:
+            'Writing to your database and publishing a message are two separate systems, and no amount of try/catch makes them atomic. The outbox pattern (often fed by CDC) is how reliable event-driven systems actually publish.',
+          keyPoints: [
+            'Dual write: "save to DB, then publish to Kafka" loses the event if the process crashes in between; "publish, then save" emits events for changes that never happened.',
+            'Transactional outbox: write the business change and an outbox row in the same local ACID transaction; a separate relay publishes outbox rows to the broker.',
+            'The relay is at-least-once (it may publish a row twice after a crash), so consumers must deduplicate — typically with an inbox / processed-events table keyed by event ID.',
+            'Relays either poll the outbox table or tail the database log with CDC (Debezium, cloud-native CDC); log tailing gives lower latency and less DB load.',
+            'Ordering: publish with the aggregate ID as the message key so events for one entity stay in order on one partition.',
+            'Listen-to-yourself and CDC on business tables are alternatives with different tradeoffs; distributed transactions (XA) between DB and broker are the option you almost never want.',
+          ],
+          blocks: [
+            {
+              type: 'mermaid',
+              code: 'flowchart LR\n    API[Order Service] -->|"BEGIN<br/>INSERT order<br/>INSERT outbox row<br/>COMMIT"| DB[(Orders DB)]\n    DB -->|"WAL / binlog"| CDC["Relay<br/>(Debezium or poller)"]\n    CDC -->|"key = orderId"| K[[Kafka topic: orders]]\n    K --> C1["Billing consumer<br/>+ inbox dedupe"]\n    K --> C2["Search indexer"]\n    K --> C3["Email service"]',
+            },
+            {
+              type: 'code',
+              language: 'sql',
+              title: 'Outbox table and the atomic write',
+              code: `CREATE TABLE outbox (
+  id             uuid PRIMARY KEY,          -- becomes the event ID consumers dedupe on
+  aggregate_type text        NOT NULL,      -- e.g. 'Order' -> routes to topic 'orders'
+  aggregate_id   text        NOT NULL,      -- message key -> per-entity ordering
+  type           text        NOT NULL,      -- 'OrderPlaced'
+  payload        jsonb       NOT NULL,
+  created_at     timestamptz NOT NULL DEFAULT now()
+);
+
+BEGIN;
+  INSERT INTO orders (id, customer_id, total, status)
+  VALUES ('o-42', 'c-7', 99.00, 'PLACED');
+
+  INSERT INTO outbox (id, aggregate_type, aggregate_id, type, payload)
+  VALUES (gen_random_uuid(), 'Order', 'o-42', 'OrderPlaced',
+          '{"orderId":"o-42","customerId":"c-7","total":99.00}');
+COMMIT;   -- both rows or neither: the event exists iff the state change exists`,
+            },
+            {
+              type: 'heading',
+              text: 'Two Ways to Run the Relay',
+            },
+            {
+              type: 'table',
+              headers: ['Relay', 'How', 'Pros', 'Cons'],
+              rows: [
+                ['Polling publisher', '`SELECT ... FROM outbox ORDER BY created_at LIMIT 100 FOR UPDATE SKIP LOCKED`, publish, then delete/mark sent', 'Simple, no extra infrastructure', 'Polling latency and DB load; careful with ordering across concurrent pollers and commit-time vs insert-time ordering'],
+                ['Log-tailing CDC', 'Debezium (Kafka Connect or Debezium Server) reads the Postgres WAL / MySQL binlog; its outbox event router SMT maps rows to topics', 'Low latency, no polling load, exact commit order', 'Operating Kafka Connect, replication slots (an abandoned Postgres slot retains WAL until the disk fills)'],
+              ],
+            },
+            {
+              type: 'callout',
+              kind: 'pitfall',
+              text: '**Publishing from an `afterCommit` hook or a Spring `@TransactionalEventListener` is not an outbox.** The hook runs in memory after commit; if the process dies before it fires, the event is gone. The durable row in the same transaction is the entire point.',
+            },
+            {
+              type: 'heading',
+              text: 'The Consumer Side: Inbox Pattern',
+            },
+            {
+              type: 'p',
+              text: 'Because the relay can publish a row twice (it published, then crashed before marking it sent) and the broker can redeliver after a rebalance, consumers record each processed event ID in an **inbox** table within the same transaction as their own state change (see the Kafka consumer example in the messaging topic). Outbox on the producer side plus inbox on the consumer side is what "effectively exactly-once" looks like across service boundaries.',
+            },
+            {
+              type: 'heading',
+              text: 'Alternatives and When They Fit',
+            },
+            {
+              type: 'list',
+              items: [
+                '**CDC directly on business tables** (no outbox table): zero application changes, great for feeding search indexes, caches, and analytics. Downside: you publish your internal schema as a contract; renaming a column breaks consumers. Use an outbox for integration events between services.',
+                '**Listen to yourself**: publish the event first, and have the service consume its own event to update its database. Works with a log as the source of truth, but the service cannot read its own write immediately.',
+                '**Event sourcing**: the event store *is* the database, so there is no dual write — subscribers read the store directly.',
+                '**Cloud-native variants**: DynamoDB Streams, Cosmos DB change feed, Spanner change streams, and MongoDB change streams all act as built-in CDC, so writing an outbox item in the same transaction and consuming the stream is the equivalent pattern.',
+              ],
+            },
+            {
+              type: 'callout',
+              kind: 'tip',
+              text: 'If an interviewer hears "and then the service publishes an `OrderPlaced` event," the follow-up is almost always "what if it crashes right after the DB commit?" Answering "transactional outbox with Debezium, keyed by order ID, and idempotent consumers with an inbox table" closes the topic in one sentence.',
+            },
           ],
         },
         {
@@ -647,6 +1778,24 @@ export const systemDesignPatternsSection = {
                 '**Everything non-critical-path off checkout\'s latency budget goes through the event bus** — sending a confirmation email, updating analytics, feeding the recommendation engine, are all async subscribers to `OrderPlaced`, not synchronous calls the checkout flow waits on. This is the practical application of "decouple with an event bus."',
                 '**Auth is centralized at the API Gateway** (validate the token once, on the way in) rather than every downstream service re-validating a raw credential — downstream services trust a signed, gateway-issued context (see the Authentication & Authorization guide for the deep dive).',
                 '**Single points of failure are explicitly eliminated**: every DB has replicas, the event bus is a clustered/partitioned Kafka deployment (not one broker), and the API Gateway itself is deployed behind a load balancer across multiple instances/AZs.',
+                '**`OrderPlaced` is published via a transactional outbox**, not a direct Kafka call after the DB commit — otherwise a crash between the two silently drops the email, the analytics row, and the warehouse pick request.',
+                '**Inventory uses reservations with expiry, not immediate decrements**: checkout reserves stock (`available - reserved`), payment capture confirms it, and an expired reservation releases it automatically — which also handles abandoned payment pages without a compensation step.',
+                '**Flash sales get special treatment**: a hot SKU is a hot key. Pre-split stock into buckets, gate entry with a queue/waiting room and a rate limiter, and shed non-critical features first (recommendations, reviews) under load.',
+              ],
+            },
+            {
+              type: 'heading',
+              text: 'Failure Walkthrough Interviewers Expect',
+            },
+            {
+              type: 'table',
+              headers: ['Failure', 'What the design does'],
+              rows: [
+                ['Payment provider times out', 'Retry with the same idempotency key (order ID); if still unknown, mark order `PAYMENT_PENDING` and reconcile via provider webhook or status poll — never charge twice, never assume failure.'],
+                ['Redis cache cluster lost', 'Catalog falls back to replicas behind a concurrency limit; L1 in-process cache absorbs the hottest keys; non-critical widgets degrade.'],
+                ['Kafka unavailable for 10 minutes', 'Orders still commit — outbox rows accumulate and the relay drains them on recovery; consumers catch up from their offsets.'],
+                ['Inventory service slow', 'Circuit breaker opens; checkout returns a clear "try again" rather than hanging; bulkhead keeps browse and cart working.'],
+                ['Bad deploy in one region/cell', 'Canary + automated rollback on error-rate SLO; cell isolation limits blast radius to a fraction of customers.'],
               ],
             },
           ],
@@ -677,7 +1826,11 @@ export const systemDesignPatternsSection = {
                 'Design a CI/CD pipeline architecture. — *Mechanism:* an event-driven pipeline (push triggers a build event), with build/test/deploy stages as independently scalable workers consuming from a queue, and idempotent deploy steps so a retried deployment doesn\'t double-apply.',
                 'Design a metrics/monitoring pipeline (like Prometheus/Datadog). — *Mechanism:* high-volume time-series writes favor an LSM-tree-style storage engine; the pipeline itself is a stream-processing/aggregation problem much like the ad-click pipeline in the HLD guide.',
                 'Design a feature flag system. — *Mechanism:* the same read-heavy, low-latency shape as config management — cache flag evaluations locally at each service and push updates, rather than making every request block on a network round trip to check a flag.',
-                'Design a distributed lock manager. — *Mechanism:* consensus underneath (Raft/ZooKeeper), or a quorum-based approach (Redlock-style) if you\'re willing to accept its known edge cases — either way, always pair the lock with a TTL/lease so a crashed holder can\'t deadlock the resource forever.',
+                'Design a distributed lock manager. — *Mechanism:* consensus underneath (Raft/etcd/ZooKeeper) with leases so a crashed holder cannot deadlock the resource forever, and monotonically increasing **fencing tokens** that the protected resource checks, because a paused holder can outlive its lease. Redlock-style approaches lack fencing and depend on timing assumptions, so they are only appropriate for efficiency locks.',
+                'Design a rate limiter for a public API. — *Mechanism:* token bucket or sliding-window counter per API key, atomic updates in Redis via a Lua script, local fallback limiter, a fail-open/closed decision, and `429` + `Retry-After` responses.',
+                'Design a notification system (email/SMS/push) that never double-sends. — *Mechanism:* transactional outbox from the triggering service, a queue per channel with retries and a DLQ, idempotency keyed by `(notification_id, channel)`, per-user rate limits and preferences, and provider failover behind circuit breakers.',
+                'Design a payment / ledger service. — *Mechanism:* double-entry ledger as an append-only (often event-sourced) log, idempotency keys on every external call, a state machine per payment with a reconciliation job against the provider, and strong consistency (single leader or serializable transactions) for balances.',
+                'Design a webhook delivery platform. — *Mechanism:* durable queue per destination (bulkheads so one slow customer endpoint cannot starve others), exponential backoff with jitter for hours, signed payloads, an event ID for receiver-side dedupe, and a replay UI backed by retained events.',
                 'Design an API gateway. — *Mechanism:* L7 load balancing plus the cross-cutting concerns centralized at the edge — authentication (see the case study above), rate limiting, and request routing — so downstream services don\'t each reimplement them.',
               ],
             },
@@ -692,7 +1845,7 @@ export const systemDesignPatternsSection = {
         {
           id: 'qa',
           title: 'Questions & Answers',
-          summary: '30 system design and architecture interview questions with full-depth answers.',
+          summary: '44 system design and architecture interview questions with full-depth answers.',
           qa: [
             {
               question: 'What is a distributed system, and why can\'t every problem just be solved by using a bigger single machine?',
@@ -717,7 +1870,7 @@ export const systemDesignPatternsSection = {
             {
               question: 'Explain consistent hashing and why virtual nodes matter.',
               answer:
-                'Consistent hashing places both nodes and keys on a hash ring; a key is owned by the next node clockwise. Adding/removing a node only remaps the keys in its immediate arc (~1/N of all keys), unlike `hash % N` which remaps almost everything. Virtual nodes assign each physical node many positions on the ring so load balances evenly regardless of ring geometry, and a failed node\'s load spreads across many survivors instead of dumping entirely onto one neighbor.',
+                'Consistent hashing places both nodes and keys on a hash ring; a key is owned by the next node clockwise. Adding/removing a node only remaps the keys in its immediate arc (~1/N of all keys), unlike `hash % N` which remaps almost everything. Virtual nodes assign each physical node many positions on the ring so load balances evenly regardless of ring geometry, and a failed node\'s load spreads across many survivors instead of dumping entirely onto one neighbor. They also let heterogeneous hardware take proportional load (more tokens for bigger machines). The tradeoffs to mention: more vnodes means more metadata and slower repair/streaming (which is why Cassandra 4.0 cut its default from 256 to 16 tokens with a smarter allocator), consistent hashing does nothing for a single hot key, and many production systems (DynamoDB, Bigtable, CockroachDB) instead use explicit partitions tracked by a metadata service, which allows splitting hot ranges on demand. Alternatives worth naming are rendezvous hashing and jump consistent hash.',
             },
             {
               question: 'What\'s the difference between Paxos and Raft, and why did Raft become more popular in real systems?',
@@ -848,6 +2001,71 @@ export const systemDesignPatternsSection = {
               question: 'In the e-commerce case study, why does the Product Catalog Service sync into Elasticsearch via change-data-capture instead of the Search Service querying the Product DB directly?',
               answer:
                 'Full-text/faceted search (fuzzy matching, relevance ranking, filtering across many attributes) requires an inverted-index data structure that a relational or document DB isn\'t built to serve efficiently — running that kind of query pattern directly against the Product DB would be slow and would compete for resources with the DB\'s actual job of serving transactional catalog reads/writes. Change-data-capture (streaming the DB\'s write-ahead log or change events into a pipeline that updates Elasticsearch) keeps the search index near-real-time consistent with the source of truth without the Product Service needing to know or care that a search index exists — it\'s a clean example of "the system that owns the data doesn\'t need to own every way that data gets queried," and it decouples search-index scaling/availability from the catalog DB\'s.',
+            },
+            {
+              question: 'What is the dual-write problem, and how does the transactional outbox pattern solve it? What guarantees does it give and not give?',
+              answer:
+                'A service that updates its database and then publishes an event to a broker is writing to two systems with no shared transaction. If it crashes after the DB commit but before the publish, the event is lost; if it publishes first and the DB commit fails, consumers react to a change that never happened. Wrapping both in try/catch cannot fix this because the crash can happen between any two lines. The outbox pattern writes the business change and an outbox row in the same local ACID transaction, so the event exists if and only if the state change exists. A separate relay (a poller using `FOR UPDATE SKIP LOCKED`, or log-tailing CDC like Debezium) publishes outbox rows to the broker. What it guarantees: no lost events and no phantom events, plus per-aggregate ordering if you key messages by aggregate ID. What it does not guarantee: exactly-once publication — the relay can publish a row twice after a crash — so consumers must be idempotent, usually via an inbox table of processed event IDs updated in the same transaction as their own state change. Operational costs include outbox table cleanup and, with CDC, managing replication slots so an idle slot does not retain WAL until the disk fills.',
+            },
+            {
+              question: 'Why is a lock with a TTL in Redis not enough to guarantee mutual exclusion, and what is a fencing token?',
+              answer:
+                'The TTL is necessary so a crashed holder does not block everyone forever, but it creates a new failure: a holder can be paused (a long GC, VM steal time, a page fault, a stalled disk) for longer than the TTL, the lock expires, another client acquires it, and then the first client wakes up and writes, believing it still holds the lock. Checking "do I still hold it?" right before writing does not help because the pause can occur between the check and the write. Single-node Redis locks are also lost on failover because replication is asynchronous. A fencing token is a monotonically increasing number issued with each lock grant (an etcd revision or ZooKeeper zxid works). The client sends it with every write, and the protected resource rejects any write whose token is lower than the highest it has already accepted — so the stale holder\'s write fails safely. The key insight is that safety must be enforced by the resource, not by the client. For locks that only prevent duplicate work, a Redis `SET NX PX` with an owner-checked release is fine; for correctness, use a consensus-backed lock with fencing, or better, avoid the lock with a conditional write.',
+            },
+            {
+              question: 'Walk me through how you would implement retries for a call from Service A to Service B safely.',
+              answer:
+                'First, decide whether the operation is safe to retry: reads and naturally idempotent writes are; non-idempotent writes need an idempotency key that B honors. Second, set a per-attempt timeout based on B\'s measured latency (around its p99.9) and respect an overall deadline propagated from the caller, so A never keeps retrying after its own caller has given up. Third, only retry retryable failures — connection errors, 502/503/504, 429 (honoring `Retry-After`) — never 400/401/409. Fourth, use capped exponential backoff with full jitter so many clients do not retry in lockstep. Fifth, cap attempts (2-3) and add a retry budget (e.g. retries may add at most 10% extra traffic), which prevents retry storms when B is genuinely overloaded. Sixth, retry at one layer only — if every hop in a 4-deep chain retries 3 times, one failure becomes 81 calls. Finally, put a circuit breaker in front of B so that when it is clearly unhealthy A fails fast with a fallback instead of queueing work, and emit metrics on retries so you notice when they become the norm. In a service mesh much of this is configuration (Istio `retries`, `perTryTimeout`), but the idempotency and budget decisions are still yours.',
+            },
+            {
+              question: 'How does a circuit breaker differ from a retry policy and from a bulkhead, and how do they work together?',
+              answer:
+                'They address different failure shapes. Retries handle transient, independent failures by trying again — they increase load. A circuit breaker handles sustained failure by stopping calls entirely: after the error or slow-call rate crosses a threshold in a rolling window it opens and fails fast (optionally returning a fallback), after a cool-down it lets a few trial requests through (half-open), and it closes again if they succeed. It decreases load on a struggling dependency and frees the caller\'s resources. A bulkhead limits how much of the caller\'s capacity any one dependency can consume (a dedicated connection pool or concurrency limit), so a slow dependency exhausts only its compartment rather than every thread. Together: the bulkhead caps concurrency, the timeout bounds each attempt, the retry handles blips within a budget, and the breaker trips when blips become an outage. Order matters — retries should sit inside the breaker so retried failures count toward tripping it. Note that Envoy/Istio "circuit breaking" is mostly connection limits plus outlier ejection of individual hosts; business-level fallbacks still live in libraries like Resilience4j or Polly.',
+            },
+            {
+              question: 'Kafka guarantees ordering — so why do teams still see out-of-order processing?',
+              answer:
+                'Kafka only guarantees order within a single partition. Common causes of disorder: (1) the producer keys messages by something other than the entity whose order matters (or sends them unkeyed), so related events land on different partitions; (2) the partition count is increased, which changes the key-to-partition mapping for new messages while old ones are still being consumed; (3) the consumer processes records from one partition in parallel (a thread pool per batch) without serializing per key; (4) failed messages are moved to a retry topic and reprocessed later, after newer events for the same key; (5) events for one entity are produced by multiple services into different topics; and (6) before idempotent producers were the default, producer retries with multiple in-flight requests could reorder messages. Fixes: key by aggregate ID, choose a generous partition count up front, use per-key ordered parallelism (e.g. Confluent\'s parallel consumer), park a whole key rather than one message on failure, and make consumers tolerant by carrying a version or sequence number per entity and ignoring events older than what they have already applied.',
+            },
+            {
+              question: 'What is the difference between linearizability and serializability, and why does it matter in system design?',
+              answer:
+                'Linearizability is a recency guarantee on individual objects: every operation appears to take effect atomically at some instant between its invocation and response, so once any client reads a new value, no client can later read the old one. It is what the "C" in CAP means and what you need for leader election, locks, and unique-username checks. Serializability is an isolation guarantee for multi-object transactions: the outcome equals some serial execution of the transactions, but not necessarily one consistent with real time — a serializable database may legally return a slightly stale snapshot. Strict serializability combines both (Spanner, CockroachDB, FoundationDB). It matters because the costs differ: linearizability requires a consensus round or a single leader on the read path, and is unavailable under partition; serializability is about concurrency control (2PL, SSI, or deterministic ordering). Many incidents come from assuming one implies the other, such as reading from a replica of a "serializable" database and expecting to see a write that just committed on the primary — that is a read-your-writes violation, a session-guarantee problem rather than an isolation problem.',
+            },
+            {
+              question: 'Why is last-write-wins conflict resolution dangerous, and what are the alternatives?',
+              answer:
+                'LWW picks the write with the highest timestamp and silently discards the others. Because clocks on different nodes drift and can jump backwards, the "later" timestamp may belong to the write that actually happened first, so a causally newer update is lost with no error. Even with perfect clocks, LWW discards genuinely concurrent updates — two users adding different items to a shared cart, and one addition vanishes. It is acceptable when overwrites are the intended semantics (a cache entry, a user\'s latest location) or when writes to a key are naturally single-writer. Alternatives: version vectors to detect concurrency and keep both versions as siblings for the application to merge (Riak); CRDTs that merge automatically by construction (counters, OR-sets, collaborative text); conditional writes / compare-and-set against a version number so concurrent writers detect the conflict and retry; routing all writes for a key to a single leader or a single partition consumer; and hybrid logical clocks to at least keep timestamps causally consistent. The interview move is to say which entities can tolerate LWW and which need a merge or coordination rule.',
+            },
+            {
+              question: 'When would you choose a modular monolith over microservices, and how would you keep the option to split later?',
+              answer:
+                'Choose a modular monolith when you have one or a few teams, a domain that is still being discovered, or no component with a dramatically different scaling, availability, or compliance profile. It gives you one deploy, in-process calls, single-database transactions, and simple debugging, while strict module boundaries prevent the big-ball-of-mud that gives monoliths their bad name. To keep the split option open: give each module ownership of its own tables and forbid cross-module joins or foreign keys; expose a narrow public interface per module and enforce the boundary with tooling (ArchUnit, Spring Modulith, Nx boundaries, Packwerk); communicate between modules through interfaces or in-process domain events that could later go over a broker; and keep the module\'s data access behind a repository so a future service can own it. When a module needs independent scaling or deployment, extract it using the strangler fig approach — the hard part, data separation, will already be done. Splitting should be driven by team autonomy or genuinely different operational needs, not by fashion.',
+            },
+            {
+              question: 'How do you keep a cache consistent with the database, and what race conditions remain even with a careful cache-aside implementation?',
+              answer:
+                'The standard approach is cache-aside with update-the-database-then-delete-the-key, plus a TTL on every entry. Deleting rather than setting avoids the race where two writers\' cache sets land in the opposite order to their DB writes. A race still remains: a reader misses, reads the old row from the DB, and stalls; a writer commits the new row and deletes the key; the reader then populates the cache with the stale row, which persists until TTL. Mitigations include short TTLs as a bound, a delayed second delete, storing a version with each value and only writing if newer (compare-and-set via a Lua script), or leases as described in Facebook\'s memcache paper, where the cache issues a token on miss and rejects a fill whose token was invalidated by an intervening delete. Another important improvement is driving invalidation from the database change stream (CDC) rather than application code, so writes from batch jobs, migrations, and other services also invalidate. Also consider replica lag: if the filler reads from a lagging replica after an invalidation, it can repopulate stale data, so read from the primary on cache fill for data that must be fresh.',
+            },
+            {
+              question: 'Design question: how would you shard a multi-tenant SaaS database where a few tenants are 1,000 times larger than the median?',
+              answer:
+                'Shard by `tenant_id` so almost all queries are single-shard and tenant isolation is natural, but do not hash tenants directly onto physical nodes. Instead map tenants to a large number of logical shards, and keep a directory (in a small strongly consistent store, cached in every router) mapping tenants or logical shards to physical clusters. That directory is what makes the skew manageable: small tenants are packed many per cluster, while whales get dedicated clusters (and possibly their own cells for blast-radius and noisy-neighbor isolation, which enterprise customers often pay for). Moving a tenant becomes an online operation — bulk copy, CDC catch-up, brief write freeze, flip the directory entry. For the very largest tenant, you may need a second-level shard key inside the tenant (e.g. `(tenant_id, project_id)`). Cross-tenant analytics should go to a separate warehouse fed by CDC rather than scatter-gather queries. Mention per-tenant rate limits and resource quotas, and that Citus, Vitess, and distributed SQL databases provide much of this machinery out of the box.',
+            },
+            {
+              question: 'What is a cell-based architecture and how does shuffle sharding reduce blast radius?',
+              answer:
+                'A cell-based architecture partitions the entire stack — services, queues, and data stores — into independent, identical units called cells, each serving a fixed subset of customers, with a very thin routing layer in front that maps a customer to a cell. Cells share nothing at runtime, so a bad deploy, a poison-pill request, a noisy customer, or a capacity exhaustion affects only that cell\'s customers. Deployments roll out cell by cell, which turns a global outage into a partial one and gives a natural canary. Scaling means adding cells rather than growing one ever-larger system, which keeps every cell within tested limits. Shuffle sharding applies the same idea at a finer grain: instead of assigning each customer to one fixed group of workers, assign each a random small combination of workers (e.g. 2 of 8). With many possible combinations, two customers rarely share all their workers, so a customer whose requests crash workers takes down only their own combination while nearly everyone else keeps at least one healthy worker. Costs: the router becomes critical and must be extremely simple, cross-cell operations (global search, migrations of a customer between cells) need extra machinery, and per-cell overhead raises baseline cost.',
+            },
+            {
+              question: 'An interviewer asks: "Your design says the service publishes an event and the email service sends a confirmation. How do you guarantee the customer gets exactly one email?"',
+              answer:
+                'Break it into the two hops. Producer side: the order service must not dual-write, so it uses a transactional outbox — the order row and an `OrderPlaced` outbox row commit together, and a relay publishes it. That guarantees at least once, not exactly once. Consumer side: the email service receives each event at least once (relay retries, consumer rebalances), so it deduplicates on a stable key. A naive "check if sent, then send" still has a window, so the robust version records an intent first: insert a row keyed by `(order_id, template)` with a unique constraint; only the consumer whose insert succeeds proceeds; then call the email provider passing that key as the provider\'s idempotency key if it supports one; then mark the row sent. If the process crashes after calling the provider but before marking sent, the retry may resend — at that point you are at the boundary of what is achievable, because the external provider is outside your transaction. So the honest answer is: effectively-once through outbox + inbox + provider idempotency, with a small residual duplicate risk you either accept for emails or eliminate only if the provider deduplicates by key. Saying that last part explicitly shows you understand why exactly-once delivery is impossible end to end.',
+            },
+            {
+              question: 'What does a service mesh actually give you, and when is it not worth it?',
+              answer:
+                'A service mesh moves cross-cutting network concerns from application libraries into infrastructure: automatic mutual TLS with workload identities (SPIFFE), so service-to-service authentication and encryption are uniform; L7 traffic management such as retries, timeouts, outlier ejection, weighted routing for canaries and traffic mirroring; consistent golden-signal metrics and trace propagation across every language; and authorization policies between services. The control plane (istiod, Linkerd\'s control plane) pushes configuration and certificates to the data plane (sidecar Envoy/linkerd2-proxy, or in Istio ambient mode a per-node ztunnel plus optional waypoint proxies). It is not worth it when you have a handful of services, a single language where a good RPC library already provides retries, deadlines, and TLS, or a team without capacity to operate it — the mesh adds latency per hop, resource overhead, upgrade risk, and a new class of misconfiguration outages. Sidecarless designs reduce the resource cost substantially, but the operational learning curve remains. A useful heuristic is to adopt it when the pain of enforcing mTLS and consistent policy across many teams and languages exceeds the cost of running the mesh.',
             },
           ],
         },

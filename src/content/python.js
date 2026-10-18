@@ -17,7 +17,8 @@ export const pythonSection = {
             'Dynamically typed: a variable\'s type is determined at runtime by whatever object it currently refers to, never declared upfront.',
             '\'Batteries included\' standard library plus PyPI, a third-party ecosystem covering nearly every domain (web, data, ML, scripting, automation).',
             'The Zen of Python (`import this`) codifies the design philosophy: readability counts, explicit is better than implicit, there should be one obvious way to do it.',
-            'CPython is the reference implementation nearly everyone means by \'Python\'; PyPy, Jython, and MicroPython are alternative implementations with different trade-offs.',
+            'CPython is the reference implementation nearly everyone means by \'Python\'; PyPy, GraalPy, and MicroPython are alternative implementations with different trade-offs.',
+            'Modern CPython (3.11+) specializes bytecode at runtime based on observed types, and ships an experimental JIT — "interpreted" no longer means "naively interpreted".',
           ],
           blocks: [
             {
@@ -57,18 +58,123 @@ def add(a, b):
     return a + b
 
 dis.dis(add)
-#   2           0 RESUME                   0
-#               2 LOAD_FAST                0 (a)
-#               4 LOAD_FAST                1 (b)
-#               6 BINARY_OP                0 (+)
-#              10 RETURN_VALUE
+# Representative output (exact opcode names change between releases --
+# e.g. 3.13+ fuses the two loads into a LOAD_FAST_LOAD_FAST superinstruction):
+#   RESUME                   0
+#   LOAD_FAST                0 (a)
+#   LOAD_FAST                1 (b)
+#   BINARY_OP                0 (+)
+#   RETURN_VALUE
 # This is what actually runs, one instruction at a time, inside the
 # Python Virtual Machine -- the .py source is never executed directly.`,
             },
             {
+              type: 'heading',
+              text: 'The interpreter is not static: specialization and the JIT',
+            },
+            {
+              type: 'p',
+              text: 'Since 3.11, CPython\'s eval loop is a **specializing adaptive interpreter** (PEP 659): after an instruction has run a few times, it is rewritten in place to a specialized variant based on the types it actually saw — a generic `BINARY_OP` that keeps adding two ints becomes an int-specific fast path, and a `LOAD_ATTR` on the same class becomes a cached slot lookup. If the types change, the instruction de-optimizes back to the generic form. This is why "monomorphic" code (the same types flowing through the same lines) is measurably faster in modern CPython, and why 3.11 was roughly 1.25x faster than 3.10 on the standard benchmark suite without any change to your code. On top of that, 3.13 added an **experimental copy-and-patch JIT** (off by default, and still experimental in current releases) that stitches pre-compiled machine-code templates for hot traces — promising, but not yet something to plan production performance around.',
+            },
+            {
+              type: 'table',
+              headers: ['Implementation', 'What it is', 'When you would pick it'],
+              rows: [
+                ['CPython', 'Reference implementation in C; bytecode VM + specializing interpreter', 'The default for essentially everything; widest C-extension compatibility'],
+                ['PyPy', 'Tracing JIT compiler written in RPython', 'Long-running, pure-Python, CPU-bound workloads; lags CPython on newest language versions'],
+                ['GraalPy', 'Python on the GraalVM (JVM ecosystem)', 'Embedding Python inside JVM applications'],
+                ['MicroPython / CircuitPython', 'Tiny subset for microcontrollers', 'Embedded and hardware projects'],
+              ],
+            },
+            {
               type: 'callout',
               kind: 'note',
-              text: 'CPython is the reference implementation and what \'Python\' means by default. PyPy uses JIT compilation for large CPU-bound speedups on long-running programs; Jython/IronPython target the JVM/.NET; MicroPython targets embedded/microcontroller environments. Interviews almost always mean CPython unless stated otherwise — its GIL, memory model, and bytecode are CPython-specific, not guaranteed by the language spec itself.',
+              text: 'CPython is the reference implementation and what \'Python\' means by default. Interviews almost always mean CPython unless stated otherwise — its GIL, reference counting, memory model and bytecode are CPython implementation details, not guarantees of the language spec. Code that depends on them (for example, relying on a file being closed the instant its last reference disappears) can behave differently on PyPy.',
+            },
+            {
+              type: 'callout',
+              kind: 'tip',
+              text: 'Since 3.13 the interactive REPL (`python` with no arguments) is a new PyPy-derived implementation with multi-line editing, colored output, history browsing, and paste mode (F3) — so you no longer need IPython just to edit a multi-line function interactively. Set `PYTHON_BASIC_REPL=1` to fall back to the old one.',
+            },
+          ],
+        },
+        {
+          id: 'modern-python-releases',
+          title: 'Modern Python: What Changed from 3.11 to 3.15',
+          summary:
+            'Python ships a new feature release every October with roughly five years of support each — knowing what landed in the last few releases is how you tell current best practice from tutorials written for a Python that no longer exists.',
+          keyPoints: [
+            'Annual cadence (PEP 602): a new 3.x every October, about two years of bugfix releases followed by security-only fixes, roughly five years in total.',
+            '3.11–3.12 were the "speed and ergonomics" releases: specializing interpreter, exception groups and `except*`, `TaskGroup`, `tomllib`, the `type` statement and PEP 695 generics, f-string grammar formalization.',
+            '3.13 brought the new interactive REPL, an experimental free-threaded (no-GIL) build, an experimental JIT, and removed the "dead batteries" modules (PEP 594).',
+            '3.14 made free-threading officially supported (still optional), added template strings (t-strings), deferred evaluation of annotations, `concurrent.interpreters`, and Zstandard compression.',
+            '3.15 (October 2026) adds explicit lazy imports, UTF-8 as the default text encoding, a built-in `frozendict`, and a new `profiling` package with a sampling profiler.',
+          ],
+          blocks: [
+            {
+              type: 'p',
+              text: 'A senior Python engineer is expected to know roughly which version introduced which capability, because it dictates what your code can use: a library that supports 3.10+ cannot use `TaskGroup` or `except*`; a service pinned to 3.12 cannot rely on t-strings. Python follows a predictable **annual release cycle** (PEP 602): each October brings a new minor version, which gets about two years of full bugfix releases and then security-only patches until roughly five years after release. The practical rule for applications is to run the newest release your dependencies support; the practical rule for libraries is to support every version that is not end-of-life.',
+            },
+            {
+              type: 'table',
+              headers: ['Version', 'Headline changes worth knowing'],
+              rows: [
+                ['3.11 (2022)', 'Specializing adaptive interpreter (~25% faster on average), fine-grained error locations in tracebacks, `ExceptionGroup` and `except*`, `asyncio.TaskGroup` and `asyncio.timeout()`, `tomllib`, `typing.Self`'],
+                ['3.12 (2023)', 'PEP 695 `type` statement and `class Box[T]:` generic syntax, PEP 701 f-strings (any nesting/quotes allowed), `@typing.override`, inlined comprehensions (PEP 709), per-interpreter GIL in the C API, `distutils` removed'],
+                ['3.13 (2024)', 'New colorful multi-line REPL, experimental free-threaded build (`python3.13t`), experimental JIT, PEP 594 dead batteries removed (`cgi`, `telnetlib`, `crypt`, ...), `TypeIs`, TypeVar defaults, `copy.replace()`'],
+                ['3.14 (2025)', 'Free-threaded build officially supported (PEP 779), template strings / t-strings (PEP 750), deferred annotations + `annotationlib` (PEP 649/749), `concurrent.interpreters` (PEP 734), `compression.zstd`, asyncio introspection CLI, `forkserver` default start method on Linux'],
+                ['3.15 (2026)', '`lazy import` (PEP 810), UTF-8 mode on by default (PEP 686), built-in `frozendict` (PEP 814), `profiling.sampling` sampling profiler (PEP 799), unpacking in comprehensions (PEP 798)'],
+              ],
+            },
+            {
+              type: 'code',
+              language: 'python',
+              title: 'a few modern idioms side by side',
+              code: `# 3.12+: generic syntax and type aliases without TypeVar boilerplate
+type UserId = int
+def first[T](items: list[T]) -> T | None:
+    return items[0] if items else None
+
+# 3.11+: structured concurrency and exception groups
+import asyncio
+async def main():
+    try:
+        async with asyncio.TaskGroup() as tg:
+            tg.create_task(fetch("a"))
+            tg.create_task(fetch("b"))
+    except* TimeoutError as eg:
+        print(f"{len(eg.exceptions)} fetches timed out")
+
+# 3.14+: template strings return a Template object, not a str
+from string.templatelib import Template
+name = "O'Brien"
+t = t"SELECT * FROM users WHERE name = {name}"
+assert isinstance(t, Template)   # a library can now escape/parameterize {name} safely
+
+# 3.15+: explicit lazy imports -- the module loads on first attribute access
+lazy import json`,
+            },
+            {
+              type: 'heading',
+              text: 'Deprecated and removed: things you should stop writing',
+            },
+            {
+              type: 'table',
+              headers: ['Old habit', 'Status', 'Use instead'],
+              rows: [
+                ['`from distutils import ...`', 'Removed in 3.12', '`setuptools`, or a modern build backend declared in `pyproject.toml`'],
+                ['`import cgi`, `telnetlib`, `crypt`, `imp`, `asynchat`, `asyncore`, `smtpd`', 'Removed (3.12/3.13)', '`email`/`multipart` parsing, `asyncio`, `importlib`, third-party packages'],
+                ['`datetime.utcnow()` / `utcfromtimestamp()`', 'Deprecated since 3.12', '`datetime.now(timezone.utc)` — aware datetimes'],
+                ['`python setup.py install` / `setup.py develop`', 'Deprecated by setuptools', '`pip install .` / `uv pip install -e .` with `pyproject.toml`'],
+                ['`typing.List`, `Dict`, `Optional[X]`', 'Still work, but legacy', '`list[int]`, `dict[str, int]`, `X | None`'],
+                ['`asyncio.get_event_loop()` at top level to run code', 'Discouraged', '`asyncio.run(main())`'],
+                ['`open(path)` assuming the platform encoding', 'UTF-8 by default from 3.15', 'Always pass `encoding="utf-8"` explicitly in code that must run on older versions'],
+              ],
+            },
+            {
+              type: 'callout',
+              kind: 'warning',
+              text: 'Free-threading and the JIT are the two features most often over-claimed. As of the current releases, the default CPython download still has a GIL; the free-threaded build is a separate, officially supported but opt-in interpreter (`python3.14t`), and the JIT remains experimental. Say exactly that in an interview rather than "Python removed the GIL".',
             },
           ],
         },
@@ -139,7 +245,41 @@ print(x)              # [1, 2, 3, 4]  <- unaffected; x still points at the origi
             {
               type: 'callout',
               kind: 'pitfall',
-              text: 'Never use `is` to compare values (`if x is 5` instead of `if x == 5`) — it can silently work by accident thanks to integer/string interning and then silently break for a value just outside the interned range. Use `is` only for identity checks that are meant to be identity checks: `if x is None`, `if x is True`.',
+              text: 'Never use `is` to compare values (`if x is 5` instead of `if x == 5`) — it can silently work by accident thanks to integer/string interning and then silently break for a value just outside the interned range. Use `is` only for identity checks that are meant to be identity checks: `if x is None`, `if x is True`. Since 3.8 the compiler even emits a `SyntaxWarning` for `is` against a literal.',
+            },
+            {
+              type: 'heading',
+              text: 'Under the hood: what an object actually is in CPython',
+            },
+            {
+              type: 'p',
+              text: 'Every CPython object begins with a common header (`PyObject`): a **reference count** and a pointer to its **type object**. The type object is what defines behavior — which `__add__`, `__eq__`, `__hash__` and so on apply — which is why "dynamic typing" really means "types belong to objects, not to names". A name in a function is just a slot in the frame\'s local array holding a pointer; rebinding it changes the pointer, never the object. An `int` is a full heap object (28 bytes for a small one on 64-bit builds, per `sys.getsizeof(1)`), which is the fundamental reason a Python `list` of a million ints uses far more memory than a NumPy array of the same values: the list holds a million pointers to a million separate objects, while the array holds raw machine integers contiguously.',
+            },
+            {
+              type: 'code',
+              language: 'python',
+              title: 'inspecting identity, type and references',
+              code: `import sys
+
+x = [1, 2, 3]
+y = x
+print(id(x) == id(y))        # True -- same object
+print(type(x), type(type(x)))  # <class 'list'> <class 'type'>
+print(sys.getrefcount(x))    # 3: x, y, and the temporary argument reference
+
+# copying is always explicit
+import copy
+nested = [[1, 2], [3, 4]]
+shallow = nested.copy()          # new outer list, SAME inner lists
+deep = copy.deepcopy(nested)     # recursively independent
+shallow[0].append(99)
+print(nested[0])                 # [1, 2, 99] -- shared inner list mutated
+print(deep[0])                   # [1, 2]`,
+            },
+            {
+              type: 'callout',
+              kind: 'note',
+              text: 'Since 3.12 (PEP 683) some objects — `None`, `True`, `False`, small ints, interned strings — are **immortal**: their refcount is pinned and never changes. That removes cache-line contention on hot shared objects (important for multiple interpreters and the free-threaded build), and is why `sys.getrefcount(None)` now returns a huge constant instead of a meaningful number.',
             },
           ],
         },
@@ -209,6 +349,49 @@ print(active - admins)          # {1} -- difference`,
               type: 'callout',
               kind: 'tip',
               text: 'A quick rule of thumb: reach for a `dict` the moment you catch yourself writing a loop to find something "matching an ID"; reach for a `set` the moment you catch yourself writing `if x not in some_list` inside a loop (that\'s O(n) per check on a list, O(1) average on a set).',
+            },
+            {
+              type: 'heading',
+              text: 'Complexity cheat sheet and how the implementations really work',
+            },
+            {
+              type: 'table',
+              headers: ['Operation', 'list', 'dict / set', 'collections.deque'],
+              rows: [
+                ['append / add at end', 'O(1) amortized', 'O(1) average', 'O(1)'],
+                ['insert / pop at front', 'O(n) — shifts every element', 'n/a', 'O(1)'],
+                ['index by position', 'O(1)', 'n/a', 'O(n) in the middle'],
+                ['`x in container`', 'O(n) scan', 'O(1) average', 'O(n) scan'],
+                ['delete by key / value', 'O(n)', 'O(1) average', 'O(n)'],
+                ['sort', 'O(n log n) Timsort/Powersort, stable', 'n/a (use `sorted()`)', 'n/a'],
+              ],
+            },
+            {
+              type: 'p',
+              text: 'A `list` is a dynamic array of pointers that over-allocates when it grows (roughly 12.5% extra plus a constant), which is why `append` is amortized O(1) but inserting at index 0 is O(n). A `dict` (since 3.6) is a **compact hash table**: a dense array of `(hash, key, value)` entries in insertion order, plus a sparse index table of small integers pointing into it. That design is why dicts preserve insertion order for free and use 20–25% less memory than the older layout. Collisions are resolved by open addressing with perturbed probing, so a pathological set of keys with colliding hashes degrades lookups toward O(n) — this is exactly why `str`/`bytes` hashing is randomized per process (`PYTHONHASHSEED`), to defeat hash-flooding denial-of-service attacks.',
+            },
+            {
+              type: 'code',
+              language: 'python',
+              title: 'the specialized containers in collections',
+              code: `from collections import deque, Counter, defaultdict, OrderedDict
+
+queue = deque(maxlen=1000)        # O(1) at both ends; bounded ring buffer
+queue.append("job-1"); queue.popleft()
+
+words = "the cat and the hat".split()
+Counter(words).most_common(1)     # [('the', 2)]
+
+graph = defaultdict(list)         # missing keys get a fresh list automatically
+graph["a"].append("b")
+
+lru = OrderedDict()               # still useful: move_to_end() + popitem(last=False)
+lru["k"] = 1; lru.move_to_end("k")`,
+            },
+            {
+              type: 'callout',
+              kind: 'pitfall',
+              text: 'Using `list.pop(0)` or `list.insert(0, x)` as a queue is a classic accidental O(n²): each call shifts every remaining element. Use `collections.deque` for FIFO queues, `heapq` for priority queues, and `queue.Queue`/`asyncio.Queue` when producers and consumers are in different threads or tasks.',
             },
           ],
         },
@@ -294,6 +477,71 @@ while i < len(users):
             print(f"key pressed: {key}")
         case _:
             print("unhandled event")`,
+            },
+            {
+              type: 'p',
+              text: 'Patterns are tried top to bottom and the first match wins. Mapping patterns match if the listed keys exist (extra keys are ignored); sequence patterns match lists and tuples but deliberately **not** `str`/`bytes`; class patterns like `Point(x=0, y=y)` call `isinstance` and then read attributes, with positional sub-patterns mapped through the class\'s `__match_args__` (generated automatically by `@dataclass`). Under the hood `match` compiles to ordinary type checks and attribute/key lookups — it is not a jump table, so a long `match` over plain values is no faster than an `if`/`elif` chain; choose it for readability on *shaped* data.',
+            },
+            {
+              type: 'code',
+              language: 'python',
+              title: 'class patterns, or-patterns, and the capture-pattern trap',
+              code: `from dataclasses import dataclass
+from enum import Enum
+
+@dataclass
+class Point:
+    x: float
+    y: float
+
+class Color(Enum):
+    RED = 1
+    GREEN = 2
+
+def describe(shape):
+    match shape:
+        case Point(0, 0):
+            return "origin"
+        case Point(x, 0) | Point(0, x):      # or-pattern; both arms must bind the same names
+            return f"on an axis at {x}"
+        case [Point() as a, Point() as b]:   # sequence of exactly two Points
+            return f"segment {a} -> {b}"
+        case Color.RED:                      # dotted name = value pattern (compared with ==)
+            return "red"
+        case _:
+            return "unknown"
+
+RED = "red"
+match "blue":
+    case RED:        # BUG: a bare name is a CAPTURE pattern -- matches anything
+        print("matched")   # prints, and rebinds RED = "blue"!`,
+            },
+            {
+              type: 'callout',
+              kind: 'pitfall',
+              text: 'A bare name in a `case` is always a capture pattern that matches anything and binds it — it never compares against an existing variable. To match a constant, use a dotted name (`Color.RED`, `http.HTTPStatus.OK`), a literal, or a guard (`case x if x == RED`). Linters such as ruff flag the unreachable cases this creates.',
+            },
+            {
+              type: 'heading',
+              text: 'Assignment expressions (the walrus operator)',
+            },
+            {
+              type: 'code',
+              language: 'python',
+              title: ':= binds inside an expression (3.8+)',
+              code: `import re
+
+# avoids computing the match twice, or a separate assignment line
+if (m := re.match(r"(\\d+)-(\\d+)", "10-20")) is not None:
+    start, end = map(int, m.groups())
+
+# read fixed-size chunks until EOF
+with open("data.bin", "rb") as f:
+    while chunk := f.read(65536):
+        process(chunk)
+
+# keep the computed value from a comprehension filter
+results = [y for x in data if (y := expensive(x)) is not None]`,
             },
           ],
         },
@@ -396,6 +644,51 @@ opts = {"name": "alice", "age": 30}
 def greet(name, age): return f"{name} is {age}"
 greet(**opts)                      # unpacks the dict into keyword args`,
             },
+            {
+              type: 'heading',
+              text: 'Positional-only, keyword-only, and designing a signature',
+            },
+            {
+              type: 'p',
+              text: 'A full Python signature has five kinds of parameters in a fixed order: positional-only (before `/`, 3.8+), positional-or-keyword, `*args`, keyword-only (after `*` or `*args`), and `**kwargs`. Library authors use `/` to keep the freedom to rename a parameter without breaking callers, and `*` to force callers to name boolean flags and options so call sites stay readable (`connect(host, timeout=5, retry=True)` rather than `connect(host, 5, True)`).',
+            },
+            {
+              type: 'code',
+              language: 'python',
+              title: 'all parameter kinds in one signature',
+              code: `def fetch(url, /, method="GET", *, timeout=10.0, retries=0, **headers):
+    ...
+
+fetch("https://x.io", "POST", timeout=2.0, Authorization="Bearer t")
+# fetch(url="https://x.io")      TypeError: url is positional-only
+# fetch("https://x.io", "GET", 5) TypeError: timeout is keyword-only`,
+            },
+            {
+              type: 'heading',
+              text: 'How closures are actually implemented',
+            },
+            {
+              type: 'p',
+              text: 'The compiler decides scope statically. When an inner function references a variable of its enclosing function, both functions store that variable in a **cell object** instead of a plain local slot; the inner function keeps a tuple of those cells in `__closure__`. That is why closures capture *variables*, not *values* — the classic late-binding trap below happens because every lambda shares the same cell for `i`, which holds its final value by the time any of them is called.',
+            },
+            {
+              type: 'code',
+              language: 'python',
+              title: 'late binding in closures',
+              code: `callbacks = [lambda: i for i in range(3)]
+print([cb() for cb in callbacks])     # [2, 2, 2] -- all share the variable i
+
+callbacks = [lambda i=i: i for i in range(3)]   # default arg captures the VALUE now
+print([cb() for cb in callbacks])     # [0, 1, 2]
+
+import functools
+callbacks = [functools.partial(print, i) for i in range(3)]  # also binds values eagerly`,
+            },
+            {
+              type: 'callout',
+              kind: 'tip',
+              text: 'Function calls are comparatively expensive in CPython (frame setup, argument binding), though 3.11 made Python-to-Python calls much cheaper by avoiding C-stack recursion. In a hot loop, hoisting an attribute lookup into a local (`append = out.append`) or replacing a per-item call with a built-in like `sum()`/`map()` still pays off — but only after a profiler has shown the loop matters.',
+            },
           ],
         },
         {
@@ -408,7 +701,10 @@ greet(**opts)                      # unpacks the dict into keyword args`,
             'f-strings (`f"{expr}"`) embed live expressions directly in the string literal, evaluated at runtime — the modern default over `%`-formatting or `.format()`.',
             'A format spec after `:` controls width, alignment, precision, and type — `f"{price:,.2f}"`, `f"{pct:.1%}"`, `f"{n:>10}"`.',
             'The `=` debug specifier (`f"{value=}"`, 3.8+) prints both the expression text and its value — invaluable for quick debug prints.',
-            'Repeated string concatenation in a loop (`s += chunk`) is O(n²) because each `+=` builds a new string; prefer `"".join(chunks)` for building a large string from many pieces.',
+            'Repeated string concatenation in a loop (`s += chunk`) is O(n²) in the general case because each `+=` builds a new string; prefer `"".join(chunks)` for building a large string from many pieces.',
+            'Since 3.12 (PEP 701) f-strings are parsed by the real grammar: you can reuse the same quote type inside, nest arbitrarily, and use backslashes and comments in the expressions.',
+            'Template strings (`t"..."`, 3.14+) look like f-strings but produce a `Template` object that keeps the literal parts and interpolated values separate, so a library can escape or parameterize them — the safe answer to SQL/HTML injection via f-strings.',
+            'Text (`str`, Unicode code points) and binary data (`bytes`) are distinct types; convert explicitly with `.encode()`/`.decode()` and always name the encoding.',
           ],
           blocks: [
             {
@@ -448,8 +744,66 @@ result = "".join(chunks)`,
             },
             {
               type: 'callout',
+              kind: 'note',
+              text: 'CPython has an implementation-specific optimization: when the left-hand string of `s += t` has no other references, it may be resized in place, so a naive loop is sometimes not quadratic in practice. Do not rely on it — it silently disappears as soon as another name references the string, and it does not exist on PyPy. `"".join()` is the portable O(n) answer.',
+            },
+            {
+              type: 'callout',
               kind: 'tip',
-              text: 'f-strings are also generally faster than `str.format()` or `%`-formatting, since the expressions are compiled directly into the bytecode rather than parsed out of a format-string mini-language at runtime — prefer them by default in modern Python (3.6+).',
+              text: 'f-strings are also generally faster than `str.format()` or `%`-formatting, since the expressions are compiled directly into the bytecode rather than parsed out of a format-string mini-language at runtime — prefer them by default. The one place to keep `%`-style is the `logging` module: `log.info("user %s", user_id)` defers formatting until a handler actually emits the record, which matters on hot paths with debug logging disabled.',
+            },
+            {
+              type: 'heading',
+              text: 'Template strings (t-strings, 3.14+): f-strings you can safely post-process',
+            },
+            {
+              type: 'p',
+              text: 'An f-string is evaluated immediately into a plain `str` — by the time a database driver or HTML renderer receives it, there is no way to tell which parts came from your code and which came from an untrusted user. That is the root cause of injection bugs like `cursor.execute(f"... WHERE name = \'{name}\'")`. PEP 750 template strings use the same syntax with a `t` prefix but evaluate to a `string.templatelib.Template`: an object holding the static string parts and a sequence of `Interpolation` objects (each with `.value`, `.expression`, `.conversion` and `.format_spec`). The consumer decides how to combine them — escape for HTML, turn into `?` placeholders for SQL, or structure a log record.',
+            },
+            {
+              type: 'code',
+              language: 'python',
+              title: 'processing a t-string safely',
+              code: `from string.templatelib import Template, Interpolation
+import html
+
+def render_html(template: Template) -> str:
+    parts = []
+    for item in template:                      # iterates static strings and Interpolations in order
+        if isinstance(item, Interpolation):
+            parts.append(html.escape(str(item.value)))
+        else:
+            parts.append(item)                 # literal text written by the developer
+    return "".join(parts)
+
+user_input = "<script>alert('x')</script>"
+print(render_html(t"<p>Hello, {user_input}!</p>"))
+# <p>Hello, &lt;script&gt;alert(&#x27;x&#x27;)&lt;/script&gt;!</p>
+
+def to_sql(template: Template) -> tuple[str, list]:
+    sql, params = [], []
+    for item in template:
+        if isinstance(item, Interpolation):
+            sql.append("?"); params.append(item.value)
+        else:
+            sql.append(item)
+    return "".join(sql), params
+
+to_sql(t"SELECT * FROM users WHERE name = {user_input}")
+# ('SELECT * FROM users WHERE name = ?', ["<script>alert('x')</script>"])`,
+            },
+            {
+              type: 'callout',
+              kind: 'warning',
+              text: 'A `Template` deliberately has no `__str__` that renders it — `str(t"...")` gives a debug representation, not the joined text. That friction is intentional: it forces every consumer to make an explicit escaping decision. Until your libraries accept templates natively, keep using parameterized queries (`cursor.execute(sql, params)`) rather than any kind of string building.',
+            },
+            {
+              type: 'heading',
+              text: 'str vs bytes, and encodings',
+            },
+            {
+              type: 'p',
+              text: 'Internally CPython stores each `str` in the narrowest fixed-width form that fits its widest character (1, 2 or 4 bytes per code point, PEP 393), which keeps indexing O(1) while keeping ASCII text compact — but means one emoji in a large string can quadruple its memory. Anything crossing a process boundary (files, sockets, HTTP) is bytes; decode at the edge, work in `str`, encode at the edge. Python 3.15 finally makes UTF-8 the default for `open()` without an `encoding=` argument (PEP 686); on earlier versions the default was the locale encoding, which is still `cp1252`-style on many Windows machines and a classic "works on Linux, breaks on Windows" bug.',
             },
           ],
         },
@@ -462,7 +816,7 @@ result = "".join(chunks)`,
             'List comprehension `[expr for x in iterable if cond]` builds a full list eagerly, in memory.',
             'Dict and set comprehensions use the same shape with `{}` — `{k: v for ...}` and `{expr for ...}` respectively.',
             'A generator expression `(expr for x in iterable)` looks identical but with `()` — it produces values lazily instead of building the whole collection upfront.',
-            'Comprehensions run in their own scope and are typically faster than the equivalent explicit loop, since the iteration is implemented in C internally.',
+            'Comprehensions isolate their loop variable (it does not leak into the enclosing scope) and are typically faster than the equivalent explicit loop, because they use a dedicated `LIST_APPEND` opcode instead of looking up and calling `.append` each iteration — and since 3.12 (PEP 709) they are inlined rather than compiled as a hidden nested function.',
             'Nesting more than two `for` clauses, or mixing several `if`s, usually means an explicit loop would be more readable — comprehensions optimize for a *single* clear transformation.',
           ],
           blocks: [
@@ -483,7 +837,7 @@ sum(lazy_squares)   # consumes it one value at a time, no intermediate list ever
             },
             {
               type: 'p',
-              text: 'The list-comprehension form is equivalent to a `for` loop that appends to a list, but is usually both more concise and measurably faster, since the loop machinery runs in CPython\'s C implementation rather than as interpreted bytecode issuing repeated `.append()` calls. The **generator-expression** form (parentheses instead of brackets) looks almost identical but is fundamentally different: it produces a generator object that yields values one at a time on demand, rather than eagerly building and holding the entire result in memory — see the dedicated generators topic for when that distinction actually matters.',
+              text: 'The list-comprehension form is equivalent to a `for` loop that appends to a list, but is usually both more concise and measurably faster. The loop is still ordinary bytecode — the win comes from the compiler emitting a specialized `LIST_APPEND` instruction rather than a repeated attribute lookup plus method call for `result.append(x)`, and (since 3.12, PEP 709) from inlining the comprehension instead of creating and calling a hidden function object each time. The **generator-expression** form (parentheses instead of brackets) looks almost identical but is fundamentally different: it produces a generator object that yields values one at a time on demand, rather than eagerly building and holding the entire result in memory — see the dedicated generators topic for when that distinction actually matters.',
             },
             {
               type: 'code',
@@ -505,6 +859,33 @@ for row in matrix:
               type: 'callout',
               kind: 'pitfall',
               text: 'A comprehension used purely for its side effects (calling a function per item and discarding the result, e.g. `[print(x) for x in items]`) builds and immediately throws away a list for no reason — use a plain `for` loop when you don\'t actually need the resulting collection.',
+            },
+            {
+              type: 'heading',
+              text: 'Scope subtleties and when to pass a generator straight to a function',
+            },
+            {
+              type: 'code',
+              language: 'python',
+              title: 'details that come up in code review',
+              code: `x = "outer"
+squares = [x * 2 for x in range(3)]
+print(x)            # "outer" -- the comprehension variable does not leak (unlike Python 2)
+
+# a generator expression as the ONLY argument needs no extra parentheses
+total = sum(order.amount for order in orders)
+has_admin = any(u.role == "admin" for u in users)   # short-circuits on the first True
+
+# class bodies are NOT enclosing scopes for comprehensions (except the first iterable)
+class Config:
+    base = 10
+    values = [base * i for i in range(3)]    # NameError: name 'base' is not defined
+    # fix: compute outside the class body, or use a classmethod/helper function`,
+            },
+            {
+              type: 'callout',
+              kind: 'tip',
+              text: 'Feed `any()`, `all()`, `sum()`, `min()`, `max()`, `"".join()` and `dict()` a generator expression rather than a list comprehension when you only consume the result once: `any()`/`all()` short-circuit without building the rest, and memory stays flat. (`"".join()` is the exception where a list is slightly faster, because join materializes its input anyway.)',
             },
           ],
         },
@@ -556,7 +937,38 @@ def add_item(item, items=None):
             {
               type: 'callout',
               kind: 'pitfall',
-              text: 'Never use a mutable object (list, dict, set) as a default argument value unless you specifically intend it to be shared and mutated across every call — which is almost never what you want. The same trap applies to `@dataclass` fields: use `field(default_factory=list)`, never `items: list = []`.',
+              text: 'Never use a mutable object (list, dict, set) as a default argument value unless you specifically intend it to be shared and mutated across every call — which is almost never what you want. The same trap applies to `@dataclass` fields: use `field(default_factory=list)`, never `items: list = []` (dataclasses actually raise `ValueError` for a bare list/dict/set default for exactly this reason).',
+            },
+            {
+              type: 'heading',
+              text: 'Variations of the same root cause',
+            },
+            {
+              type: 'code',
+              language: 'python',
+              title: 'when None is a legitimate value, and other definition-time evaluations',
+              code: `# If None is a meaningful argument, use a private sentinel object instead
+_MISSING = object()
+
+def get_setting(key, default=_MISSING):
+    try:
+        return settings[key]
+    except KeyError:
+        if default is _MISSING:
+            raise
+        return default          # caller may legitimately pass default=None
+
+# Same definition-time trap with non-mutable but time-dependent defaults
+from datetime import datetime, timezone
+def log_event(msg, at=datetime.now(timezone.utc)):   # BUG: frozen at import time
+    ...
+def log_event_fixed(msg, at=None):
+    at = at or datetime.now(timezone.utc)`,
+            },
+            {
+              type: 'callout',
+              kind: 'tip',
+              text: 'Let tooling catch this for you: ruff\'s flake8-bugbear rules (`B006` mutable argument default, `B008` function call in default argument) flag both variants at lint time, which is far cheaper than discovering cross-request state leakage in production.',
             },
           ],
         },
@@ -633,6 +1045,42 @@ def slow_query_2():
               text: 'A decorator that itself takes arguments (`@retry(times=3)`) needs one extra layer of nesting: the outer function takes the decorator\'s own arguments and returns the actual decorator. Beyond hand-written decorators, know the built-in ones cold: `@staticmethod` (no implicit `self`/`cls`, just a regular function namespaced on the class), `@classmethod` (receives the class as `cls` instead of an instance — used for alternate constructors), and `@functools.lru_cache` (memoizes a function\'s return value per distinct set of arguments, trading memory for avoiding recomputation).',
             },
             {
+              type: 'code',
+              language: 'python',
+              title: 'a parameterized retry decorator, plus caching built-ins',
+              code: `import functools, time, random
+
+def retry(times: int = 3, exceptions: tuple[type[Exception], ...] = (ConnectionError,)):
+    def decorator(func):                     # the real decorator
+        @functools.wraps(func)
+        def wrapper(*args, **kwargs):
+            for attempt in range(1, times + 1):
+                try:
+                    return func(*args, **kwargs)
+                except exceptions:
+                    if attempt == times:
+                        raise
+                    time.sleep(0.1 * 2 ** attempt + random.random() / 10)  # backoff + jitter
+        return wrapper
+    return decorator
+
+@retry(times=5)                              # retry(times=5) runs first and returns decorator
+def call_payment_api(): ...
+
+@functools.cache                             # unbounded memoization (3.9+), = lru_cache(maxsize=None)
+def fib(n: int) -> int:
+    return n if n < 2 else fib(n - 1) + fib(n - 2)
+
+class Report:
+    @functools.cached_property               # computed once per instance, then stored in __dict__
+    def totals(self): ...`,
+            },
+            {
+              type: 'callout',
+              kind: 'pitfall',
+              text: '`@lru_cache`/`@cache` on an instance method caches on `self` as part of the key, so the cache holds a strong reference to every instance ever passed in — a memory leak for long-lived processes. Cache a module-level function, use `cached_property`, or key the cache on an explicit identifier instead. Also remember cached arguments must be hashable, and a cached mutable return value is shared between callers.',
+            },
+            {
               type: 'heading',
               text: 'Context managers and `with`',
             },
@@ -676,6 +1124,32 @@ def db_transaction(connection):
 with db_transaction(conn) as tx:
     tx.execute("INSERT INTO orders ...")
     # commit happens automatically on success; rollback + close on any exception`,
+            },
+            {
+              type: 'p',
+              text: 'Two `__exit__` details matter in production. First, if `__exit__` returns a truthy value, the exception is **suppressed** — that is how `contextlib.suppress(FileNotFoundError)` works, and an accidental `return True` in a hand-written `__exit__` silently swallows errors. Second, when you need to enter a *variable* number of context managers (open N files, acquire N locks) use `contextlib.ExitStack`, which unwinds them in reverse order even if entering one of them fails halfway through. Since 3.10 you can also group several managers in parentheses across lines: `with (open(a) as f, open(b) as g):`.',
+            },
+            {
+              type: 'code',
+              language: 'python',
+              title: 'ExitStack and async context managers',
+              code: `from contextlib import ExitStack, asynccontextmanager
+
+def merge_files(paths: list[str], out_path: str) -> None:
+    with ExitStack() as stack:
+        files = [stack.enter_context(open(p, encoding="utf-8")) for p in paths]
+        out = stack.enter_context(open(out_path, "w", encoding="utf-8"))
+        for f in files:
+            out.writelines(f)
+    # every file is closed here, in reverse order, even if one open() failed
+
+@asynccontextmanager
+async def lifespan(app):
+    pool = await create_pool()     # startup
+    try:
+        yield {"pool": pool}
+    finally:
+        await pool.close()         # shutdown -- FastAPI/Starlette accept exactly this shape`,
             },
           ],
         },
@@ -764,7 +1238,189 @@ for error in error_lines("huge_log.txt"):
             {
               type: 'callout',
               kind: 'note',
-              text: 'The `itertools` module (`chain`, `islice`, `groupby`, `takewhile`, `tee`) is the standard toolkit for composing lazy pipelines out of generators without ever materializing an intermediate list — worth knowing by name even if not memorized in full.',
+              text: 'The `itertools` module (`chain`, `islice`, `groupby`, `takewhile`, `tee`, and `batched` since 3.12) is the standard toolkit for composing lazy pipelines out of generators without ever materializing an intermediate list — worth knowing by name even if not memorized in full.',
+            },
+            {
+              type: 'heading',
+              text: 'How a generator suspends: frames, send(), and yield from',
+            },
+            {
+              type: 'p',
+              text: 'Calling a generator function runs none of its body; it creates a generator object that owns a suspended **frame** (instruction pointer plus local variables). Each `next()` resumes that frame until the next `yield`, which hands a value out and freezes the frame again. Because the frame lives on the heap rather than the C stack, a generator can be paused indefinitely at near-zero cost — and this is exactly the machinery coroutines were originally built on. `gen.send(value)` resumes the frame and makes the paused `yield` expression evaluate to `value`; `gen.throw(exc)` raises inside it; `gen.close()` raises `GeneratorExit` at the paused point so `finally` blocks run. `yield from sub` delegates the whole protocol to a sub-generator and evaluates to the sub-generator\'s `return` value.',
+            },
+            {
+              type: 'code',
+              language: 'python',
+              title: 'send(), yield from, and itertools.batched',
+              code: `def running_average():
+    total = count = 0
+    average = None
+    while True:
+        value = yield average        # receives whatever is sent in
+        total += value
+        count += 1
+        average = total / count
+
+avg = running_average()
+next(avg)                 # "prime" it: run to the first yield
+avg.send(10)              # 10.0
+avg.send(20)              # 15.0
+
+def flatten(nested):
+    for item in nested:
+        if isinstance(item, list):
+            yield from flatten(item)   # delegate to the recursive sub-generator
+        else:
+            yield item
+
+list(flatten([1, [2, [3, 4]], 5]))     # [1, 2, 3, 4, 5]
+
+from itertools import batched           # 3.12+
+for chunk in batched(range(10), 4):
+    print(chunk)                        # (0, 1, 2, 3) (4, 5, 6, 7) (8, 9)`,
+            },
+            {
+              type: 'callout',
+              kind: 'pitfall',
+              text: 'Generators are single-use: iterating an exhausted generator silently yields nothing, so passing one to two consumers (`total = sum(g); count = len(list(g))`) gives a wrong answer with no error. Also, a generator that is abandoned mid-iteration only runs its `finally`/`with` cleanup when it is closed or garbage-collected — wrap resource-holding generators with `contextlib.closing()` or consume them fully if cleanup timing matters.',
+            },
+          ],
+        },
+        {
+          id: 'python-data-model',
+          title: 'The Python Data Model — Dunder Methods & Protocols',
+          summary:
+            'Built-in syntax and functions (`len()`, `in`, `+`, `==`, `with`, `for`, `hash()`) are all hooks into special methods on the object\'s type — implementing the right dunders is how your own classes become first-class citizens.',
+          keyPoints: [
+            'Syntax dispatches to special methods looked up on the *type*, not the instance: `len(x)` calls `type(x).__len__(x)`, `a + b` tries `a.__add__(b)` and then `b.__radd__(a)`.',
+            'Return `NotImplemented` (not `False`, not an exception) from a binary operator or comparison you cannot handle, so Python can try the reflected operation on the other operand.',
+            'Defining `__eq__` without `__hash__` makes instances unhashable — the two must agree: equal objects must have equal hashes.',
+            '`__repr__` is for developers (unambiguous, ideally eval-able); `__str__` is for end users and falls back to `__repr__`.',
+            'Python favors protocols (duck typing) over inheritance: implement `__iter__` and you are iterable; implement `__len__` and `__getitem__` and you are a sequence. `collections.abc` gives you mixin methods for free.',
+          ],
+          blocks: [
+            {
+              type: 'p',
+              text: 'The "data model" (documented in the language reference) is the contract between the interpreter and your objects. When CPython executes `len(cart)`, it does not look for a method called `len` — it reads a C-level slot on `type(cart)` that is populated from your class\'s `__len__`. Because the lookup goes through the **type**, assigning `instance.__len__ = ...` on an instance has no effect on `len(instance)`; special methods must be defined on the class. This design is why built-ins are fast (a slot read, not a dictionary lookup) and why consistent protocols work across every type in the language.',
+            },
+            {
+              type: 'table',
+              headers: ['You write', 'Python calls', 'Typical use'],
+              rows: [
+                ['`repr(x)`, `str(x)`, `f"{x}"`', '`__repr__`, `__str__`, `__format__`', 'debugging output, user-facing text'],
+                ['`x == y`, `x < y`', '`__eq__`, `__lt__` (and reflected forms)', 'value equality, sorting'],
+                ['`hash(x)`, `x in some_set`', '`__hash__` (+ `__eq__`)', 'dict keys, set membership'],
+                ['`len(x)`, `bool(x)`', '`__len__`, `__bool__` (falls back to `__len__`)', 'containers, truthiness'],
+                ['`x[k]`, `x[k] = v`, `k in x`', '`__getitem__`, `__setitem__`, `__contains__`', 'custom collections'],
+                ['`for i in x`', '`__iter__` (falls back to `__getitem__` with 0, 1, 2...)', 'iteration'],
+                ['`x + y`, `y + x`, `x += y`', '`__add__`, `__radd__`, `__iadd__`', 'numeric/vector types'],
+                ['`with x:`', '`__enter__`, `__exit__`', 'resource management'],
+                ['`x(...)`', '`__call__`', 'callable objects, stateful functions'],
+              ],
+            },
+            {
+              type: 'code',
+              language: 'python',
+              title: 'a well-behaved value type',
+              code: `from functools import total_ordering
+import math
+
+@total_ordering                          # derives <=, >, >= from __eq__ and __lt__
+class Money:
+    __slots__ = ("amount", "currency")
+
+    def __init__(self, amount: int, currency: str):
+        self.amount = amount              # minor units (cents) -- never floats for money
+        self.currency = currency
+
+    def __repr__(self) -> str:
+        return f"Money({self.amount!r}, {self.currency!r})"
+
+    def __str__(self) -> str:
+        return f"{self.amount / 100:,.2f} {self.currency}"
+
+    def __eq__(self, other: object) -> bool:
+        if not isinstance(other, Money):
+            return NotImplemented         # let Python try other.__eq__ / fall back to identity
+        return (self.amount, self.currency) == (other.amount, other.currency)
+
+    def __hash__(self) -> int:            # consistent with __eq__
+        return hash((self.amount, self.currency))
+
+    def __lt__(self, other: "Money") -> bool:
+        if not isinstance(other, Money) or other.currency != self.currency:
+            return NotImplemented
+        return self.amount < other.amount
+
+    def __add__(self, other: "Money") -> "Money":
+        if not isinstance(other, Money) or other.currency != self.currency:
+            return NotImplemented
+        return Money(self.amount + other.amount, self.currency)
+
+    def __radd__(self, other):            # makes sum([...]) work: sum starts with 0
+        return self if other == 0 else NotImplemented
+
+    def __bool__(self) -> bool:
+        return self.amount != 0
+
+prices = [Money(1999, "EUR"), Money(501, "EUR")]
+print(sum(prices))           # 25.00 EUR
+print(max(prices))           # 19.99 EUR (uses __lt__)
+print({Money(1, "EUR")})     # hashable, usable in sets`,
+            },
+            {
+              type: 'heading',
+              text: 'Binary operator dispatch',
+            },
+            {
+              type: 'mermaid',
+              code: `flowchart TD
+    Expr["a + b"] --> Sub{"is type(b) a subclass<br/>of type(a) that overrides __radd__?"}
+    Sub -- yes --> RFirst["try b.__radd__(a) first"]
+    Sub -- no --> Add["try a.__add__(b)"]
+    Add -- "returns a value" --> Done["result"]
+    Add -- "returns NotImplemented" --> Radd["try b.__radd__(a)"]
+    RFirst -- "NotImplemented" --> Add2["try a.__add__(b)"]
+    Add2 -- "value" --> Done
+    Add2 -- "NotImplemented" --> Err
+    RFirst -- "value" --> Done
+    Radd -- "value" --> Done
+    Radd -- "NotImplemented" --> Err["TypeError: unsupported operand"]`,
+            },
+            {
+              type: 'callout',
+              kind: 'pitfall',
+              text: 'Overriding `__eq__` sets `__hash__ = None` implicitly, so instances silently become unhashable and fail as dict keys or set members. Conversely, a `__hash__` based on mutable fields means mutating an object after inserting it into a set makes it unfindable. Hash only on immutable identity fields — or use `@dataclass(frozen=True)`, which generates a consistent pair for you.',
+            },
+            {
+              type: 'heading',
+              text: 'Protocols over inheritance: collections.abc',
+            },
+            {
+              type: 'code',
+              language: 'python',
+              title: 'implement two methods, get a full read-only mapping',
+              code: `from collections.abc import Mapping
+
+class EnvConfig(Mapping):
+    """Read-only view over environment-style key/value pairs."""
+    def __init__(self, data: dict[str, str]):
+        self._data = dict(data)
+    def __getitem__(self, key: str) -> str:
+        return self._data[key]
+    def __iter__(self):
+        return iter(self._data)
+    def __len__(self) -> int:
+        return len(self._data)
+
+cfg = EnvConfig({"DEBUG": "1"})
+cfg.get("PORT", "8000")      # .get, .keys, .items, __contains__, __eq__ come from the ABC
+isinstance(cfg, Mapping)     # True -- works with any code written against Mapping`,
+            },
+            {
+              type: 'callout',
+              kind: 'tip',
+              text: 'Prefer composition plus a `collections.abc` base (or a `typing.Protocol`) over subclassing `dict`/`list` directly. The built-in types\' C implementations do not route their own methods through your overrides — subclassing `dict` and overriding `__setitem__` does *not* affect `update()` or the constructor — which is why `collections.UserDict` exists for the rare case you really want dict inheritance.',
             },
           ],
         },
@@ -776,7 +1432,8 @@ for error in error_lines("huge_log.txt"):
           keyPoints: [
             'Type hints (`def f(x: int) -> str`) are not enforced at runtime by the interpreter itself — they\'re metadata for static checkers (mypy, pyright) and frameworks (Pydantic, FastAPI) that explicitly validate against them.',
             'A plain type-hinted function happily runs with a wrong-typed argument at runtime with no error unless something actually checks it.',
-            'Common typing constructs: `Optional[X]`/`X | None`, `Union[A, B]`/`A | B`, generic containers (`list[int]`, `dict[str, int]`), and `Protocol` for structural typing.',
+            'Common typing constructs: `X | None` (formerly `Optional[X]`), `A | B` (formerly `Union[A, B]`), generic containers (`list[int]`, `dict[str, int]`), and `Protocol` for structural typing.',
+            'Since 3.14, annotations are evaluated lazily (PEP 649/749), so forward references no longer need quotes and `from __future__ import annotations` is no longer needed in new code.',
             '`@dataclass` auto-generates `__init__`, `__repr__`, and `__eq__` from annotated fields, reducing boilerplate for simple data-holding classes.',
             '`frozen=True` makes a dataclass immutable (raises on attribute assignment); `field(default_factory=list)` is the dataclass-native fix for the mutable-default-argument problem.',
           ],
@@ -811,12 +1468,42 @@ Add(a="2", b="3")   # Pydantic DOES check -- coerces "2" -> 2 (or raises, depend
               type: 'table',
               headers: ['Construct', 'Meaning'],
               rows: [
-                ['`Optional[int]` / `int \\| None`', 'an `int`, or `None`'],
-                ['`Union[int, str]` / `int \\| str`', 'either type is acceptable'],
-                ['`list[int]`, `dict[str, int]`', 'a generic container with typed contents (built-in generics since 3.9)'],
+                ['`int \\| None` (legacy: `Optional[int]`)', 'an `int`, or `None` — the `X \\| Y` syntax works at runtime since 3.10'],
+                ['`int \\| str` (legacy: `Union[int, str]`)', 'either type is acceptable'],
+                ['`list[int]`, `dict[str, int]`', 'a generic container with typed contents (built-in generics since 3.9; `typing.List` is legacy)'],
+                ['`Sequence[int]`, `Mapping[str, int]` from `collections.abc`', 'accept the read-only abstract type in parameters; return concrete types'],
                 ['`Protocol`', 'structural typing — "anything with this method shape", no inheritance required'],
-                ['`TypeVar`', 'a placeholder for writing a generic function/class parameterized over a type'],
+                ['`def f[T](x: T) -> T` (legacy: `TypeVar`)', 'a generic function/class parameterized over a type — PEP 695 syntax since 3.12'],
+                ['`Literal["r", "w"]`, `Final`, `ClassVar`', 'exact allowed values; a constant; a class-level (non-instance) attribute'],
               ],
+            },
+            {
+              type: 'heading',
+              text: 'When annotations are evaluated (3.14 changed this)',
+            },
+            {
+              type: 'p',
+              text: 'Historically annotations were evaluated eagerly when the `def` or `class` statement ran, which caused two problems: forward references (a method returning its own class) had to be written as strings, and importing heavy modules just for annotations cost startup time. The old workaround, `from __future__ import annotations` (PEP 563), turned every annotation into a string — which broke runtime consumers like Pydantic in subtle ways. Python 3.14 adopted **deferred evaluation** (PEP 649/749): annotations are compiled into a hidden function and only evaluated when something asks for them, via the new `annotationlib` module (`annotationlib.get_annotations(obj, format=Format.FORWARDREF)`) or `typing.get_type_hints()`. Forward references now just work without quotes, and code that never introspects annotations never pays for them.',
+            },
+            {
+              type: 'code',
+              language: 'python',
+              title: 'forward references without quotes (3.14+)',
+              code: `class Node:
+    def add_child(self, child: Node) -> Node:   # fine in 3.14: not evaluated at def time
+        ...
+
+import annotationlib
+annotationlib.get_annotations(Node.add_child)
+# {'child': <class 'Node'>, 'return': <class 'Node'>}
+
+# On 3.13 and earlier you still need quotes or the __future__ import:
+# def add_child(self, child: "Node") -> "Node": ...`,
+            },
+            {
+              type: 'callout',
+              kind: 'warning',
+              text: 'Do not read `obj.__annotations__` directly in library code — its behavior differs across versions and under the `__future__` import. Use `annotationlib.get_annotations()` (3.14+) or `inspect.get_annotations()`/`typing.get_type_hints()` on older versions. New code targeting 3.14+ should generally drop `from __future__ import annotations`.',
             },
             {
               type: 'heading',
@@ -846,6 +1533,199 @@ p1 == p2        # True -- __eq__ is auto-generated, compares field values
 class Order:
     id: int
     items: list[str] = field(default_factory=list)   # NOT items: list = [] -- same trap as before`,
+            },
+            {
+              type: 'code',
+              language: 'python',
+              title: 'the production-grade dataclass options',
+              code: `from dataclasses import dataclass, replace
+
+@dataclass(frozen=True, slots=True, kw_only=True)   # slots/kw_only since 3.10
+class RetryPolicy:
+    attempts: int = 3
+    backoff_s: float = 0.5
+    retry_on: tuple[type[Exception], ...] = (ConnectionError,)
+
+    def __post_init__(self):                  # validation hook after generated __init__
+        if self.attempts < 1:
+            raise ValueError("attempts must be >= 1")
+
+default = RetryPolicy()
+aggressive = replace(default, attempts=10)   # copy-with-changes; copy.replace() also works (3.13+)`,
+            },
+            {
+              type: 'table',
+              headers: ['Tool', 'Validates at runtime?', 'Best for'],
+              rows: [
+                ['`@dataclass`', 'No (only `__post_init__` checks you write)', 'internal domain objects, zero dependencies'],
+                ['`typing.NamedTuple`', 'No', 'lightweight immutable records that must also be tuples'],
+                ['`attrs`', 'Optional validators', 'richer dataclass features, slots by default'],
+                ['Pydantic `BaseModel`', 'Yes — parses and coerces', 'untrusted input at boundaries: HTTP bodies, config, messages'],
+                ['`msgspec.Struct`', 'Yes, during decode', 'very high-throughput JSON/MessagePack serialization'],
+              ],
+            },
+            {
+              type: 'callout',
+              kind: 'tip',
+              text: 'Validate at the edges, trust in the core: parse untrusted data once into a Pydantic model at the boundary, then pass plain dataclasses (or the model) inward. Re-validating the same data in every layer costs CPU and spreads validation rules around the codebase.',
+            },
+          ],
+        },
+        {
+          id: 'advanced-typing',
+          title: 'Advanced Typing — Generics, Protocols & Static Checkers in Practice',
+          summary:
+            'Modern Python typing is a full gradual type system: PEP 695 generics, structural Protocols, precise narrowing, and typed decorators let a checker catch real bugs — if you adopt it deliberately and know where it stops.',
+          keyPoints: [
+            'PEP 695 (3.12+): `class Box[T]:`, `def first[T](xs: list[T]) -> T`, and `type Alias = ...` replace most `TypeVar`/`Generic`/`TypeAlias` boilerplate, with lazily evaluated aliases.',
+            '`Protocol` gives structural ("duck") typing that the checker verifies — accept the smallest interface you actually use rather than a concrete class.',
+            'Narrowing: `isinstance`, `is None` checks, `match`, and user-defined `TypeIs` (3.13) functions let the checker refine a union inside a branch.',
+            '`ParamSpec` and `Concatenate` let decorators preserve the wrapped function\'s exact signature; `@overload` describes functions whose return type depends on argument types.',
+            'Gradual typing means `Any` silently switches checking off; run the checker in strict mode on new code and ratchet strictness up over time on legacy code.',
+          ],
+          blocks: [
+            {
+              type: 'p',
+              text: 'Typing in Python is **gradual**: un-annotated code is treated as `Any`, and the checker only verifies what you annotate. That makes adoption incremental, but it also means a codebase can look typed while most of it is unchecked. The value appears when annotations are precise enough to rule out real mistakes — `None` dereferences, wrong argument order, forgetting a branch of a union — and when the checker runs in CI. The main checkers are **mypy** (the original, reference behavior), **pyright** (fast, powers VS Code\'s Pylance), and newer Rust-based checkers such as Astral\'s `ty` and Meta\'s Pyrefly; they agree on the typing spec but differ on inference details, so pick one per project and pin its version.',
+            },
+            {
+              type: 'code',
+              language: 'python',
+              title: 'PEP 695 generics and type aliases (3.12+)',
+              code: `from collections.abc import Callable, Iterable, Sized
+
+type JSON = dict[str, JSON] | list[JSON] | str | int | float | bool | None   # recursive alias
+type Handler[E] = Callable[[E], None]                                       # generic alias
+
+class Stack[T]:
+    def __init__(self) -> None:
+        self._items: list[T] = []
+    def push(self, item: T) -> None:
+        self._items.append(item)
+    def pop(self) -> T:
+        return self._items.pop()
+
+def first[T](items: Iterable[T], default: T) -> T:
+    return next(iter(items), default)
+
+def biggest[N: (int, float)](a: N, b: N) -> N:     # constrained type parameter
+    return a if a >= b else b
+
+def longest[S: Sized](items: list[S]) -> S: ...     # upper bound: any Sized subtype
+
+s = Stack[int]()
+s.push("x")      # checker error: "str" is not assignable to "int"`,
+            },
+            {
+              type: 'heading',
+              text: 'Protocols: structural typing the checker can verify',
+            },
+            {
+              type: 'code',
+              language: 'python',
+              title: 'depend on behavior, not on a class hierarchy',
+              code: `from typing import Protocol, runtime_checkable
+
+class SupportsClose(Protocol):
+    def close(self) -> None: ...
+
+class Repository[T](Protocol):
+    def get(self, id: int) -> T | None: ...
+    def add(self, item: T) -> None: ...
+
+def shutdown(resources: list[SupportsClose]) -> None:
+    for r in resources:
+        r.close()
+
+shutdown([open("a.txt"), socket_conn, db_pool])   # none of them inherit SupportsClose
+
+@runtime_checkable           # opt-in isinstance() support -- checks method NAMES only
+class Drawable(Protocol):
+    def draw(self) -> None: ...`,
+            },
+            {
+              type: 'heading',
+              text: 'Narrowing, TypedDict, and exhaustiveness',
+            },
+            {
+              type: 'code',
+              language: 'python',
+              title: 'make the checker prove every case is handled',
+              code: `from typing import Literal, TypedDict, NotRequired, TypeIs, assert_never
+
+class Created(TypedDict):
+    kind: Literal["created"]
+    id: int
+
+class Deleted(TypedDict):
+    kind: Literal["deleted"]
+    id: int
+    reason: NotRequired[str]
+
+type Event = Created | Deleted
+
+def handle(event: Event) -> str:
+    match event["kind"]:
+        case "created":
+            return f"new {event['id']}"
+        case "deleted":
+            return f"gone {event['id']}"
+        case _ as unreachable:
+            assert_never(unreachable)   # checker errors here if a new kind is added and not handled
+
+def is_str_list(val: list[object]) -> TypeIs[list[str]]:   # 3.13+, narrows in both branches
+    return all(isinstance(x, str) for x in val)`,
+            },
+            {
+              type: 'heading',
+              text: 'Typing decorators and overloads',
+            },
+            {
+              type: 'code',
+              language: 'python',
+              title: 'ParamSpec keeps the wrapped signature intact',
+              code: `import functools, time
+from collections.abc import Callable
+from typing import Literal, overload
+
+def timed[**P, R](func: Callable[P, R]) -> Callable[P, R]:   # PEP 695 ParamSpec syntax
+    @functools.wraps(func)
+    def wrapper(*args: P.args, **kwargs: P.kwargs) -> R:
+        start = time.perf_counter()
+        try:
+            return func(*args, **kwargs)
+        finally:
+            print(f"{func.__name__}: {time.perf_counter() - start:.3f}s")
+    return wrapper
+
+@timed
+def charge(customer_id: str, cents: int) -> bool: ...
+charge("c1", "10")      # checker error: still sees (customer_id: str, cents: int)
+
+@overload
+def load(path: str, *, raw: Literal[True]) -> bytes: ...
+@overload
+def load(path: str, *, raw: Literal[False] = ...) -> str: ...
+def load(path: str, *, raw: bool = False) -> str | bytes:
+    data = open(path, "rb").read()
+    return data if raw else data.decode("utf-8")`,
+            },
+            {
+              type: 'table',
+              headers: ['Feature', 'Since', 'Why it matters'],
+              rows: [
+                ['`typing.Self`', '3.11', 'methods returning their own (sub)class, fluent builders'],
+                ['`@typing.override`', '3.12', 'checker errors if the base method you think you override was renamed'],
+                ['TypeVar defaults (PEP 696)', '3.13', '`class Response[T = bytes]:` — sensible default type parameter'],
+                ['`TypeIs`', '3.13', 'precise user-defined narrowing (preferred over `TypeGuard`)'],
+                ['`ReadOnly` TypedDict items', '3.13', 'mark keys that must not be mutated'],
+                ['Deferred annotations', '3.14', 'forward references without quotes, no import-time cost'],
+              ],
+            },
+            {
+              type: 'callout',
+              kind: 'pitfall',
+              text: 'Typing has limits a senior engineer should name: it cannot see through heavy dynamism (`getattr` by computed name, monkeypatching, metaclass magic), `cast()` and `# type: ignore` are unchecked promises, and untyped third-party libraries degrade everything they touch to `Any`. Enable `warn_unused_ignores`/`reportUnnecessaryTypeIgnoreComment` and prefer narrowing over `cast` so the escape hatches stay visible.',
             },
           ],
         },
@@ -953,6 +1833,50 @@ def load_config(path):
               kind: 'pitfall',
               text: 'A bare `except:` (no exception type at all) catches *everything*, including `KeyboardInterrupt` and `SystemExit` — it can make a program impossible to stop with Ctrl+C and routinely masks real bugs (typos, `AttributeError`s) as if they were the expected failure case. Always name the exception type(s) you intend to handle.',
             },
+            {
+              type: 'heading',
+              text: 'Exception groups and except* (3.11+)',
+            },
+            {
+              type: 'p',
+              text: 'Concurrent code can fail in several places at once: three of ten tasks in a `TaskGroup` raise, or a batch validator finds five bad records. A single exception cannot represent that, so 3.11 added `ExceptionGroup` (a container of exceptions, itself an exception) and the `except*` syntax. Each `except*` clause handles the *subset* of the group matching its type and lets the rest continue propagating — several `except*` clauses can run for one group, unlike plain `except`, where at most one clause runs.',
+            },
+            {
+              type: 'code',
+              language: 'python',
+              title: 'handling several failures at once',
+              code: `def validate_all(records):
+    errors = []
+    for i, r in enumerate(records):
+        try:
+            validate(r)
+        except ValueError as e:
+            e.add_note(f"record index {i}")     # 3.11+: extra context shown in the traceback
+            errors.append(e)
+    if errors:
+        raise ExceptionGroup("validation failed", errors)
+
+try:
+    validate_all(batch)
+except* ValueError as eg:                       # eg is an ExceptionGroup of ONLY the ValueErrors
+    for e in eg.exceptions:
+        log.warning("bad record: %s %s", e, e.__notes__)
+except* KeyError:
+    log.error("missing field somewhere")         # can ALSO run for the same group`,
+            },
+            {
+              type: 'heading',
+              text: 'Cost model and production practice',
+            },
+            {
+              type: 'p',
+              text: 'Since 3.11 CPython uses **zero-cost exceptions**: entering a `try` block costs nothing at runtime (the handlers are looked up in a side table only when something is raised), so wrapping code in `try` is free on the happy path and EAFP style ("easier to ask forgiveness than permission" — `try: d[k] except KeyError`) is idiomatic. Actually *raising* is still comparatively expensive (allocating the exception and building the traceback), so do not use exceptions for control flow in a tight loop where the exceptional case is common. In services, log an exception exactly once with full context (`log.exception(...)` inside the handler records the traceback), at the layer that decides what to do about it — catching, logging and re-raising at every layer produces the same stack trace five times in your log aggregator.',
+            },
+            {
+              type: 'callout',
+              kind: 'tip',
+              text: 'Use `raise ... from None` to deliberately hide an implementation-detail cause (for example, translating an internal `KeyError` into a clean `UnknownUserError` in a public API), and `raise` with no arguments inside an `except` block to re-raise the current exception with its original traceback intact.',
+            },
           ],
         },
         {
@@ -1014,7 +1938,177 @@ from . import validators              # "." = the current package`,
             {
               type: 'callout',
               kind: 'note',
-              text: 'A virtual environment (`python -m venv .venv`) gives each project its own isolated `site-packages`, so installing a dependency for one project never affects another\'s — the standard baseline for any real Python project, and usually the first thing to check when "it works on my machine" turns out to be a version mismatch.',
+              text: 'A virtual environment (`python -m venv .venv`, or `uv venv`) gives each project its own isolated `site-packages`, so installing a dependency for one project never affects another\'s — the standard baseline for any real Python project, and usually the first thing to check when "it works on my machine" turns out to be a version mismatch. See the packaging and tooling topic for the modern workflow.',
+            },
+            {
+              type: 'heading',
+              text: '`__main__`, `python -m`, and import-time cost',
+            },
+            {
+              type: 'p',
+              text: 'When you run `python app.py`, that file is executed as a module named `__main__`, not `app` — so `if __name__ == "__main__":` guards code that should run only as a script, and importing `app` from elsewhere creates a *second*, separate module object (a subtle source of "my singleton exists twice" bugs). Prefer `python -m package.module`: it puts the current directory (not the script\'s folder) on `sys.path` and resolves relative imports correctly. Import time is also a real production concern for CLIs and serverless cold starts — `python -X importtime -c "import myapp"` prints a per-module breakdown of where startup time goes.',
+            },
+            {
+              type: 'code',
+              language: 'python',
+              title: 'deferring expensive imports',
+              code: `# 3.15+: explicit lazy imports (PEP 810) -- bound now, loaded on first use
+lazy import pandas as pd
+lazy from myapp.reports import build_report
+
+def export(rows):
+    return pd.DataFrame(rows)        # pandas is actually imported here, the first time
+
+# Any version: import inside the function that needs it
+def export_legacy(rows):
+    import pandas as pd              # cached in sys.modules after the first call
+    return pd.DataFrame(rows)
+
+# Type-only imports that should never run at import time
+from typing import TYPE_CHECKING
+if TYPE_CHECKING:
+    from myapp.models import Order   # seen by the type checker, skipped at runtime`,
+            },
+            {
+              type: 'callout',
+              kind: 'pitfall',
+              text: 'Naming your own file after a standard-library or installed module (`random.py`, `email.py`, `requests.py`) shadows the real one, because the script directory comes first on `sys.path` — producing baffling `AttributeError: module \'random\' has no attribute \'randint\'` errors. Recent CPython versions detect this case and print a hint suggesting the file is shadowing the module.',
+            },
+          ],
+        },
+        {
+          id: 'packaging-and-tooling',
+          title: 'Packaging & Tooling — pyproject.toml, uv, ruff and Lockfiles',
+          summary:
+            'Modern Python projects are declared in `pyproject.toml`, managed by a fast resolver such as uv, linted and formatted by ruff, type-checked in CI, and deployed from a lockfile — replacing the old `setup.py` + `requirements.txt` + five-tools stack.',
+          keyPoints: [
+            '`pyproject.toml` is the single standard config file: project metadata and dependencies (PEP 621), the build backend (PEP 517/518), and tool settings for ruff, mypy, pytest and others.',
+            'uv (from Astral, written in Rust) replaces pip, pip-tools, virtualenv, pyenv and pipx with one fast tool: it installs Python versions, creates venvs, resolves, locks and syncs.',
+            'Separate *abstract* dependencies (ranges in `pyproject.toml`) from *concrete* pins (a lockfile with exact versions and hashes) — libraries publish ranges, applications deploy locks.',
+            'ruff replaces flake8, isort, pyupgrade and black-style formatting with one very fast linter/formatter; pair it with a type checker and pytest in CI.',
+            'Use a `src/` layout so tests run against the installed package rather than accidentally importing from the working directory.',
+          ],
+          blocks: [
+            {
+              type: 'p',
+              text: 'For years Python packaging meant `setup.py` (arbitrary code executed at install time), `requirements.txt` (a list with no distinction between direct and transitive dependencies), `virtualenv`, `pip-tools` and `pyenv` stitched together. The ecosystem has converged on standards instead: **`pyproject.toml`** declares what the project is, a **build backend** (hatchling, setuptools, flit-core, uv_build, maturin for Rust extensions) turns it into a wheel, and an installer/resolver produces a reproducible environment. **uv** has become the de facto fast front-end for that workflow; Poetry, PDM and Hatch are mature alternatives built on the same standards, and plain `pip` + `venv` still works everywhere.',
+            },
+            {
+              type: 'code',
+              language: 'toml',
+              title: 'pyproject.toml for a service',
+              code: `[project]
+name = "orders-service"
+version = "1.4.0"
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi>=0.115",
+    "pydantic>=2.7,<3",
+    "httpx>=0.27",
+]
+
+[dependency-groups]            # PEP 735: dev-only groups, not published as extras
+dev = ["pytest>=8", "ruff", "mypy"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "SIM", "ASYNC"]   # pycodestyle, pyflakes, isort, bugbear, pyupgrade...
+
+[tool.mypy]
+strict = true
+
+[tool.pytest.ini_options]
+addopts = "-ra --strict-markers"
+testpaths = ["tests"]`,
+            },
+            {
+              type: 'code',
+              language: 'bash',
+              title: 'the everyday uv workflow',
+              code: `uv python install 3.14          # fetch a managed CPython build
+uv init orders-service          # scaffold pyproject.toml
+uv add fastapi "pydantic>=2.7"  # add deps, update uv.lock, sync .venv
+uv add --dev pytest ruff        # into the dev dependency group
+uv run pytest                   # run inside the project env (auto-syncs first)
+uv lock --upgrade-package httpx # bump one transitive pin deliberately
+uv sync --locked                # CI/prod: fail if the lockfile is out of date
+uvx ruff check --fix .          # run a tool in an ephemeral env (like pipx)
+uv export --format requirements-txt > requirements.txt   # for tools that need it`,
+            },
+            {
+              type: 'heading',
+              text: 'Ranges vs pins: the rule that prevents most dependency incidents',
+            },
+            {
+              type: 'table',
+              headers: ['Artifact', 'Contains', 'Who uses it'],
+              rows: [
+                ['`pyproject.toml` dependencies', 'Compatible ranges for *direct* dependencies only', 'Libraries (published to PyPI) and apps alike'],
+                ['`uv.lock` / `poetry.lock` / `pylock.toml` (PEP 751)', 'Exact versions + hashes for the whole transitive tree', 'Applications and CI; never shipped by libraries'],
+                ['`requirements.txt` with `==` pins and `--hash`', 'Legacy flat lock format', 'Older deploy pipelines, Docker images'],
+              ],
+            },
+            {
+              type: 'p',
+              text: 'A **library** must declare loose ranges (`pydantic>=2.7,<3`) — pinning exact versions in a library makes it impossible to install alongside anything else that needs a different patch release. An **application** must deploy from a lockfile so that the bits tested in CI are byte-for-byte the bits in production, and should upgrade those pins deliberately (Dependabot/Renovate PRs) rather than implicitly on the next build. Hashes in the lock also protect against a compromised or re-uploaded package on the index — part of basic supply-chain hygiene, alongside trusted publishing to PyPI and scanning with `pip-audit`.',
+            },
+            {
+              type: 'code',
+              language: 'dockerfile',
+              title: 'a reproducible, cache-friendly container build',
+              code: `FROM python:3.14-slim
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
+WORKDIR /app
+ENV UV_COMPILE_BYTECODE=1 UV_LINK_MODE=copy
+# 1) dependencies only -- this layer is cached until the lockfile changes
+COPY pyproject.toml uv.lock ./
+RUN uv sync --locked --no-dev --no-install-project
+# 2) then the application code
+COPY src ./src
+RUN uv sync --locked --no-dev
+CMD ["/app/.venv/bin/uvicorn", "orders_service.main:app", "--host", "0.0.0.0"]`,
+            },
+            {
+              type: 'callout',
+              kind: 'tip',
+              text: 'Pin the uv image to a specific version tag in real pipelines rather than `latest`, for the same reproducibility reason you lock dependencies. And remember that wheels are platform-specific for packages with C/Rust extensions: lock and build on the same OS/architecture (and libc — musl-based Alpine images often force slow source builds) that you deploy to.',
+            },
+            {
+              type: 'heading',
+              text: 'Project layout',
+            },
+            {
+              type: 'code',
+              language: 'text',
+              title: 'src layout',
+              code: `orders-service/
+  pyproject.toml
+  uv.lock
+  src/
+    orders_service/
+      __init__.py
+      main.py
+      py.typed        # marker: this package ships inline type hints (PEP 561)
+  tests/
+    conftest.py
+    test_orders.py`,
+            },
+            {
+              type: 'callout',
+              kind: 'note',
+              text: 'With a flat layout, `pytest` run from the repo root can import `orders_service` straight from the working directory and pass even though the *installed* package is broken (missing files in the wheel, wrong package data). The `src/` layout forces tests to import the installed (editable) package, so packaging mistakes surface in CI instead of in production.',
+            },
+            {
+              type: 'callout',
+              kind: 'pitfall',
+              text: 'Never `sudo pip install` into the system interpreter. Modern Linux distributions mark it "externally managed" (PEP 668) and refuse, because overwriting distro-owned packages can break OS tools. Use a venv per project and `uv tool install`/`pipx` for global CLI tools.',
             },
           ],
         },
@@ -1027,7 +2121,9 @@ from . import validators              # "." = the current package`,
             'Only one thread executes Python bytecode at a time within a process — CPU-bound threads take turns, they don\'t run in parallel.',
             'The GIL is released during blocking I/O, so threading (and asyncio) genuinely help I/O-bound workloads.',
             'CPU-bound work needs multiprocessing (separate GIL per process) or a native extension that releases the GIL internally (e.g. NumPy).',
-            'Python 3.13+ free-threaded builds (PEP 703) are an experimental, opt-in step toward removing the GIL for genuine multi-core parallelism.',
+            'Free-threaded CPython (PEP 703) arrived as an experimental build in 3.13 and became officially supported — but still optional, not the default — in 3.14 (PEP 779); it runs as a separate `python3.14t` interpreter.',
+            'The GIL never made *your* code thread-safe: it protects the interpreter\'s internals, but a compound operation like `counter += 1` can still be interrupted between bytecodes. Use locks or queues regardless of build.',
+            'Other parallelism options: `ProcessPoolExecutor` (pickling cost, separate memory), subinterpreters via `concurrent.interpreters`/`InterpreterPoolExecutor` (3.14), and native code that releases the GIL.',
           ],
           blocks: [
             {
@@ -1039,8 +2135,73 @@ from . import validators              # "." = the current package`,
               items: [
                 '**CPU-bound work** → use **multiprocessing** (separate processes, each with its own GIL and memory space, genuinely parallel on multiple cores) or offload to a native extension/library that releases the GIL internally (NumPy, for instance, releases it during heavy array operations).',
                 '**I/O-bound work** → use **threading** or, better in modern Python, **asyncio** (single-threaded cooperative concurrency, avoiding thread overhead and context-switching cost entirely for I/O-bound workloads).',
-                '**Python 3.13+ free-threaded builds** (PEP 703, an opt-in "no-GIL" build) are worth naming as the forward-looking answer to "will this always be true" — an experimental, opt-in build variant as of its introduction, not yet the default, but it signals where CPython is heading for genuine multi-core parallelism without multiprocessing\'s memory-isolation overhead.',
+                '**Free-threaded builds** (PEP 703) are the forward-looking answer to "will this always be true": experimental in 3.13, officially supported but still opt-in from 3.14 (PEP 779). They give genuine multi-core parallelism for pure-Python threads without multiprocessing\'s memory-isolation and pickling overhead — at a single-threaded cost the 3.14 docs put at roughly 5–10%, and only if every C extension you import has been made thread-safe.',
               ],
+            },
+            {
+              type: 'heading',
+              text: 'How the GIL actually works',
+            },
+            {
+              type: 'p',
+              text: 'The GIL exists mainly because CPython\'s memory management is built on **non-atomic reference counting**: every `Py_INCREF`/`Py_DECREF` is a plain integer update, and without a global lock two threads could corrupt a refcount and free a live object. A thread holding the GIL runs bytecode until it blocks on I/O (C code explicitly releases the GIL around `read()`, `recv()`, `sleep()`, compression, hashing of large buffers, and so on) or until another thread has been waiting longer than the **switch interval** (`sys.getswitchinterval()`, 5 ms by default), at which point the running thread is asked to drop the GIL at the next safe point. That forced switching is why CPU-bound threads do not merely fail to speed up but can get slightly *slower*: they spend time handing the lock back and forth and trashing each other\'s CPU caches.',
+            },
+            {
+              type: 'code',
+              language: 'python',
+              title: 'the GIL does not make compound operations atomic',
+              code: `import threading
+
+counter = 0
+def work():
+    global counter
+    for _ in range(1_000_000):
+        counter += 1          # LOAD, ADD, STORE: a thread switch can land between them
+
+threads = [threading.Thread(target=work) for _ in range(4)]
+for t in threads: t.start()
+for t in threads: t.join()
+print(counter)                # may be < 4_000_000 -- lost updates, even WITH the GIL
+
+lock = threading.Lock()
+def safe_work():
+    global counter
+    for _ in range(1_000_000):
+        with lock:
+            counter += 1      # correct on both GIL and free-threaded builds`,
+            },
+            {
+              type: 'heading',
+              text: 'Free-threaded CPython: what changes',
+            },
+            {
+              type: 'p',
+              text: 'The free-threaded build replaces the GIL with a set of finer-grained techniques: **biased reference counting** (the owning thread updates a refcount cheaply; other threads use atomic operations), **immortal objects** for shared singletons, per-object locks inside built-in containers so a `list` or `dict` is never corrupted by concurrent access, deferred reference counting for frequently shared objects such as functions and modules, and the `mimalloc` allocator. Built-in operations on a single container stay internally consistent, but **your** read-modify-write sequences still need locks, exactly as above. C extensions must declare free-threading support; importing one that does not re-enables the GIL at runtime (with a warning) unless you force it off with `PYTHON_GIL=0` / `-X gil=0`.',
+            },
+            {
+              type: 'code',
+              language: 'bash',
+              title: 'checking which build you are on',
+              code: `uv python install 3.14t                # or the "free-threaded" option in the python.org installer
+python3.14t -c "import sys; print(sys._is_gil_enabled())"   # False on a free-threaded build
+python3.14t -X gil=1 app.py            # force the GIL back on for comparison
+python -c "import sysconfig; print(sysconfig.get_config_var('Py_GIL_DISABLED'))"  # 1 = free-threaded build`,
+            },
+            {
+              type: 'table',
+              headers: ['Approach', 'True CPU parallelism?', 'Shared memory?', 'Main cost'],
+              rows: [
+                ['`threading` (GIL build)', 'No for Python code; yes inside GIL-releasing C code', 'Yes', 'GIL contention; race conditions'],
+                ['`threading` (free-threaded build)', 'Yes', 'Yes', '~5–10% single-thread slowdown; extension compatibility; you own thread safety'],
+                ['`multiprocessing` / `ProcessPoolExecutor`', 'Yes', 'No (pickle data across; `shared_memory` for buffers)', 'Process startup, serialization, memory per worker'],
+                ['`concurrent.interpreters` (3.14)', 'Yes (one GIL per interpreter)', 'Very limited', 'Young API; many extensions not yet compatible'],
+                ['`asyncio`', 'No', 'Yes, single thread', 'Needs async-native libraries end to end'],
+              ],
+            },
+            {
+              type: 'callout',
+              kind: 'warning',
+              text: 'Since 3.14 the default `multiprocessing` start method on Linux changed from `fork` to `forkserver` (macOS and Windows already used `spawn`). Code that relied on `fork` silently inheriting module-level globals, open connections or lambdas in child processes can now fail with pickling errors — pass picklable, top-level functions and explicit arguments, and guard the entry point with `if __name__ == "__main__":`.',
             },
             {
               type: 'mermaid',
@@ -1097,7 +2258,8 @@ print("processes:", time.perf_counter() - start)  # meaningfully faster on a mul
             'A blocking call inside an `async def` function blocks the *entire* event loop, not just that coroutine.',
             'Calling an `async def` function without `await` just creates a coroutine object that silently does nothing.',
             '`asyncio.create_task(...)` without keeping a reference risks the task being garbage-collected mid-execution.',
-            'Sequential `await` in a loop runs coroutines one at a time; `asyncio.gather(*coros)` runs them concurrently.',
+            'Sequential `await` in a loop runs coroutines one at a time; `asyncio.gather(*coros)` or, preferably since 3.11, an `asyncio.TaskGroup` runs them concurrently.',
+            'Offload unavoidable blocking calls with `asyncio.to_thread()` and CPU-bound work with a process pool via `loop.run_in_executor()`.',
           ],
           blocks: [
             {
@@ -1156,7 +2318,152 @@ async def fetch_all_concurrent(urls: list[str]) -> list[dict]:
             {
               type: 'callout',
               kind: 'pitfall',
-              text: 'A blocking call inside an `async def` handler doesn\'t just slow down that one request — it stalls every other in-flight request being served by that same event loop for the duration of the block.',
+              text: 'A blocking call inside an `async def` handler doesn\'t just slow down that one request — it stalls every other in-flight request being served by that same event loop for the duration of the block. Run with `PYTHONASYNCIODEBUG=1` (or `asyncio.run(main(), debug=True)`) in development: the loop then logs every callback that holds it for longer than 100 ms, which pinpoints the blocking call.',
+            },
+            {
+              type: 'heading',
+              text: 'What a coroutine really is',
+            },
+            {
+              type: 'p',
+              text: 'A coroutine is built on the same suspendable-frame machinery as a generator. `await x` delegates to `x.__await__()`, and somewhere at the bottom of every await chain sits a **Future** — an object representing a result that does not exist yet. When a coroutine awaits a Future that is not done, the whole chain of frames suspends and control returns to the event loop. The loop itself is a `while True` around the OS readiness API (`epoll` on Linux, `kqueue` on macOS, IOCP on Windows): it asks which sockets are ready, runs the callbacks that resolve the corresponding Futures, and resumes the **Tasks** wrapping the coroutines that were waiting on them. A `Task` is just a Future that drives a coroutine step by step. Nothing preempts a running coroutine — so between two `await`s your code is effectively atomic with respect to other tasks, which is why asyncio code rarely needs locks for simple shared state (and why a CPU-heavy loop with no `await` starves everyone).',
+            },
+            {
+              type: 'mermaid',
+              code: `flowchart LR
+    Loop["event loop<br/>(one thread)"] -->|"select/epoll:<br/>which sockets are ready?"| OS["OS kernel"]
+    OS -->|"socket 7 readable"| Loop
+    Loop -->|"set_result on the Future<br/>waiting on socket 7"| Fut["Future"]
+    Fut -->|"wake the Task"| Task["Task wrapping<br/>your coroutine"]
+    Task -->|"run until the<br/>next await"| Loop`,
+            },
+            {
+              type: 'code',
+              language: 'python',
+              title: 'offloading blocking and CPU-bound work correctly',
+              code: `import asyncio, hashlib
+from concurrent.futures import ProcessPoolExecutor
+
+def legacy_sync_call(user_id: int) -> dict: ...     # e.g. a sync SDK
+def hash_password(pw: bytes) -> bytes:               # CPU-bound
+    return hashlib.scrypt(pw, salt=b"s", n=2**14, r=8, p=1)
+
+process_pool = ProcessPoolExecutor()
+
+async def handler(user_id: int, pw: bytes):
+    # blocking I/O -> default thread pool, the loop keeps serving other tasks
+    profile = await asyncio.to_thread(legacy_sync_call, user_id)
+    # CPU-bound -> a process pool (threads would still hold the GIL for pure-Python CPU work)
+    loop = asyncio.get_running_loop()
+    digest = await loop.run_in_executor(process_pool, hash_password, pw)
+    return profile, digest`,
+            },
+            {
+              type: 'callout',
+              kind: 'tip',
+              text: 'Debugging a hung async service used to mean guessing. Since 3.14, `python -m asyncio ps <PID>` and `python -m asyncio pstree <PID>` attach to a running process and print every task with its await chain, and `asyncio.print_call_graph()` does the same from inside the program — the async equivalent of a thread dump.',
+            },
+          ],
+        },
+        {
+          id: 'asyncio-structured-concurrency',
+          title: 'Structured Concurrency — TaskGroup, Timeouts & Cancellation',
+          summary:
+            '`asyncio.TaskGroup` and `asyncio.timeout()` (3.11+) make concurrent tasks behave like a block of code: they start together, finish together, and fail together — fixing the orphaned-task and swallowed-error problems of bare `create_task` and `gather`.',
+          keyPoints: [
+            'Structured concurrency: no task outlives the block that created it. `async with asyncio.TaskGroup() as tg:` waits for every child task before exiting.',
+            'If any child raises, the TaskGroup cancels the remaining siblings and raises an `ExceptionGroup` containing all the failures — nothing is silently lost.',
+            '`asyncio.timeout(seconds)` cancels the enclosed work and raises `TimeoutError`; it composes with nested timeouts and with TaskGroup.',
+            'Cancellation is delivered as `CancelledError` at the next `await`; always let it propagate (clean up in `finally`, then re-raise) or you break timeouts and shutdown.',
+            'Bound concurrency explicitly with `asyncio.Semaphore` — unbounded fan-out to 10,000 URLs exhausts sockets, memory, and the patience of the server you are calling.',
+          ],
+          blocks: [
+            {
+              type: 'p',
+              text: '`asyncio.gather()` and fire-and-forget `create_task()` share a flaw: task lifetimes are not tied to any scope. With `gather`, if one coroutine raises, the exception propagates immediately but the other coroutines **keep running in the background**, unobserved; a bare `create_task` can be garbage-collected or fail with an error nobody ever sees ("Task exception was never retrieved"). **Structured concurrency** — an idea popularized by Trio and adopted into asyncio as `TaskGroup` in 3.11 — fixes this by making a group of tasks lexically scoped: the `async with` block does not exit until every child is done, and a failure in one child cancels its siblings.',
+            },
+            {
+              type: 'code',
+              language: 'python',
+              title: 'TaskGroup with bounded concurrency and a deadline',
+              code: `import asyncio
+import httpx
+
+async def fetch_one(client: httpx.AsyncClient, sem: asyncio.Semaphore, url: str) -> dict:
+    async with sem:                                  # at most N requests in flight
+        resp = await client.get(url)
+        resp.raise_for_status()
+        return resp.json()
+
+async def fetch_all(urls: list[str], max_in_flight: int = 20) -> list[dict]:
+    sem = asyncio.Semaphore(max_in_flight)
+    async with httpx.AsyncClient(timeout=10) as client:
+        async with asyncio.timeout(30):              # overall deadline for the whole batch
+            async with asyncio.TaskGroup() as tg:
+                tasks = [tg.create_task(fetch_one(client, sem, u)) for u in urls]
+    # reaching here means EVERY task succeeded
+    return [t.result() for t in tasks]
+
+try:
+    results = asyncio.run(fetch_all(urls))
+except* httpx.HTTPStatusError as eg:
+    print(f"{len(eg.exceptions)} requests failed with bad status")
+except* TimeoutError:
+    print("batch exceeded its 30s deadline")`,
+            },
+            {
+              type: 'table',
+              headers: ['', '`asyncio.gather()`', '`asyncio.TaskGroup`'],
+              rows: [
+                ['On first failure', 'Raises it; other awaitables keep running unless you cancel them', 'Cancels remaining siblings, waits for them, raises `ExceptionGroup`'],
+                ['Multiple failures', 'Only the first is raised (others lost) unless `return_exceptions=True`', 'All collected in the `ExceptionGroup`'],
+                ['Collect partial results despite failures', 'Yes, with `return_exceptions=True`', 'Not directly — catch inside each task if you want partial results'],
+                ['Adding tasks dynamically', 'No — fixed list up front', 'Yes, `tg.create_task()` anywhere inside the block'],
+                ['Available since', 'Forever', '3.11'],
+              ],
+            },
+            {
+              type: 'heading',
+              text: 'Cancellation semantics you must respect',
+            },
+            {
+              type: 'p',
+              text: '`task.cancel()` does not stop a task immediately; it schedules a `CancelledError` to be thrown into the coroutine at its current `await`. Timeouts, TaskGroup sibling cancellation, server shutdown and client disconnects in ASGI frameworks are all built on this. Since 3.8 `CancelledError` inherits from `BaseException`, so `except Exception:` no longer swallows it by accident — but a bare `except:` or `except BaseException:` that does not re-raise will turn a cancellation into a hang. Use `finally` (or `async with`) for cleanup, keep cleanup short, and if a critical section must not be interrupted, wrap it in `asyncio.shield()` knowing the outer await still gets cancelled.',
+            },
+            {
+              type: 'code',
+              language: 'python',
+              title: 'cooperating with cancellation',
+              code: `async def worker(queue: asyncio.Queue):
+    while True:
+        job = await queue.get()
+        try:
+            await process(job)
+        except asyncio.CancelledError:
+            await requeue(job)           # brief cleanup...
+            raise                        # ...then ALWAYS re-raise
+        except Exception:
+            log.exception("job %s failed", job.id)
+        finally:
+            queue.task_done()
+
+# Fire-and-forget done right (when a TaskGroup scope genuinely does not fit):
+background: set[asyncio.Task] = set()
+def spawn(coro):
+    task = asyncio.create_task(coro)
+    background.add(task)                     # strong reference prevents GC mid-flight
+    task.add_done_callback(background.discard)
+    return task`,
+            },
+            {
+              type: 'callout',
+              kind: 'pitfall',
+              text: 'Mixing old-style timeouts: `asyncio.wait_for(coro, timeout)` still works, but nested `wait_for` calls and manual `loop.call_later` cancellation are error-prone. Prefer `async with asyncio.timeout(...)` (or `asyncio.timeout_at()` for absolute deadlines) and pass deadlines down the call chain. And never call `asyncio.run()` from inside a running loop (for example inside a Jupyter cell or an async framework) — it raises `RuntimeError`; just `await` the coroutine instead.',
+            },
+            {
+              type: 'callout',
+              kind: 'note',
+              text: 'Alternatives worth knowing: **Trio** pioneered structured concurrency with "nurseries"; **AnyIO** provides Trio-style task groups and cancel scopes on top of either asyncio or Trio, and is what Starlette/FastAPI use internally. **uvloop** is a drop-in, libuv-based event loop implementation that is often noticeably faster for network-heavy services.',
             },
           ],
         },
@@ -1206,6 +2513,28 @@ class Service(metaclass=ValidatedMeta):
 # real-world equivalents of this pattern: ORM base classes (Django models, SQLAlchemy's
 # declarative base) use a metaclass to scan class-body annotations and turn them into
 # actual database column descriptors at class-creation time, before any instance exists.`,
+            },
+            {
+              type: 'p',
+              text: 'Before writing a metaclass, check whether a lighter hook does the job — most real uses do not need one. `__init_subclass__` (3.6+) runs on the parent whenever a subclass is created, which covers plugin registration and subclass validation; class decorators can post-process a single class; `__set_name__` lets a descriptor learn its attribute name. Metaclasses also compose badly: a class cannot have two unrelated metaclasses, so combining two frameworks that each insist on their own metaclass raises a `TypeError: metaclass conflict`.',
+            },
+            {
+              type: 'code',
+              language: 'python',
+              title: '__init_subclass__: plugin registration without a metaclass',
+              code: `class Exporter:
+    registry: dict[str, type["Exporter"]] = {}
+
+    def __init_subclass__(cls, /, format: str, **kwargs):
+        super().__init_subclass__(**kwargs)
+        if format in Exporter.registry:
+            raise TypeError(f"duplicate exporter for {format!r}")
+        Exporter.registry[format] = cls
+
+class CsvExporter(Exporter, format="csv"): ...
+class JsonExporter(Exporter, format="json"): ...
+
+Exporter.registry["csv"]     # <class 'CsvExporter'> -- registered at class-creation time`,
             },
             {
               type: 'heading',
@@ -1337,7 +2666,7 @@ class Account2:
             },
             {
               type: 'p',
-              text: 'This is exactly what the separate **generational garbage collector** (the `gc` module, running automatically alongside refcounting) exists to catch: it periodically traces object graphs looking for groups of objects that are only reachable from within themselves (a cycle) and not from any external root, and reclaims the whole group at once. It organizes tracked objects into three **generations** (new objects start in generation 0); an object that survives a collection pass is promoted to the next generation, which is scanned less frequently — the working assumption (borne out empirically) being that most objects die young, so scanning long-lived objects on every pass would be wasted work.',
+              text: 'This is exactly what the separate **generational garbage collector** (the `gc` module, running automatically alongside refcounting) exists to catch: it periodically traces object graphs looking for groups of objects that are only reachable from within themselves (a cycle) and not from any external root, and reclaims the whole group at once. It organizes tracked objects into three **generations** (new objects start in generation 0); an object that survives a collection pass is promoted to the next generation, which is scanned less frequently — the working assumption (borne out empirically) being that most objects die young, so scanning long-lived objects on every pass would be wasted work. Collections are triggered by allocation counts (`gc.get_threshold()`), not by a timer. CPython 3.14.0 briefly shipped an *incremental* collector with two generations to cut pause times, but it was reverted to the 3.13-style generational GC in 3.14.5 after reports of higher memory pressure — a good reminder that GC internals are implementation details that change between patch releases.',
             },
             {
               type: 'code',
@@ -1371,20 +2700,137 @@ class NodeFixed:
 
     def add_child(self, child):
         self.children.append(child)
-        child.parent = weakref.ref(self)   # doesn't increment self's refcount`,
+        child.parent = weakref.ref(self)   # doesn't increment self's refcount
+
+# reading it back: call the weakref -- returns None once the parent is gone
+# parent_obj = child.parent()
+# weakref.WeakValueDictionary / WeakSet build caches that don't keep entries alive`,
             },
             {
               type: 'heading',
-              text: 'A brief word on performance and profiling',
+              text: 'Finding memory leaks in a long-running process',
             },
             {
               type: 'p',
-              text: 'Beyond correctness, memory and CPU behavior are things you *measure*, not guess at. `sys.getsizeof()` and `tracemalloc` (built into the standard library) show exactly where memory is allocated; `cProfile` (`python -m cProfile -s cumulative script.py`) gives a per-function call-count and time breakdown for CPU work, and `line_profiler` narrows that down to individual lines when a single function is the bottleneck. The disciplined order is always: **measure first** (never optimize based on intuition about what "must" be slow), fix the single biggest bottleneck the profile actually shows, then re-measure — and `__slots__` (declaring a class\'s fixed set of attributes, skipping the creation of a per-instance `__dict__`) is a concrete, measurable win specifically when instantiating a simple class millions of times, at the cost of no longer being able to add arbitrary new attributes to an instance later.',
+              text: 'Pure-Python "leaks" are almost always objects that are still reachable: an ever-growing module-level cache or list, an unbounded `lru_cache`, callbacks registered and never removed, or tracebacks stored with their frames (an exception object keeps every local variable of every frame in its traceback alive). `tracemalloc` snapshots compared over time show which source lines own the growing allocations. Also note that CPython\'s small-object allocator (pymalloc) and the C library allocator do not always return freed memory to the OS, so a process\'s RSS can stay high after a spike even with no leak — a reason to recycle workers periodically (`max_requests` in Gunicorn).',
+            },
+            {
+              type: 'code',
+              language: 'python',
+              title: 'diffing tracemalloc snapshots, and __slots__ savings',
+              code: `import tracemalloc
+
+tracemalloc.start(25)                     # keep 25 frames of allocation traceback
+before = tracemalloc.take_snapshot()
+run_suspect_workload()
+after = tracemalloc.take_snapshot()
+for stat in after.compare_to(before, "lineno")[:5]:
+    print(stat)                           # top 5 lines by memory growth
+
+class PointDict:                          # each instance carries a __dict__
+    def __init__(self, x, y): self.x, self.y = x, y
+
+class PointSlots:                         # fixed attribute slots, no per-instance __dict__
+    __slots__ = ("x", "y")
+    def __init__(self, x, y): self.x, self.y = x, y
+# For millions of small objects, slots typically cut per-instance memory substantially
+# and make attribute access slightly faster -- at the cost of no dynamic attributes.`,
             },
             {
               type: 'callout',
               kind: 'tip',
-              text: 'Optimize the algorithm before the implementation — an O(n²) function profiled and micro-optimized into a slightly faster O(n²) function is almost always the wrong fix compared to finding the O(n log n) or O(n) approach in the first place. Profiling tells you *where* time goes; it doesn\'t replace choosing better data structures and algorithms.',
+              text: 'In pre-fork servers (Gunicorn with `preload_app`), call `gc.freeze()` in the parent after loading the app: it moves all existing objects into a permanent generation the collector ignores, so the GC does not touch (and thereby copy-on-write duplicate) memory pages shared with the forked workers.',
+            },
+          ],
+        },
+        {
+          id: 'performance-and-profiling',
+          title: 'Performance Engineering & Profiling',
+          summary:
+            'Fast Python comes from measuring first, then choosing better algorithms, pushing loops into C (built-ins, NumPy, Polars), caching, and only then reaching for compiled extensions — not from micro-tricks applied by intuition.',
+          keyPoints: [
+            'Measure before optimizing: `timeit` for micro-benchmarks, `cProfile` (now also `profiling.tracing`) for deterministic call counts, and sampling profilers (py-spy, Scalene, `profiling.sampling` in 3.15) for production-like workloads with low overhead.',
+            'The biggest wins are algorithmic and structural: the right data structure, batching I/O (fixing N+1 queries), and avoiding repeated work — not rewriting a loop to save one attribute lookup.',
+            'Python is slow per bytecode, fast per C call: move inner loops into built-ins, comprehensions, `str.join`, NumPy/Polars vectorized operations, or `itertools`.',
+            'When a hot path must be fast, compile it: Cython, mypyc, or a Rust extension via PyO3/maturin — and keep the boundary coarse because each Python-to-native call has overhead.',
+            'Modern CPython itself gets faster each release (specialization since 3.11, experimental JIT); upgrading the interpreter is often the cheapest optimization available.',
+          ],
+          blocks: [
+            {
+              type: 'p',
+              text: 'Every bytecode instruction in CPython costs on the order of nanoseconds of dispatch overhead, plus pointer chasing to heap-allocated objects — so an inner loop doing 100 million simple additions in pure Python takes seconds, while the same work in a NumPy vectorized call takes milliseconds because it runs one tight C loop over contiguous machine integers. That cost model drives the whole playbook: reduce the number of bytecodes executed per unit of work, and hand bulk work to code written in C or Rust.',
+            },
+            {
+              type: 'list',
+              ordered: true,
+              items: [
+                '**Define the target** — a latency budget or throughput number, measured on realistic data. Without one you cannot know when to stop.',
+                '**Profile** to find where time actually goes. Wall-clock samples for I/O-heavy services; CPU samples for compute.',
+                '**Fix the biggest item first**, usually algorithmic (O(n²) to O(n log n)), I/O shape (batch queries, connection pooling, concurrency), or redundant work (caching).',
+                '**Vectorize or delegate** remaining hot loops to built-ins/NumPy/Polars.',
+                '**Compile** only the proven hot path (Cython, mypyc, PyO3), or scale out with processes.',
+                '**Re-measure** and add a benchmark to CI so the regression cannot silently return.',
+              ],
+            },
+            {
+              type: 'code',
+              language: 'bash',
+              title: 'the profiling toolbox',
+              code: `python -m timeit -s "xs = list(range(10_000))" "sum(xs)"     # micro-benchmark
+python -m cProfile -s cumulative app.py                         # deterministic, per function
+python -m profiling.sampling run app.py                         # 3.15+ built-in sampling profiler
+py-spy top --pid 12345                                          # attach to a live process, no restart
+py-spy record -o profile.svg --pid 12345                        # flame graph from production
+scalene app.py                                                  # CPU vs native vs memory, per line
+python -X importtime -c "import app" 2> import.log              # startup cost per module`,
+            },
+            {
+              type: 'code',
+              language: 'python',
+              title: 'same result, very different cost',
+              code: `import numpy as np
+
+values = list(range(10_000_000))
+
+# 1) pure Python loop: millions of bytecodes and boxed int objects
+total = 0
+for v in values:
+    total += v * v
+
+# 2) generator into a built-in: the loop is still Python, but sum() itself runs in C
+total = sum(v * v for v in values)
+
+# 3) vectorized: one C loop over contiguous int64s -- typically orders of magnitude faster
+arr = np.arange(10_000_000, dtype=np.int64)
+total = int(np.dot(arr, arr))
+
+# Caching repeated work is often a bigger win than any of the above
+from functools import lru_cache
+@lru_cache(maxsize=4096)
+def tax_rate(region: str) -> float: ...`,
+            },
+            {
+              type: 'table',
+              headers: ['Technique', 'Typical gain', 'Cost / caveat'],
+              rows: [
+                ['Better algorithm / data structure', 'Unbounded (changes complexity class)', 'Thinking time'],
+                ['Batching I/O, fixing N+1 queries', 'Often 10–100x on request latency', 'Query/API redesign'],
+                ['Built-ins, comprehensions, `join`', 'Modest (tens of percent)', 'Almost free'],
+                ['NumPy / Polars vectorization', 'Large for numeric/tabular work', 'Data must fit array/columnar model'],
+                ['Cython / mypyc / PyO3 extension', 'Large on tight loops', 'Build complexity, platform wheels'],
+                ['`multiprocessing` / free-threaded build', 'Up to number of cores', 'Serialization or thread-safety work'],
+                ['PyPy', 'Large for long-running pure-Python code', 'C-extension compatibility, version lag'],
+              ],
+            },
+            {
+              type: 'callout',
+              kind: 'pitfall',
+              text: 'Micro-benchmarks lie easily: a `timeit` result on 100 integers says nothing about cache behavior on 10 million, and deterministic profilers like `cProfile` add per-call overhead that inflates the apparent cost of small, frequently called functions. Confirm a finding with a sampling profiler or an end-to-end benchmark before rewriting code around it.',
+            },
+            {
+              type: 'callout',
+              kind: 'tip',
+              text: 'Optimize the algorithm before the implementation — an O(n²) function micro-optimized into a slightly faster O(n²) function is almost always the wrong fix compared to finding the O(n log n) or O(n) approach in the first place. Profiling tells you *where* time goes; it doesn\'t replace choosing better data structures and algorithms.',
             },
           ],
         },
@@ -1511,6 +2957,48 @@ def test_charge_customer_success(mock_client):
               kind: 'tip',
               text: 'A `conftest.py` file in a test directory holds fixtures shared across every test file in that directory (and below), without needing to import them explicitly — pytest auto-discovers it. FastAPI\'s `app.dependency_overrides` pairs naturally with pytest fixtures to swap real dependencies (a real DB session, a real auth check) for test doubles at the framework level, not just the mock-library level.',
             },
+            {
+              type: 'heading',
+              text: 'Built-in fixtures, async tests and what to mock',
+            },
+            {
+              type: 'code',
+              language: 'python',
+              title: 'monkeypatch, tmp_path, caplog and async tests',
+              code: `import pytest
+
+def test_reads_config(tmp_path, monkeypatch):
+    cfg = tmp_path / "app.toml"                  # tmp_path: a unique temp dir per test
+    cfg.write_text("debug = true", encoding="utf-8")
+    monkeypatch.setenv("APP_CONFIG", str(cfg))   # automatically undone after the test
+    monkeypatch.setattr("myapp.clock.now", lambda: FIXED_TIME)
+    assert load_settings().debug is True
+
+def test_logs_warning(caplog):
+    with caplog.at_level("WARNING"):
+        run_job()
+    assert "retrying" in caplog.text
+
+def test_rejects_negative():
+    with pytest.raises(ValueError, match="must be positive"):
+        set_quantity(-1)
+
+# async tests need a plugin: pytest-asyncio (mark/auto mode) or anyio's pytest plugin
+@pytest.mark.asyncio
+async def test_fetch_user(async_client):
+    resp = await async_client.get("/users/1")
+    assert resp.status_code == 200`,
+            },
+            {
+              type: 'callout',
+              kind: 'pitfall',
+              text: '`patch` must target the name **where it is looked up**, not where it is defined: if `myapp/orders.py` does `from payments import charge`, patch `myapp.orders.charge`, not `payments.charge`. Prefer `create_autospec` or `patch(..., autospec=True)` so the mock rejects calls with a wrong signature — a bare `MagicMock` happily accepts any call and lets interface drift pass silently. Mock at system boundaries (HTTP, clock, payment gateway); over-mocking your own internals produces tests that pass while the real wiring is broken.',
+            },
+            {
+              type: 'callout',
+              kind: 'tip',
+              text: 'Beyond example-based tests: `hypothesis` generates inputs and shrinks failures to a minimal case (excellent for parsers and serializers), `pytest-cov` measures coverage (a signal, not a goal), and `pytest-xdist` (`-n auto`) runs tests across CPU cores — which requires tests to be order-independent and not share external state.',
+            },
           ],
         },
         {
@@ -1569,6 +3057,41 @@ async def create_user(payload: UserCreate):
               type: 'callout',
               kind: 'tip',
               text: 'A constraint change (e.g. `age: int = Field(gt=0)`) is applied and reflected everywhere derived from that model automatically — validation, serialization, and the generated docs never drift apart because they all read from the same model.',
+            },
+            {
+              type: 'heading',
+              text: 'Pydantic v2 specifics worth knowing',
+            },
+            {
+              type: 'p',
+              text: 'Current FastAPI uses **Pydantic v2**, whose validation core (`pydantic-core`) is written in Rust and is several times faster than v1. The API changed in ways that trip up old tutorials: `.dict()` became `.model_dump()`, `.parse_obj()` became `.model_validate()`, `@validator` became `@field_validator` (and `@root_validator` became `@model_validator`), `class Config` became `model_config = ConfigDict(...)`, and `orm_mode` became `from_attributes=True`. Pydantic\'s default **lax mode** coerces compatible input (`"42"` to `42`); use `strict=True` on a field or model when coercion would hide client bugs. Also note `EmailStr` requires the separate `email-validator` package.',
+            },
+            {
+              type: 'code',
+              language: 'python',
+              title: 'v2-style model with validators and config',
+              code: `from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+
+class OrderIn(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)  # reject unknown fields
+
+    sku: str = Field(min_length=3, max_length=32)
+    quantity: int = Field(gt=0, le=1000)
+    coupon: str | None = None
+
+    @field_validator("sku")
+    @classmethod
+    def sku_upper(cls, v: str) -> str:
+        return v.upper()
+
+    @model_validator(mode="after")
+    def coupon_needs_bulk(self):
+        if self.coupon and self.quantity < 10:
+            raise ValueError("coupons require quantity >= 10")
+        return self
+
+order = OrderIn.model_validate({"sku": " ab-1 ", "quantity": "12"})  # lax: "12" -> 12
+order.model_dump()           # {'sku': 'AB-1', 'quantity': 12, 'coupon': None}`,
             },
           ],
         },
@@ -1645,6 +3168,42 @@ async def read_orders(
             {
               type: 'p',
               text: 'A dependency using `yield` (as `get_db` does above) is FastAPI\'s request-scoped equivalent of a context manager: the code before `yield` runs at request start, the code after runs at request end (in a `finally`, guaranteeing cleanup even if the handler raises) — this is the standard, correct pattern for anything needing setup/teardown per request (DB sessions, transaction boundaries, acquiring/releasing a resource), mirroring `contextlib.contextmanager` applied at the request-lifecycle level.',
+            },
+            {
+              type: 'heading',
+              text: 'Modern style: Annotated dependencies and lifespan',
+            },
+            {
+              type: 'p',
+              text: 'Current FastAPI documentation recommends declaring dependencies with `Annotated` so a dependency becomes a reusable type alias, rather than a default value (`= Depends(...)`). The same style applies to `Query`, `Header` and friends. For application-wide resources (HTTP client, connection pool, ML model) use a **lifespan** async context manager; the old `@app.on_event("startup")` / `"shutdown"` hooks are deprecated.',
+            },
+            {
+              type: 'code',
+              language: 'python',
+              title: 'Annotated aliases and lifespan',
+              code: `from contextlib import asynccontextmanager
+from typing import Annotated
+from fastapi import Depends, FastAPI, Request
+import httpx
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    app.state.http = httpx.AsyncClient(timeout=10)   # created once per process
+    yield
+    await app.state.http.aclose()
+
+app = FastAPI(lifespan=lifespan)
+
+async def get_http(request: Request) -> httpx.AsyncClient:
+    return request.app.state.http
+
+CurrentUser = Annotated[User, Depends(get_current_user)]    # reusable alias
+Http = Annotated[httpx.AsyncClient, Depends(get_http)]
+
+@app.get("/me/profile")
+async def profile(user: CurrentUser, http: Http):
+    resp = await http.get(f"https://profiles.internal/{user.id}")
+    return resp.json()`,
             },
             {
               type: 'heading',
@@ -1854,7 +3413,7 @@ async def list_orders(
         {
           id: 'qa',
           title: 'Questions & Answers',
-          summary: 'Twenty Python interview questions with full-depth answers, spanning language fundamentals, the object/reference model, concurrency, framework internals, testing, and API design.',
+          summary: 'Thirty-plus Python interview questions with full-depth answers, spanning language fundamentals, the object/reference model, the data model, concurrency (GIL, asyncio, free-threading), typing, tooling, framework internals, testing, performance, and API design.',
           qa: [
             {
               question: 'Explain the LEGB rule, and give a concrete example where it produces a surprising result.',
@@ -1955,6 +3514,66 @@ async def list_orders(
               question: 'Why must dict keys and set members be hashable, and what does that rule out?',
               answer:
                 'A `dict`/`set` is backed by a hash table: inserting or looking up a key computes `hash(key)` to determine which bucket it belongs in, giving average O(1) lookup instead of scanning every entry linearly. That only works correctly if a key\'s hash never changes for as long as it\'s stored in the table — if it did, the table could no longer find the entry in the bucket it originally computed, silently corrupting lookups. This is why only immutable (or at least implementation-guaranteed-stable-hash) objects are hashable: `int`, `str`, `tuple` of hashable elements, and `frozenset` all qualify, while `list`, `dict`, and plain `set` are explicitly unhashable, because Python enforces this constraint upfront with a `TypeError` rather than allowing the silent corruption that mutating a key in place would eventually cause.',
+            },
+            {
+              question: 'Is the GIL gone in current Python? What exactly is true today about free-threading?',
+              answer:
+                'Not by default. Free-threaded CPython (PEP 703) shipped as an experimental opt-in build in 3.13 and became officially supported, but still optional, in 3.14 (PEP 779); you run it as a separate interpreter (`python3.14t`), and the standard build still has a GIL. The free-threaded build replaces the lock with biased reference counting, immortal objects, per-object locks in built-in containers and a different allocator; the 3.14 documentation puts the single-threaded penalty at roughly 5-10%. Caveats: every C extension must declare free-threading support (importing one that does not re-enables the GIL with a warning), and your own compound operations such as `counter += 1` were never atomic even with the GIL, so you still need locks or queues. The right answer for CPU-bound work today remains: measure, then choose processes, free-threaded threads (if your dependency stack supports it), or native code.',
+            },
+            {
+              question: 'Why can `counter += 1` race between threads even though the GIL exists?',
+              answer:
+                'The GIL guarantees that the interpreter\'s own data structures are not corrupted, not that your multi-step operations are atomic. `counter += 1` compiles to separate load, add and store bytecodes; the interpreter may switch threads between any two of them (the switch interval is 5 ms by default, and the lock is also released around blocking calls), so two threads can read the same old value and both write old+1, losing an update. Individual operations such as `list.append` are atomic as an implementation detail, but relying on that is fragile and breaks the reasoning entirely once you consider free-threaded builds. Protect shared read-modify-write sequences with `threading.Lock`, use `queue.Queue` to hand work between threads, or avoid shared mutable state by design.',
+            },
+            {
+              question: 'How does asyncio.TaskGroup differ from asyncio.gather, and why was it added?',
+              answer:
+                'Both run coroutines concurrently, but TaskGroup (3.11) gives structured concurrency: the `async with` block does not exit until every child task finishes, and if any child raises, the group cancels the remaining siblings, waits for them, and raises an `ExceptionGroup` containing all failures (handled with `except*`). With `gather`, the first exception propagates immediately while the other awaitables keep running unobserved in the background unless you cancel them yourself, and later failures are lost unless `return_exceptions=True`. That orphaned-task behavior causes resource leaks and "Task exception was never retrieved" warnings. `gather(return_exceptions=True)` remains handy when you genuinely want partial results from independent calls; TaskGroup is the safer default when the tasks are parts of one unit of work. Combine it with `asyncio.timeout()` for a deadline and a `Semaphore` to bound concurrency.',
+            },
+            {
+              question: 'How should cancellation be handled correctly in asyncio code?',
+              answer:
+                'Cancellation is delivered as a `CancelledError` raised at the task\'s current `await`. It inherits from `BaseException` (since 3.8), so `except Exception` does not catch it, but a bare `except:` or `except BaseException:` that does not re-raise will swallow it and break timeouts, TaskGroup sibling cancellation and graceful shutdown. The rule is to clean up in `finally` or `async with` blocks, keep that cleanup short, and re-raise if you catch the error. `asyncio.timeout()` and TaskGroup both rely on this mechanism. `asyncio.shield()` protects an inner awaitable from being cancelled, but the outer await still raises, so it is for critical sections like committing a transaction, not a way to ignore cancellation.',
+            },
+            {
+              question: 'What changed about annotations in Python 3.14, and what should library code do?',
+              answer:
+                'Annotations are now evaluated lazily (PEP 649, with PEP 749 describing the implementation): the compiler stores them in an annotate function that runs only when something asks, so forward references work without quotes and unused annotations cost nothing at import time. The new `annotationlib` module provides `get_annotations()` with formats `VALUE`, `FORWARDREF` and `STRING`. Consequently `from __future__ import annotations` (PEP 563 stringification) is unnecessary for new code and has downsides for runtime consumers like Pydantic. Library code that inspects annotations should use `annotationlib.get_annotations()` on 3.14+, or `inspect.get_annotations()`/`typing.get_type_hints()` on older versions, and never read `__annotations__` directly.',
+            },
+            {
+              question: 'What are t-strings, and what problem do they solve that f-strings cannot?',
+              answer:
+                'Template strings (PEP 750, Python 3.14) use a `t` prefix and evaluate to a `string.templatelib.Template` object rather than a `str`. The object holds the literal parts and the `Interpolation` objects (value, expression text, conversion, format spec) separately, so a consumer can process the dynamic parts differently from the static text. An f-string collapses everything into one string immediately, so a database or HTML layer cannot tell developer-written text from user input, which is what makes injection bugs easy to write. With a t-string a library can escape for HTML, convert to bound SQL parameters, or build structured log records. A `Template` is intentionally not a `str` and does not render itself, so each consumer must make an explicit decision; until your libraries support templates, parameterized queries remain the correct defense.',
+            },
+            {
+              question: 'Explain the difference between `__repr__` and `__str__`, and what must hold between `__eq__` and `__hash__`.',
+              answer:
+                '`__repr__` targets developers: unambiguous, ideally something that could recreate the object, and it is what appears in tracebacks, logs and the REPL, including inside containers. `__str__` targets end users and is what `print` and `str()` use; if it is missing Python falls back to `__repr__`, so implement `__repr__` first. For hashing, equal objects must have equal hashes. Defining `__eq__` without `__hash__` sets `__hash__` to `None`, making instances unhashable; defining a hash from mutable fields lets an object get lost inside a set or dict after it mutates. Hash a tuple of the immutable identity fields, or use `@dataclass(frozen=True)` which generates a consistent pair. Return `NotImplemented` (not `False`) for unsupported operand types so Python can try the reflected operation.',
+            },
+            {
+              question: 'How do you structure and ship a modern Python project, and why does it matter to separate ranges from lockfiles?',
+              answer:
+                'Declare metadata, dependencies (PEP 621) and tool configuration in `pyproject.toml`, choose a build backend (hatchling, setuptools, uv_build), use a `src/` layout so tests run against the installed package, and manage environments with uv (or Poetry/pip-tools). Direct dependencies get compatible ranges in `pyproject.toml`; an application additionally commits a lockfile (`uv.lock`, `poetry.lock`, or the standard `pylock.toml` format) with exact versions and hashes, and CI/production install with a frozen/locked mode that fails if the lock is stale. Libraries must not pin exact versions because that makes them uninstallable alongside other packages; applications must pin so that the tested artifact is the deployed artifact. Add ruff, a type checker and pytest to CI, audit dependencies (`pip-audit`), and build container images in two layers so dependency installs are cached until the lockfile changes.',
+            },
+            {
+              question: 'A Python service\'s memory grows steadily. How do you investigate?',
+              answer:
+                'First distinguish a real leak from allocator behavior: RSS can stay high after a spike because pymalloc and the C allocator do not always return memory to the OS. To find growth, enable `tracemalloc` (with several frames), take snapshots at intervals and use `compare_to` to see which lines own the increasing allocations; `gc.get_objects()` counted by type, or `objgraph`, shows what accumulates and who references it. Typical culprits are unbounded module-level caches or `lru_cache(maxsize=None)`, `lru_cache` on instance methods (keeps `self` alive), callbacks or listeners never unregistered, exceptions stored with their tracebacks (frames keep locals alive), reference cycles with `__del__`, and per-request data added to global structures. Mitigate with bounded caches, `weakref`, `WeakValueDictionary`, and periodic worker recycling as a safety net, then confirm the fix by repeating the same measurement.',
+            },
+            {
+              question: 'When would you reach for a metaclass versus `__init_subclass__`, a class decorator, or a descriptor?',
+              answer:
+                'Use the lightest tool that works. `__init_subclass__` runs on the parent whenever a subclass is defined and covers plugin registries and subclass validation. A class decorator post-processes one class without affecting inheritance (dataclasses work this way). A descriptor (with `__set_name__`) customizes per-attribute access and learns its name. A metaclass is only necessary when you must control class creation itself: altering the namespace before the class exists (for example `__prepare__` returning a custom mapping), customizing instance creation via `__call__`, or intercepting attribute access on the class object. Metaclasses cost readability and compose poorly, since a class can have only one metaclass and two frameworks with different ones raise a metaclass conflict, so ORMs and enum-like libraries are the main legitimate users.',
+            },
+            {
+              question: 'Why is `multiprocessing` behavior different on Linux in newer Python versions, and what breaks?',
+              answer:
+                'Historically Linux defaulted to the `fork` start method, which clones the parent process and lets children inherit globals, open file descriptors and even unpicklable objects. Forking a process that already has threads is unsafe (locks held by other threads are copied in a locked state), so since 3.14 the default on Linux and other non-macOS Unix platforms is `forkserver`; macOS and Windows already used `spawn`. With these methods the child imports your module fresh and receives arguments by pickling, so lambdas, locally defined functions, open connections and module state set only at runtime are not inherited. The fix is to use top-level picklable functions, pass explicit arguments, initialize per-process resources in a worker initializer, guard the entry point with `if __name__ == "__main__":`, and request `fork` explicitly via `get_context("fork")` only if you fully understand the risk.',
+            },
+            {
+              question: 'How do you make a decorator preserve type information and behave correctly for both sync and async functions?',
+              answer:
+                'Use `functools.wraps` so metadata (`__name__`, `__doc__`, `__wrapped__`) survives, and type it with `ParamSpec` and a return `TypeVar` (in 3.12+ syntax `def deco[**P, R](f: Callable[P, R]) -> Callable[P, R]`) so the type checker sees the original signature through the wrapper. A decorator written with a plain `def wrapper` around an `async def` function returns a coroutine without awaiting it, so timing, retry or error-handling logic silently runs before the work happens; handle coroutine functions separately by checking `inspect.iscoroutinefunction(func)` and providing an `async def wrapper` that awaits the call, or provide two decorators. For decorators with arguments, add one more nesting level, and for class-based decorators remember to apply `functools.update_wrapper`. Finally, never use `@lru_cache` directly on async functions, since it caches the coroutine object, which can only be awaited once.',
             },
           ],
         },

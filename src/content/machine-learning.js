@@ -146,6 +146,47 @@ export const machineLearningSection = {
               kind: 'tip',
               text: 'The single fastest diagnostic in practice: plot training error and validation error together. A large **gap** between them (train low, validation high) says high variance; both being high and close together says high bias. This one comparison drives most of the "what do I change next" decisions in model development.',
             },
+            {
+              type: 'heading',
+              text: 'Where the decomposition comes from',
+            },
+            {
+              type: 'p',
+              text: 'Assume the data is generated as `y = f(x) + ε` with noise `ε` of mean 0 and variance `σ²`, and let `f_hat_D` be the model trained on a random dataset `D`. At a fixed point `x`, add and subtract the average model `E_D[f_hat_D(x)]` inside `E[(y - f_hat_D(x))²]`; all cross terms vanish because the noise is independent of `D` and has mean zero. What remains is exactly three non-negative terms: `(f(x) - E_D[f_hat_D(x)])²` (bias squared), `E_D[(f_hat_D(x) - E_D[f_hat_D(x)])²]` (variance) and `σ²` (irreducible noise). The derivation is specific to squared error; for 0-1 loss and cross-entropy there are analogous but messier decompositions, which is why the "bias + variance + noise" picture should be treated as a guiding intuition for classifiers rather than an exact identity.',
+            },
+            {
+              type: 'code',
+              language: 'python',
+              title: 'estimating bias and variance empirically by resampling',
+              code: `import numpy as np
+from sklearn.tree import DecisionTreeRegressor
+
+rng = np.random.default_rng(0)
+f = lambda x: np.sin(2 * np.pi * x)            # the true function
+x_test = np.linspace(0, 1, 200)[:, None]
+
+def bias_variance(make_model, n_datasets=200, n=50, noise=0.3):
+    preds = []
+    for _ in range(n_datasets):                   # many independent training sets
+        x = rng.uniform(0, 1, (n, 1))
+        y = f(x).ravel() + rng.normal(0, noise, n)
+        preds.append(make_model().fit(x, y).predict(x_test))
+    preds = np.array(preds)                       # (n_datasets, 200)
+    avg = preds.mean(axis=0)
+    bias_sq = np.mean((avg - f(x_test).ravel()) ** 2)
+    variance = np.mean(preds.var(axis=0))
+    return bias_sq, variance
+
+for depth in [1, 3, 6, None]:
+    b, v = bias_variance(lambda: DecisionTreeRegressor(max_depth=depth))
+    print(f"max_depth={depth}: bias^2={b:.3f}  variance={v:.3f}")
+# shallow trees: high bias, low variance; unlimited depth: near-zero bias, high variance`,
+            },
+            {
+              type: 'callout',
+              kind: 'note',
+              text: '**Double descent.** The classic U-shaped test-error curve is not the whole story for heavily over-parameterized models. As capacity grows past the *interpolation threshold* (the point where the model can fit the training set exactly), test error can peak and then **fall again** — observed for wide neural networks, random-feature models and even boosted ensembles. The usual explanation is implicit regularization: among the many parameter settings that interpolate the data, gradient descent tends to find low-norm, "smooth" ones. This does not repeal the bias-variance tradeoff; it means that for deep learning, "more parameters" is not automatically "more variance", and the effective complexity also depends on the optimizer, data size and regularization.',
+            },
           ],
         },
         {
@@ -168,9 +209,9 @@ export const machineLearningSection = {
             {
               type: 'mermaid',
               code: `flowchart LR
-    All["Full Dataset"] --> Train["Training Set ~60-70%\\nfit model parameters"]
-    All --> Val["Validation Set ~15-20%\\ntune hyperparameters, pick model"]
-    All --> Test["Test Set ~15-20%\\ntouched ONCE, final honest score"]`,
+    All["Full Dataset"] --> Train["Training Set ~60-70%<br/>fit model parameters"]
+    All --> Val["Validation Set ~15-20%<br/>tune hyperparameters, pick model"]
+    All --> Test["Test Set ~15-20%<br/>touched ONCE, final honest score"]`,
             },
             {
               type: 'code',
@@ -179,9 +220,12 @@ export const machineLearningSection = {
               code: `from sklearn.model_selection import train_test_split
 
 # split off test set first, and never touch it again until the very end
-X_temp, X_test, y_temp, y_test = train_test_split(X, y, test_size=0.15, random_state=42)
-X_train, X_val, y_train, y_val = train_test_split(X_temp, y_temp, test_size=0.176, random_state=42)
-# 0.176 of the remaining 85% ~= 15% of the original data
+# stratify keeps class proportions identical across splits (important for imbalanced labels)
+X_temp, X_test, y_temp, y_test = train_test_split(
+    X, y, test_size=0.15, stratify=y, random_state=42)
+X_train, X_val, y_train, y_val = train_test_split(
+    X_temp, y_temp, test_size=0.15 / 0.85, stratify=y_temp, random_state=42)
+# 0.15 / 0.85 of the remaining 85% == 15% of the original data
 
 best_model, best_score = None, -float('inf')
 for candidate in candidate_models:
@@ -196,6 +240,239 @@ final_score = best_model.score(X_test, y_test)  # reported exactly once`,
               type: 'callout',
               kind: 'pitfall',
               text: '**Data leakage** is the sneaky version of this mistake: fitting a scaler, imputer, or feature-selection step on the *entire* dataset before splitting lets statistics from the test set (its mean, its distribution) leak into preprocessing the training set sees — inflating validation/test scores in a way that will not hold up in production. Always fit preprocessing only on the training fold, then apply (transform, not fit) it to validation/test.',
+            },
+            {
+              type: 'heading',
+              text: 'A random split is not always an honest split',
+            },
+            {
+              type: 'p',
+              text: 'A random split silently assumes that rows are **independent and identically distributed** and that production data will look like a random sample of your historical data. Both assumptions break constantly. The rule that replaces "split randomly" is: **split the data the same way the model will meet new data in production.**',
+            },
+            {
+              type: 'table',
+              headers: ['Situation', 'Wrong split', 'Honest split', 'Why'],
+              rows: [
+                ['Data with a time dimension (sales, fraud, churn)', 'Random shuffle', 'Train on the past, validate/test on a later period', 'In production you always predict the future; a random split lets the model peek at future patterns'],
+                ['Several rows per entity (patients, users, devices)', 'Random rows', 'Group split: every row of an entity lands in exactly one split', 'Otherwise the model recognizes the entity rather than learning the pattern'],
+                ['Near-duplicates (crawled text, augmented images)', 'Random rows', 'De-duplicate first, or split by source/cluster', 'Copies on both sides of the split inflate scores'],
+                ['Rare classes', 'Plain random', 'Stratified split', 'A small test set may otherwise contain almost no positives'],
+                ['Model will serve a new region/customer', 'Random rows', 'Hold out whole regions/customers', 'Measures generalization to the population you actually care about'],
+              ],
+            },
+            {
+              type: 'callout',
+              kind: 'tip',
+              text: 'Statistical noise in the test score matters too. With 1,000 test examples and 90% accuracy, the standard error is roughly `sqrt(0.9 * 0.1 / 1000)`, about 0.95 percentage points, so a 95% interval spans roughly plus or minus 1.9 points. A "0.5 point improvement" on that test set is indistinguishable from noise. Report confidence intervals (bootstrap the test set) before claiming one model beats another.',
+            },
+          ],
+        },
+        {
+          id: 'cross-validation-hyperparameter-tuning',
+          title: 'Cross-Validation and Hyperparameter Tuning',
+          summary:
+            'Cross-validation turns one noisy validation score into an average over several folds, and hyperparameter search uses those scores to pick a configuration — done carelessly, both quietly overfit the validation data and report optimistic numbers.',
+          keyPoints: [
+            '**k-fold CV** splits the training data into k folds, trains k models (each holding out a different fold) and averages the k validation scores; the spread across folds is as informative as the mean.',
+            'Pick the CV splitter to match the data: `StratifiedKFold` for classification, `GroupKFold` / `StratifiedGroupKFold` when rows share an entity, `TimeSeriesSplit` (expanding window) for temporal data.',
+            '**Hyperparameters** (tree depth, learning rate, regularization strength) are not learned by `fit`; they are chosen by comparing CV scores. Random search beats grid search for the same budget when only a few hyperparameters really matter; Bayesian/TPE optimizers (e.g. Optuna) are better still for expensive models.',
+            'The best CV score after searching hundreds of configurations is **optimistically biased** — you selected the maximum of many noisy estimates. Use **nested CV** or an untouched test set to estimate the performance of the whole "tune then train" procedure.',
+            'Every data-dependent preprocessing step (scaling, imputation, encoding, feature selection, resampling) must live **inside** the CV loop, which in scikit-learn means inside a `Pipeline`.',
+          ],
+          blocks: [
+            {
+              type: 'mermaid',
+              code: `flowchart TB
+    Data["Training data (test set already locked away)"] --> F1["Fold 1: train on folds 2-5, score fold 1"]
+    Data --> F2["Fold 2: train on folds 1,3-5, score fold 2"]
+    Data --> F3["..."]
+    Data --> F5["Fold 5: train on folds 1-4, score fold 5"]
+    F1 --> Avg["Mean and std of the 5 scores"]
+    F2 --> Avg
+    F3 --> Avg
+    F5 --> Avg
+    Avg --> Pick["Compare configurations, pick the best"]
+    Pick --> Refit["Refit best config on ALL training data"]
+    Refit --> Test["Score once on the locked test set"]`,
+            },
+            {
+              type: 'table',
+              headers: ['Splitter', 'Use when', 'Guarantee'],
+              rows: [
+                ['KFold(shuffle=True)', 'Regression on i.i.d. rows', 'Every row is validated exactly once'],
+                ['StratifiedKFold', 'Classification, especially imbalanced', 'Each fold keeps the overall class ratio'],
+                ['GroupKFold / StratifiedGroupKFold', 'Multiple rows per user/patient/session', 'No group appears in both train and validation'],
+                ['TimeSeriesSplit', 'Forecasting, any time-ordered data', 'Validation always comes after training in time (optionally with a gap)'],
+                ['RepeatedStratifiedKFold', 'Small datasets where fold assignment noise is large', 'Averages over several random fold assignments'],
+              ],
+            },
+            {
+              type: 'code',
+              language: 'python',
+              title: 'leakage-safe tuning: Pipeline + randomized search + nested CV',
+              code: `import numpy as np
+from scipy.stats import loguniform
+from sklearn.pipeline import Pipeline
+from sklearn.preprocessing import StandardScaler
+from sklearn.linear_model import LogisticRegression
+from sklearn.model_selection import (StratifiedKFold, RandomizedSearchCV,
+                                     cross_val_score)
+
+pipe = Pipeline([
+    ("scale", StandardScaler()),                    # re-fit inside every fold
+    ("clf", LogisticRegression(max_iter=2000)),
+])
+
+param_dist = {"clf__C": loguniform(1e-3, 1e2)}      # sample on a log scale
+
+inner = StratifiedKFold(n_splits=5, shuffle=True, random_state=0)
+search = RandomizedSearchCV(pipe, param_dist, n_iter=40, cv=inner,
+                            scoring="average_precision", n_jobs=-1, random_state=0)
+
+# nested CV: the OUTER loop estimates how good "tune + fit" is as a procedure
+outer = StratifiedKFold(n_splits=5, shuffle=True, random_state=1)
+scores = cross_val_score(search, X_train, y_train, cv=outer, scoring="average_precision")
+print(f"nested CV PR-AUC: {scores.mean():.3f} +/- {scores.std():.3f}")
+
+search.fit(X_train, y_train)           # final tuning on all training data
+print(search.best_params_)`,
+            },
+            {
+              type: 'code',
+              language: 'python',
+              title: 'Bayesian-style search with Optuna and early pruning',
+              code: `import optuna
+import lightgbm as lgb
+from sklearn.model_selection import StratifiedKFold, cross_val_score
+
+def objective(trial):
+    params = {
+        "n_estimators": 2000,
+        "learning_rate": trial.suggest_float("learning_rate", 1e-3, 0.2, log=True),
+        "num_leaves": trial.suggest_int("num_leaves", 8, 256, log=True),
+        "min_child_samples": trial.suggest_int("min_child_samples", 5, 200, log=True),
+        "subsample": trial.suggest_float("subsample", 0.5, 1.0),
+        "subsample_freq": 1,
+        "colsample_bytree": trial.suggest_float("colsample_bytree", 0.4, 1.0),
+        "reg_lambda": trial.suggest_float("reg_lambda", 1e-3, 10, log=True),
+        "verbose": -1,
+    }
+    cv = StratifiedKFold(n_splits=5, shuffle=True, random_state=0)
+    return cross_val_score(lgb.LGBMClassifier(**params), X_train, y_train,
+                           cv=cv, scoring="roc_auc").mean()
+
+study = optuna.create_study(direction="maximize")
+study.optimize(objective, n_trials=100)
+print(study.best_params, study.best_value)`,
+            },
+            {
+              type: 'list',
+              items: [
+                '**Search on the right scale**: learning rates and regularization strengths span orders of magnitude, so sample them log-uniformly; sampling `C` uniformly in [0.001, 100] wastes almost every trial above 1.',
+                '**Prefer random to grid**: with 9 grid points over 2 hyperparameters you only try 3 distinct values of each; 9 random points try 9 distinct values of each, which matters when one of them dominates (Bergstra and Bengio, 2012).',
+                '**Budget-aware methods** such as successive halving / Hyperband (`HalvingRandomSearchCV`, Optuna pruners) kill bad configurations early, after a few epochs or a fraction of the data, and spend compute on promising ones.',
+                '**Pick the simplest model within noise**: if several configurations are within one standard error of the best mean score, prefer the most regularized one (the "one-standard-error rule"); it usually generalizes and maintains better.',
+              ],
+            },
+            {
+              type: 'callout',
+              kind: 'pitfall',
+              text: 'Reporting `search.best_score_` as "the model accuracy" is a classic optimistic bias: it is the maximum over many noisy estimates computed on the same folds. The more configurations you try, the larger the bias. Quote a nested-CV estimate or the score on a test set that played no part in the search.',
+            },
+            {
+              type: 'callout',
+              kind: 'warning',
+              text: 'Plain k-fold on time-ordered data trains on the future and validates on the past. Use forward-chaining splits (`TimeSeriesSplit`), and add a `gap` between training and validation when features use trailing windows or labels take time to mature (e.g. a chargeback known 60 days later), otherwise information still bleeds across the boundary.',
+            },
+          ],
+        },
+        {
+          id: 'data-leakage',
+          title: 'Data Leakage: Why Models Look Great Offline and Fail in Production',
+          summary:
+            'Leakage is any path by which information that will not be available at prediction time reaches the model during training or evaluation — it is the most common reason for spectacular offline metrics that collapse after deployment.',
+          keyPoints: [
+            '**Target leakage**: a feature is a consequence or proxy of the label (e.g. "account_closed_date" in a churn model, "treatment_given" in a diagnosis model) — it is perfectly predictive offline and absent or meaningless at prediction time.',
+            '**Train-test contamination**: statistics from evaluation data leak into training through preprocessing fitted on the full dataset, resampling before splitting, de-duplication not done, or the same entity appearing on both sides.',
+            '**Temporal leakage**: features computed with data from after the prediction moment (a "30-day average" window that extends past the prediction timestamp, a customer attribute overwritten with its latest value).',
+            '**Selection leakage**: using the test set for decisions (feature selection on all data, early stopping on the test set, repeated "one last look").',
+            'The defence is **point-in-time correctness** plus **pipelines**: each training row must be built only from data that existed at its prediction timestamp, and every fitted transformation must be learned inside the training fold.',
+          ],
+          blocks: [
+            {
+              type: 'p',
+              text: 'A useful mental test for every feature: **"At the exact moment the model is called in production, would this value exist, and would it have exactly this value?"** If the answer is "no" or "it would be computed differently", the feature leaks. Suspiciously high scores are themselves a signal — an AUC of 0.99 on a problem where domain experts struggle is far more often a bug than a breakthrough.',
+            },
+            {
+              type: 'table',
+              headers: ['Leak', 'Real-world example', 'How to detect', 'Fix'],
+              rows: [
+                ['Target proxy feature', '"num_collection_calls" in a loan-default model', 'One feature dominates importance; ablating it collapses the score', 'Drop it, or rebuild it as of the prediction time'],
+                ['Preprocessing on all data', 'Scaler/imputer/PCA/feature selection fitted before splitting', 'Code review: any `fit` before the split', 'Put every step in a `Pipeline`'],
+                ['Future data in features', 'Rolling average computed with a centered window', 'Score drops sharply on a strictly out-of-time test set', 'Point-in-time joins, as-of feature store queries'],
+                ['Entity overlap', 'Same patient\'s X-rays in train and test', 'Check group IDs across splits', 'Group-aware splitting'],
+                ['Duplicates', 'Same product description scraped twice', 'Hash or near-duplicate search across splits', 'De-duplicate before splitting'],
+                ['Label definition drift', 'Label rewritten by a later process (e.g. fraud confirmed months later)', 'Label distribution differs by snapshot date', 'Freeze labels with an observation window'],
+              ],
+            },
+            {
+              type: 'code',
+              language: 'python',
+              title: 'a leakage-proof tabular pipeline with ColumnTransformer',
+              code: `from sklearn.compose import ColumnTransformer
+from sklearn.pipeline import Pipeline
+from sklearn.impute import SimpleImputer
+from sklearn.preprocessing import OneHotEncoder, StandardScaler
+from sklearn.ensemble import HistGradientBoostingClassifier
+from sklearn.model_selection import cross_val_score, StratifiedKFold
+
+numeric = ["age", "income", "tenure_days"]
+categorical = ["country", "plan", "device"]
+
+preprocess = ColumnTransformer([
+    ("num", Pipeline([
+        ("impute", SimpleImputer(strategy="median", add_indicator=True)),
+        ("scale", StandardScaler()),
+    ]), numeric),
+    ("cat", OneHotEncoder(handle_unknown="infrequent_if_exist", min_frequency=20), categorical),
+])
+
+model = Pipeline([
+    ("prep", preprocess),
+    ("clf", HistGradientBoostingClassifier(max_iter=500, early_stopping=True)),
+])
+
+# every fold re-fits imputer, scaler and encoder on that fold's training part only
+cv = StratifiedKFold(n_splits=5, shuffle=True, random_state=0)
+print(cross_val_score(model, X_train, y_train, cv=cv, scoring="roc_auc").mean())`,
+            },
+            {
+              type: 'code',
+              language: 'sql',
+              title: 'point-in-time feature join: only use events BEFORE the prediction moment',
+              code: `-- one row per (customer, prediction_time); features may only look backwards
+SELECT
+  p.customer_id,
+  p.prediction_time,
+  COUNT(o.order_id)                       AS orders_last_90d,
+  COALESCE(SUM(o.amount), 0)              AS spend_last_90d,
+  p.label_churned_next_30d
+FROM prediction_points p
+LEFT JOIN orders o
+  ON  o.customer_id = p.customer_id
+  AND o.created_at <  p.prediction_time                      -- strictly before
+  AND o.created_at >= p.prediction_time - INTERVAL '90 days'
+GROUP BY p.customer_id, p.prediction_time, p.label_churned_next_30d;`,
+            },
+            {
+              type: 'callout',
+              kind: 'tip',
+              text: 'Run an **adversarial validation** check: label training rows 0 and test (or recent production) rows 1, train a classifier to tell them apart and inspect its AUC. Near 0.5 means the splits look alike; well above 0.5 means distribution shift or leakage, and the top features of that classifier tell you exactly where to look.',
+            },
+            {
+              type: 'callout',
+              kind: 'pitfall',
+              text: 'Leakage survives code review when preprocessing is done "once, up front" in a notebook for convenience. Any `fit`, `fit_transform`, `get_dummies` on the full frame, `dropna` based on label availability, or feature selection that looks at `y` before the split is a candidate leak. Make "the only thing that touches raw data is the Pipeline" a team rule.',
             },
           ],
         },
@@ -215,7 +492,7 @@ final_score = best_model.score(X_test, y_test)  # reported exactly once`,
             {
               type: 'mermaid',
               code: `flowchart LR
-    U["Underfitting\\nmodel too simple\\nHIGH train error, HIGH test error"] --> S["Sweet Spot\\nbalanced complexity\\nLOW train error, LOW test error"] --> O["Overfitting\\nmodel too complex\\nVERY LOW train error, HIGH test error"]`,
+    U["Underfitting<br/>model too simple<br/>HIGH train error, HIGH test error"] --> S["Sweet Spot<br/>balanced complexity<br/>LOW train error, LOW test error"] --> O["Overfitting<br/>model too complex<br/>VERY LOW train error, HIGH test error"]`,
             },
             {
               type: 'table',
@@ -278,7 +555,11 @@ final_score = best_model.score(X_test, y_test)  # reported exactly once`,
 
 def normal_equation(X, y):
     X_b = np.c_[np.ones((X.shape[0], 1)), X]   # add bias column
-    return np.linalg.inv(X_b.T @ X_b) @ X_b.T @ y
+    # textbook form: np.linalg.inv(X_b.T @ X_b) @ X_b.T @ y
+    # never invert explicitly in practice: X^T X squares the condition number and
+    # fails outright when features are collinear. lstsq uses an SVD/QR solver instead.
+    w, *_ = np.linalg.lstsq(X_b, y, rcond=None)
+    return w
 
 def gradient_descent(X, y, lr=0.01, n_iters=1000):
     n, d = X.shape
@@ -296,13 +577,37 @@ def gradient_descent(X, y, lr=0.01, n_iters=1000):
               kind: 'pitfall',
               text: 'A learning rate that is too large causes gradient descent to overshoot the minimum and diverge (loss oscillates or explodes); too small makes convergence painfully slow. Feature scaling (standardizing inputs) matters a great deal here too — on unscaled features with very different ranges, the loss surface becomes a long narrow valley and gradient descent zig-zags inefficiently instead of heading straight for the minimum.',
             },
+            {
+              type: 'heading',
+              text: 'Assumptions, and what breaks when they fail',
+            },
+            {
+              type: 'p',
+              text: 'For *prediction*, linear regression only needs the relationship to be roughly linear in the features you give it (you can add `x²`, logs, splines or interactions — the model stays linear in its *weights*). For *inference* — trusting coefficients, p-values and confidence intervals — the classical assumptions matter much more, and violating them is common in real data.',
+            },
+            {
+              type: 'table',
+              headers: ['Assumption', 'Symptom when violated', 'Consequence', 'Typical remedy'],
+              rows: [
+                ['Linearity (in parameters)', 'Curved pattern in residuals vs fitted plot', 'Biased predictions', 'Feature transforms, splines, or a non-linear model'],
+                ['Independent errors', 'Autocorrelated residuals (time series, clustered data)', 'Standard errors too small, overconfident inference', 'Time-series models, clustered/robust standard errors'],
+                ['Constant error variance (homoscedasticity)', 'Residual spread fans out with fitted value', 'Inefficient estimates, wrong intervals', 'Log-transform target, weighted least squares, robust SEs'],
+                ['No perfect multicollinearity', 'Huge, unstable coefficients with flipping signs', '`X^T X` near-singular; coefficients uninterpretable', 'Drop/merge features, Ridge regression'],
+                ['Normal errors (for small-sample inference only)', 'Heavy-tailed residual Q-Q plot', 'Unreliable p-values in small samples', 'Bootstrap intervals, robust loss (Huber)'],
+              ],
+            },
+            {
+              type: 'callout',
+              kind: 'warning',
+              text: 'Coefficients describe association conditional on the other features, not causation. With correlated features, "a one-unit increase in X holding the others fixed" may describe a situation that never occurs in the data, and the coefficient can even change sign when another feature is added. Use causal-inference methods (experiments, instruments, matching) when the question is "what happens if we change X?".',
+            },
           ],
         },
         {
           id: 'logistic-regression',
           title: 'Logistic Regression: Classification, Despite the Name',
           summary:
-            'Logistic regression predicts the *probability* of a class by squashing a linear combination of features through the sigmoid function — it is a classification algorithm, and the "regression" refers to regressing that intermediate probability, not the final class label.',
+            'Logistic regression predicts the *probability* of a class by squashing a linear combination of features through the sigmoid function — it is a classification algorithm, and the "regression" refers to the fact that it fits a linear model of the *log-odds* `log(p / (1 - p))`, not the final class label.',
           keyPoints: [
             'The model computes a linear score `z = w · x + b` exactly like linear regression, then passes it through the **sigmoid function** `σ(z) = 1 / (1 + e^-z)` to squash it into a probability between 0 and 1.',
             'It is trained by minimizing **binary cross-entropy (log loss)**, not MSE — log loss penalizes confident-and-wrong predictions much more heavily than MSE would, which is the correct behavior for a probability output.',
@@ -326,22 +631,111 @@ def gradient_descent(X, y, lr=0.01, n_iters=1000):
               type: 'code',
               language: 'python',
               title: 'logistic regression with sklearn',
-              code: `from sklearn.linear_model import LogisticRegression
+              code: `import numpy as np
+from sklearn.linear_model import LogisticRegression
 from sklearn.preprocessing import StandardScaler
 from sklearn.pipeline import make_pipeline
 
 model = make_pipeline(
-    StandardScaler(),               # scaling helps the optimizer converge
-    LogisticRegression(C=1.0),      # C is inverse regularization strength
+    StandardScaler(),               # scaling helps the optimizer converge AND makes
+                                    # the L2 penalty treat all features equally
+    LogisticRegression(C=1.0, max_iter=1000),   # C = 1 / regularization strength;
+                                                # L2-regularized by DEFAULT
 )
 model.fit(X_train, y_train)
 probabilities = model.predict_proba(X_test)[:, 1]   # P(class = 1)
-predictions = model.predict(X_test)                 # thresholded at 0.5 by default`,
+predictions = model.predict(X_test)                 # thresholded at 0.5 by default
+
+# interpret: exp(coef) = multiplicative change in the ODDS per +1 std of the feature
+coefs = model[-1].coef_.ravel()
+odds_ratios = np.exp(coefs)`,
+            },
+            {
+              type: 'heading',
+              text: 'The math in four lines',
+            },
+            {
+              type: 'list',
+              ordered: true,
+              items: [
+                'Model: `p = σ(z)` with `z = w · x + b`. Inverting the sigmoid gives `log(p / (1 - p)) = w · x + b`: the log-odds are linear in the features, so each coefficient is "change in log-odds per unit of that feature".',
+                'Likelihood of one example: `p^y * (1 - p)^(1 - y)`. Maximizing the product over the data is the same as minimizing the negative log: `L = -[y log p + (1 - y) log(1 - p)]` — binary cross-entropy is *maximum likelihood* for a Bernoulli label.',
+                'Using `dσ/dz = σ(1 - σ)`, the derivative collapses to `dL/dz = p - y`, so `dL/dw = (p - y) x`. The loss is convex in `w`, so gradient methods find the global optimum.',
+                'If the classes are perfectly separable, the unregularized optimum is at infinity (weights grow forever to push probabilities to exactly 0 and 1). This is one reason libraries regularize by default.',
+              ],
+            },
+            {
+              type: 'callout',
+              kind: 'note',
+              text: 'scikit-learn\'s `LogisticRegression` applies L2 regularization by default (`C=1.0`), which surprises people who expect a plain maximum-likelihood fit like statsmodels gives. In recent scikit-learn releases (1.8+), choosing the penalty type through the `penalty` argument is deprecated in favour of `l1_ratio` (0 for L2, 1 for L1, in between for elastic net) together with `C`; check the docs for the version you pin. For unpenalized inference with p-values, statsmodels remains the more natural tool.',
             },
             {
               type: 'callout',
               kind: 'tip',
               text: 'The 0.5 threshold is a default, not a law — shift it based on the cost of false positives vs. false negatives. A fraud model might use a lower threshold (flag more aggressively, accept more false alarms) if missing real fraud is far costlier than an extra manual review.',
+            },
+          ],
+        },
+        {
+          id: 'regularized-linear-models',
+          title: 'Regularized Linear Models: Ridge, Lasso, and Elastic Net',
+          summary:
+            'Adding a penalty on coefficient size to least squares (or log loss) trades a little bias for a large drop in variance — Ridge shrinks everything smoothly, Lasso zeroes out features, and Elastic Net combines both for correlated, high-dimensional data.',
+          keyPoints: [
+            '**Ridge (L2)**: minimize `||y - Xw||² + α·||w||²`. Closed form `w = (X^T X + αI)^-1 X^T y` — adding `αI` makes the matrix invertible even with collinear or more-features-than-rows data.',
+            '**Lasso (L1)**: minimize `(1/2n)·||y - Xw||² + α·||w||_1`. The corners of the L1 ball make exact zeros likely, so Lasso performs feature selection; no closed form, solved by coordinate descent.',
+            '**Elastic Net**: mixes both (`l1_ratio`). With groups of correlated features, Lasso arbitrarily keeps one and drops the rest; Elastic Net tends to keep or drop them together and is more stable.',
+            'Bayesian view: Ridge = maximum a posteriori estimate with a Gaussian prior on weights; Lasso = MAP with a Laplace prior. Regularization strength is the inverse of prior variance.',
+            'Penalties are scale-dependent: **always standardize features** before regularized linear models, and never penalize the intercept. Choose `α` by cross-validation (`RidgeCV`, `LassoCV`, `ElasticNetCV`).',
+          ],
+          blocks: [
+            {
+              type: 'p',
+              text: 'Why does shrinking weights help? An unregularized least-squares fit is unbiased, but when features are many or correlated its coefficients have enormous variance — tiny changes in the data swing them wildly, and some combinations of large positive and large negative weights cancel on the training set but blow up on new data. Penalizing `||w||` pulls the solution toward zero. In the eigenbasis of `X^T X`, Ridge scales each component of the least-squares solution by `λ_i / (λ_i + α)`: directions with large variance (large eigenvalue `λ_i`, well determined by the data) are barely touched, while directions with tiny variance (poorly determined, mostly noise) are shrunk hard. That is the bias-variance tradeoff made explicit and tunable by a single knob.',
+            },
+            {
+              type: 'table',
+              headers: ['', 'Ridge (L2)', 'Lasso (L1)', 'Elastic Net'],
+              rows: [
+                ['Penalty', 'α·sum(w²)', 'α·sum(|w|)', 'α·[r·sum(|w|) + (1-r)/2·sum(w²)]'],
+                ['Exact zeros?', 'No — shrinks toward zero', 'Yes — sparse solutions', 'Yes, fewer and more stable'],
+                ['Correlated features', 'Spreads weight across the group', 'Picks one somewhat arbitrarily', 'Keeps/drops the group together'],
+                ['p > n (more features than rows)', 'Works fine', 'Selects at most n features', 'Works, can select more than n'],
+                ['Solver', 'Closed form / Cholesky / SVD', 'Coordinate descent', 'Coordinate descent'],
+                ['Use when', 'Many small effects, prediction focus', 'Believe few features matter, want interpretability', 'High-dimensional, correlated features (genomics, text)'],
+              ],
+            },
+            {
+              type: 'code',
+              language: 'python',
+              title: 'choosing alpha by cross-validation and reading the sparsity',
+              code: `import numpy as np
+from sklearn.pipeline import make_pipeline
+from sklearn.preprocessing import StandardScaler
+from sklearn.linear_model import RidgeCV, LassoCV, ElasticNetCV
+
+alphas = np.logspace(-4, 3, 50)
+
+ridge = make_pipeline(StandardScaler(), RidgeCV(alphas=alphas)).fit(X_train, y_train)
+lasso = make_pipeline(StandardScaler(), LassoCV(alphas=alphas, cv=5, max_iter=20_000)).fit(X_train, y_train)
+enet = make_pipeline(StandardScaler(),
+                     ElasticNetCV(l1_ratio=[0.1, 0.5, 0.9, 0.99], cv=5, max_iter=20_000)
+                     ).fit(X_train, y_train)
+
+print("ridge alpha:", ridge[-1].alpha_)
+print("lasso alpha:", lasso[-1].alpha_,
+      "non-zero coefs:", np.sum(lasso[-1].coef_ != 0), "of", X_train.shape[1])
+print("enet l1_ratio:", enet[-1].l1_ratio_)`,
+            },
+            {
+              type: 'callout',
+              kind: 'pitfall',
+              text: 'Lasso-selected features are not a reliable list of "the true causes". With correlated predictors the selected set changes from one bootstrap sample to the next. If you need a stable selection, look at selection frequency across bootstrap resamples (stability selection) or use Elastic Net, and never run the selection on the full dataset before cross-validating the downstream model.',
+            },
+            {
+              type: 'callout',
+              kind: 'tip',
+              text: 'Naming varies across libraries and it bites people: scikit-learn regressors use `alpha` (bigger = stronger penalty), while `LogisticRegression` and `SVC` use `C` (bigger = *weaker* penalty, roughly `1/alpha`). XGBoost/LightGBM call their L2/L1 terms `reg_lambda`/`reg_alpha`.',
             },
           ],
         },
@@ -361,8 +755,8 @@ predictions = model.predict(X_test)                 # thresholded at 0.5 by defa
             {
               type: 'mermaid',
               code: `flowchart TB
-    Root["All 10 samples\\n6 Yes / 4 No"] -->|"Age < 30"| Left["7 samples\\n5 Yes / 2 No"]
-    Root -->|"Age >= 30"| Right["3 samples\\n1 Yes / 2 No"]
+    Root["All 10 samples<br/>6 Yes / 4 No"] -->|"Age < 30"| Left["7 samples<br/>5 Yes / 2 No"]
+    Root -->|"Age >= 30"| Right["3 samples<br/>1 Yes / 2 No"]
     Left -->|"Income > 50k"| LL["4 samples: 4 Yes / 0 No (pure leaf)"]
     Left -->|"Income <= 50k"| LR["3 samples: 1 Yes / 2 No"]
     Right --> RLeaf["3 samples: 1 Yes / 2 No (leaf)"]`,
@@ -388,7 +782,37 @@ print(gini(root))  # 1 - (0.6^2 + 0.4^2) = 1 - 0.52 = 0.48
 left = ['Yes'] * 5 + ['No'] * 2
 right = ['Yes'] * 1 + ['No'] * 2
 weighted_gini = (7 / 10) * gini(left) + (3 / 10) * gini(right)
-gain = gini(root) - weighted_gini   # the tree picks the split maximizing this gain`,
+# gini(left) = 20/49 ~= 0.408, gini(right) = 4/9 ~= 0.444
+# weighted ~= 0.7 * 0.408 + 0.3 * 0.444 ~= 0.419
+gain = gini(root) - weighted_gini   # ~= 0.061; the tree picks the split maximizing this gain`,
+            },
+            {
+              type: 'list',
+              items: [
+                '**Regression trees** use the same greedy recipe with variance (squared error) as the impurity: each leaf predicts the mean of its training targets, and a split is chosen to maximize the reduction in within-node squared error. The result is a piecewise-constant function — trees cannot extrapolate beyond the range of targets seen in training.',
+                '**Greedy, not optimal**: finding the globally optimal tree is NP-hard, so CART picks the best split at each node in isolation. A split that looks useless now (like the first split of XOR) may enable great splits later — one reason ensembles of trees outperform single trees.',
+                '**Axis-aligned boundaries**: each split tests one feature, so a diagonal boundary like `x1 > x2` needs a staircase of many splits. Adding the engineered feature `x1 - x2` can replace dozens of nodes.',
+                '**Cost-complexity pruning** (`ccp_alpha`): grow a large tree, then remove subtrees whose impurity reduction does not justify their leaf count, minimizing `impurity + α·(number of leaves)`. Choose `α` by cross-validation.',
+              ],
+            },
+            {
+              type: 'code',
+              language: 'python',
+              title: 'pruning a tree with cost-complexity and cross-validation',
+              code: `import numpy as np
+from sklearn.tree import DecisionTreeClassifier, export_text
+from sklearn.model_selection import cross_val_score
+
+path = DecisionTreeClassifier(random_state=0).cost_complexity_pruning_path(X_train, y_train)
+alphas = path.ccp_alphas[:-1]            # last alpha prunes everything down to the root
+
+scores = [cross_val_score(DecisionTreeClassifier(ccp_alpha=a, random_state=0),
+                          X_train, y_train, cv=5).mean() for a in alphas]
+best_alpha = alphas[int(np.argmax(scores))]
+
+tree = DecisionTreeClassifier(ccp_alpha=best_alpha, random_state=0).fit(X_train, y_train)
+print(tree.get_depth(), tree.get_n_leaves())
+print(export_text(tree, feature_names=list(X_train.columns)))   # human-readable rules`,
             },
             {
               type: 'callout',
@@ -446,6 +870,32 @@ importances = model.feature_importances_   # average impurity reduction per feat
               kind: 'note',
               text: 'Bagging is trivially parallelizable — every tree is trained completely independently of every other, unlike boosting (next topic), where each model depends on the errors of the ones before it and must be trained sequentially.',
             },
+            {
+              type: 'p',
+              text: 'Why does decorrelation matter so much? The variance of an average of `B` identically distributed predictors, each with variance `σ²` and pairwise correlation `ρ`, is `ρσ² + (1 - ρ)σ²/B`. Adding more trees only kills the second term; the first term, `ρσ²`, is a floor that more trees can never get below. Bootstrap sampling alone leaves trees highly correlated (they all split on the same strong features first), so random forests attack `ρ` directly by restricting each split to a random subset of features (`max_features`). Smaller `max_features` lowers correlation but raises each tree\'s individual bias — another tunable bias-variance knob.',
+            },
+            {
+              type: 'code',
+              language: 'python',
+              title: 'impurity importance vs permutation importance',
+              code: `from sklearn.inspection import permutation_importance
+
+# impurity-based importance: computed on TRAINING data, biased toward
+# high-cardinality / continuous features (more possible split points)
+impurity_imp = model.feature_importances_
+
+# permutation importance: shuffle one column on HELD-OUT data and measure the score drop
+result = permutation_importance(model, X_val, y_val, n_repeats=10,
+                                scoring="roc_auc", random_state=0, n_jobs=-1)
+for idx in result.importances_mean.argsort()[::-1][:10]:
+    print(X_val.columns[idx], round(result.importances_mean[idx], 4),
+          "+/-", round(result.importances_std[idx], 4))`,
+            },
+            {
+              type: 'callout',
+              kind: 'pitfall',
+              text: 'Impurity-based `feature_importances_` can rank a random ID column or a high-cardinality noise feature as important, because it is measured on the data the trees memorized. Prefer permutation importance on a validation set — but remember that with strongly correlated features, permuting one barely hurts (its twin covers for it), so both features look unimportant even when the pair is critical. Drop or group correlated features before interpreting.',
+            },
           ],
         },
         {
@@ -491,24 +941,57 @@ importances = model.feature_importances_   # average impurity reduction per feat
               code: `import xgboost as xgb
 
 model = xgb.XGBClassifier(
-    n_estimators=1000,
+    n_estimators=5000,           # upper bound; early stopping picks the real number
     learning_rate=0.05,
-    max_depth=4,             # shallow trees -- weak learners, by design
-    subsample=0.8,           # row subsampling per tree, adds regularization
-    colsample_bytree=0.8,    # column subsampling per tree, adds regularization
-    early_stopping_rounds=50,
+    max_depth=4,                 # shallow trees -- weak learners, by design
+    min_child_weight=5,          # min hessian sum per leaf: blocks tiny, noisy leaves
+    subsample=0.8,               # row subsampling per tree, adds regularization
+    colsample_bytree=0.8,        # column subsampling per tree, adds regularization
+    reg_lambda=1.0,              # L2 on leaf weights
+    tree_method="hist",          # histogram split finding (the default in modern XGBoost)
+    eval_metric="logloss",
+    early_stopping_rounds=50,    # constructor argument in current XGBoost, not a fit() argument
+    # device="cuda",             # train on GPU if available
 )
 model.fit(
     X_train, y_train,
-    eval_set=[(X_val, y_val)],
+    eval_set=[(X_val, y_val)],   # early stopping watches the LAST eval set
     verbose=False,
 )
 print(model.best_iteration)   # boosting stopped here -- prevents overfitting`,
             },
             {
+              type: 'heading',
+              text: 'What modern boosting libraries actually optimize',
+            },
+            {
+              type: 'p',
+              text: 'XGBoost-style boosting takes a second-order Taylor expansion of the loss around the current prediction. For each example you compute the gradient `g_i` and the hessian `h_i` of the loss with respect to the current prediction (for log loss, `g = p - y` and `h = p(1 - p)`). With L2 penalty `λ` on leaf values, the optimal value of a leaf containing examples `I` is `w* = -sum(g_i) / (sum(h_i) + λ)`, and the gain of a split is `1/2 · [G_L²/(H_L + λ) + G_R²/(H_R + λ) - (G_L + G_R)²/(H_L + H_R + λ)] - γ`, where `G` and `H` are summed gradients and hessians on each side and `γ` is a per-leaf complexity penalty. That formula is why `reg_lambda`, `gamma` (`min_split_loss`) and `min_child_weight` (a lower bound on `H` per leaf) are the core regularization knobs.',
+            },
+            {
+              type: 'table',
+              headers: ['', 'XGBoost', 'LightGBM', 'CatBoost', 'sklearn HistGradientBoosting'],
+              rows: [
+                ['Tree growth', 'Depth-wise (lossguide optional)', 'Leaf-wise (best-first): faster, overfits more on small data', 'Symmetric (oblivious) trees: very fast inference, strong regularization', 'Depth/leaf limited, leaf-wise style'],
+                ['Categoricals', 'Native support (enable_categorical)', 'Native support (categorical_feature)', 'Best-in-class: ordered target statistics', 'Native support (categorical_features)'],
+                ['Missing values', 'Learns a default direction per split', 'Learns a default direction', 'Handled natively', 'Learns which side NaNs go'],
+                ['Main knobs', 'max_depth, eta, min_child_weight, subsample', 'num_leaves, min_child_samples, learning_rate', 'depth, learning_rate, l2_leaf_reg', 'max_leaf_nodes, learning_rate, l2_regularization'],
+                ['Sweet spot', 'Mature, GPU, distributed, ubiquitous in production', 'Large data, speed', 'Many high-cardinality categoricals, little tuning', 'No extra dependency, solid defaults'],
+              ],
+            },
+            {
+              type: 'list',
+              items: [
+                '**Tuning order that works**: fix a moderate learning rate (0.05-0.1) with early stopping; tune tree complexity (`max_depth`/`num_leaves`, `min_child_weight`/`min_child_samples`); then subsampling; then L1/L2; finally lower the learning rate and raise the tree cap for the last few tenths of a point.',
+                '**Monotonic constraints** (`monotone_constraints`) force the prediction to only increase (or decrease) with a feature, e.g. risk must not fall as debt rises. They regularize, improve trust and are often required in credit models.',
+                '**Custom objectives**: any twice-differentiable loss works if you can supply the gradient and hessian; quantile, Tweedie, Poisson, ranking (LambdaMART) and survival objectives ship built in.',
+                '**Early stopping set**: early-stopping on the same set you report is a small leak; with plenty of data use a separate slice, or use the CV-averaged best iteration and refit on all training data.',
+              ],
+            },
+            {
               type: 'callout',
               kind: 'tip',
-              text: 'For structured/tabular data, gradient-boosted trees (XGBoost/LightGBM/CatBoost) remain the strongest off-the-shelf performers in practice — routinely outperforming deep learning on tabular problems, which lack the spatial/sequential structure (images, text) that gives neural networks their edge.',
+              text: 'For structured/tabular data, gradient-boosted trees (XGBoost/LightGBM/CatBoost) remain the strongest default in practice — they usually match or beat deep learning on medium-sized tabular problems, which lack the spatial/sequential structure (images, text) that gives neural networks their edge, and they need far less tuning and compute. Tabular deep learning and pretrained tabular foundation models (e.g. TabPFN-style in-context learners for small datasets) are an active research area and occasionally win, so benchmark them when the stakes justify it rather than assuming either way.',
             },
           ],
         },
@@ -807,6 +1290,32 @@ def target_encode_oof(df, col, target, n_splits=5):
     return encoded.fillna(df[target].mean())  # smooth unseen categories with the global mean`,
             },
             {
+              type: 'code',
+              language: 'python',
+              title: 'production-grade encoders: OneHotEncoder and TargetEncoder inside a pipeline',
+              code: `from sklearn.compose import ColumnTransformer
+from sklearn.preprocessing import OneHotEncoder, TargetEncoder
+from sklearn.pipeline import make_pipeline
+from sklearn.linear_model import LogisticRegression
+
+# pd.get_dummies is fine for exploration, but it is NOT a fitted transformer:
+# a category unseen in training creates a new column (or drops one) at inference time.
+encode = ColumnTransformer([
+    ("low_card", OneHotEncoder(handle_unknown="ignore"), ["plan", "device"]),
+    # TargetEncoder (scikit-learn 1.3+) shrinks each category mean toward the global
+    # mean and uses internal cross-fitting in fit_transform, so training rows are
+    # never encoded with their own label.
+    ("high_card", TargetEncoder(target_type="binary"), ["merchant_id", "zip_code"]),
+], remainder="passthrough")
+
+model = make_pipeline(encode, LogisticRegression(max_iter=2000))
+model.fit(X_train, y_train)`,
+            },
+            {
+              type: 'p',
+              text: 'Smoothing is what makes target encoding safe for rare categories. A common form is `enc(c) = (n_c · mean_c + m · global_mean) / (n_c + m)`: a category seen 3 times is pulled strongly toward the global mean, while one seen 30,000 times keeps essentially its own mean. Without it, a merchant seen once with a fraudulent transaction gets an encoding of 1.0 — pure memorization. Hashing (`FeatureHasher`) is another option for huge, open-ended vocabularies: fixed memory, no vocabulary to maintain, at the cost of occasional collisions and no inverse mapping.',
+            },
+            {
               type: 'callout',
               kind: 'pitfall',
               text: 'Naive target encoding — computing each category\'s mean target value using the *entire* training set including the row being encoded — leaks the label into the feature itself, producing a feature that looks almost perfectly predictive during training and then fails badly on new data. Always compute target encodings out-of-fold (or with an equivalent leave-one-out scheme).',
@@ -845,7 +1354,15 @@ X = df[['age', 'income']].copy()
 X['income_was_missing'] = X['income'].isna().astype(int)   # preserve the missingness signal
 
 imputer = SimpleImputer(strategy='median')
-X[['age', 'income']] = imputer.fit_transform(X[['age', 'income']])`,
+X[['age', 'income']] = imputer.fit_transform(X[['age', 'income']])   # fit on TRAIN only
+
+# equivalent, pipeline-friendly form: SimpleImputer(strategy='median', add_indicator=True)
+# model-based: IterativeImputer (experimental API) or KNNImputer for MAR structure`,
+            },
+            {
+              type: 'callout',
+              kind: 'tip',
+              text: 'Gradient-boosted tree libraries (XGBoost, LightGBM, CatBoost, scikit-learn\'s `HistGradientBoosting*`) handle `NaN` natively by learning, at every split, which branch missing values should go to. Feeding them raw `NaN` is often better than imputing, because "missing" itself carries signal. Imputation is mainly needed for linear models, SVMs, k-NN and neural networks.',
             },
             {
               type: 'list',
@@ -886,9 +1403,9 @@ X[['age', 'income']] = imputer.fit_transform(X[['age', 'income']])`,
             {
               type: 'mermaid',
               code: `flowchart LR
-    CM["Confusion Matrix: TP, FP, TN, FN"] --> P["Precision = TP / (TP + FP)\\n'of what I flagged, how much was right?'"]
-    CM --> R["Recall = TP / (TP + FN)\\n'of what was truly positive, how much did I catch?'"]
-    P --> F1["F1 = 2 * P * R / (P + R)\\nharmonic mean, balances both"]
+    CM["Confusion Matrix: TP, FP, TN, FN"] --> P["Precision = TP / (TP + FP)<br/>'of what I flagged, how much was right?'"]
+    CM --> R["Recall = TP / (TP + FN)<br/>'of what was truly positive, how much did I catch?'"]
+    P --> F1["F1 = 2 * P * R / (P + R)<br/>harmonic mean, balances both"]
     R --> F1`,
             },
             {
@@ -901,7 +1418,7 @@ X[['age', 'income']] = imputer.fit_transform(X[['age', 'income']])`,
             },
             {
               type: 'p',
-              text: 'Say a spam filter is tested on 100 emails, 20 of which are truly spam. It flags 25 emails as spam, and 18 of those 25 are correctly spam (2 flagged emails were actually legitimate — false positives), while it missed 2 real spam emails (they landed in the inbox — false negatives). That gives TP = 18, FP = 2, FN = 2, TN = 78. Precision = 18 / (18 + 2) = 0.90 (90% of what it flagged really was spam). Recall = 18 / (18 + 2) = 0.90 (it caught 90% of the real spam). F1 = 2 × (0.90 × 0.90) / (0.90 + 0.90) = 0.90. In this particular case precision and recall happen to be equal, but they move independently — a filter that flags everything as spam would push recall toward 1.0 while precision collapses toward 0.20 (the true spam rate), which is exactly the tradeoff the threshold controls.',
+              text: 'Say a spam filter is tested on 100 emails, 20 of which are truly spam. It flags 20 emails as spam, and 18 of those 20 are correctly spam (2 flagged emails were actually legitimate — false positives), while it missed 2 real spam emails (they landed in the inbox — false negatives). That gives TP = 18, FP = 2, FN = 2, TN = 78. Precision = 18 / (18 + 2) = 0.90 (90% of what it flagged really was spam). Recall = 18 / (18 + 2) = 0.90 (it caught 90% of the real spam). F1 = 2 × (0.90 × 0.90) / (0.90 + 0.90) = 0.90. In this particular case precision and recall happen to be equal, but they move independently — a filter that flags everything as spam would push recall toward 1.0 while precision collapses toward 0.20 (the true spam rate), which is exactly the tradeoff the threshold controls.',
             },
             {
               type: 'code',
@@ -914,6 +1431,35 @@ print(classification_report(y_test, y_pred))   # precision, recall, F1 per class
 y_probs = model.predict_proba(X_test)[:, 1]
 print('ROC-AUC:', roc_auc_score(y_test, y_probs))
 print('PR-AUC:', average_precision_score(y_test, y_probs))  # more informative under class imbalance`,
+            },
+            {
+              type: 'heading',
+              text: 'ROC-AUC vs PR-AUC, and multi-class averaging',
+            },
+            {
+              type: 'p',
+              text: 'ROC-AUC has a clean probabilistic meaning: it is the probability that a randomly chosen positive is scored higher than a randomly chosen negative. Its x-axis, the false-positive rate `FP / (FP + TN)`, divides by the (huge) number of negatives, so with 1 positive per 1,000 negatives a model can produce thousands of false alarms while FPR still looks tiny and ROC-AUC still looks excellent. Precision divides by what you flagged, so it exposes those false alarms directly. Rule of thumb: ROC-AUC for comparing rankers when classes are reasonably balanced or both error types matter symmetrically; PR-AUC (average precision) when positives are rare and the user acts on the flagged list. Note that the PR-AUC of a random model equals the positive rate, not 0.5, so always quote the baseline.',
+            },
+            {
+              type: 'table',
+              headers: ['Metric', 'What it summarizes', 'Use it when', 'Watch out'],
+              rows: [
+                ['Accuracy', 'Fraction correct at one threshold', 'Balanced classes, equal error costs', 'Useless under imbalance'],
+                ['Precision / Recall / F1', 'Errors at one threshold', 'You know roughly where the threshold will be', 'F1 ignores true negatives and assumes equal weight on P and R; F-beta changes that'],
+                ['ROC-AUC', 'Ranking quality across all thresholds', 'Ranking/screening, moderate imbalance', 'Optimistic with extreme imbalance; insensitive to calibration'],
+                ['PR-AUC (average precision)', 'Precision-recall trade-off across thresholds', 'Rare positives (fraud, defects, retrieval)', 'Baseline equals prevalence; not comparable across datasets with different prevalence'],
+                ['MCC', 'Correlation between prediction and truth using all four cells', 'A single balanced number at a fixed threshold', 'Less familiar to stakeholders'],
+                ['Log loss / Brier score', 'Quality of predicted probabilities', 'Probabilities feed decisions (pricing, risk)', 'Punishes overconfidence; see the calibration topic'],
+              ],
+            },
+            {
+              type: 'list',
+              items: [
+                '**Macro average**: compute the metric per class, then average equally — every class matters the same, so rare classes count fully.',
+                '**Weighted average**: per-class metrics weighted by class support — dominated by frequent classes.',
+                '**Micro average**: pool all TP/FP/FN across classes first — for single-label multi-class problems micro precision = micro recall = accuracy.',
+                'Choose the averaging that matches the business question, and report the per-class table too — an aggregate can hide a class the model never gets right.',
+              ],
             },
             {
               type: 'callout',
@@ -949,14 +1495,39 @@ print('PR-AUC:', average_precision_score(y_test, y_probs))  # more informative u
               type: 'code',
               language: 'python',
               title: 'regression metrics',
-              code: `from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
-import numpy as np
+              code: `from sklearn.metrics import (mean_absolute_error, mean_squared_error,
+                             root_mean_squared_error, r2_score,
+                             mean_absolute_percentage_error)
+from sklearn.dummy import DummyRegressor
 
 mae = mean_absolute_error(y_test, y_pred)
 mse = mean_squared_error(y_test, y_pred)
-rmse = np.sqrt(mse)
+rmse = root_mean_squared_error(y_test, y_pred)   # scikit-learn 1.4+; replaces squared=False
 r2 = r2_score(y_test, y_pred)
-print(f'MAE={mae:.2f}  RMSE={rmse:.2f}  R2={r2:.3f}')`,
+print(f'MAE={mae:.2f}  RMSE={rmse:.2f}  R2={r2:.3f}')
+
+# always compare with a trivial baseline fitted on the training data
+baseline = DummyRegressor(strategy="median").fit(X_train, y_train)
+print('baseline MAE:', mean_absolute_error(y_test, baseline.predict(X_test)))`,
+            },
+            {
+              type: 'heading',
+              text: 'Which loss you train with decides what you predict',
+            },
+            {
+              type: 'p',
+              text: 'Minimizing squared error makes the model predict the **conditional mean** of `y`; minimizing absolute error makes it predict the **conditional median**; minimizing the pinball (quantile) loss at level `q` makes it predict the `q`-th quantile. This is not a reporting detail: for skewed targets such as order value or insurance claims, the mean and median can differ by a factor of several. Decide what the business needs (expected revenue is a mean; "a delivery promise we hit 90% of the time" is a 0.9 quantile), train with the matching loss, and evaluate with the matching metric.',
+            },
+            {
+              type: 'table',
+              headers: ['Metric', 'Good for', 'Pitfall'],
+              rows: [
+                ['MAPE', 'Communicating relative error to business users', 'Undefined at y = 0, explodes near zero, penalizes over-prediction more than under-prediction'],
+                ['sMAPE / WAPE', 'Forecasting across items of different scale', 'WAPE (sum of absolute errors / sum of actuals) is more stable than MAPE'],
+                ['RMSLE', 'Targets spanning orders of magnitude, relative errors matter', 'Requires y > -1; under-prediction penalized more than over-prediction'],
+                ['Pinball / quantile loss', 'Prediction intervals, service-level targets', 'Need one model (or output) per quantile, and check coverage'],
+                ['Adjusted R²', 'Comparing linear models with different feature counts', 'Still not a substitute for held-out error'],
+              ],
             },
             {
               type: 'callout',
@@ -1004,12 +1575,189 @@ model.fit(X_train, y_train)
 smote = SMOTE(random_state=42)
 X_train_resampled, y_train_resampled = smote.fit_resample(X_train, y_train)
 model.fit(X_train_resampled, y_train_resampled)
-# X_test / y_test remain untouched -- reflects the real class distribution`,
+# X_test / y_test remain untouched -- reflects the real class distribution
+
+# Inside cross-validation, use imblearn's Pipeline (sklearn's Pipeline cannot hold
+# samplers): resampling then happens only on each fold's training part.
+from imblearn.pipeline import Pipeline as ImbPipeline
+from sklearn.preprocessing import StandardScaler
+from sklearn.model_selection import cross_val_score
+
+pipe = ImbPipeline([("scale", StandardScaler()),
+                    ("smote", SMOTE(random_state=42)),
+                    ("clf", LogisticRegression(max_iter=2000))])
+print(cross_val_score(pipe, X_train, y_train, cv=5, scoring="average_precision").mean())`,
+            },
+            {
+              type: 'heading',
+              text: 'What resampling really changes',
+            },
+            {
+              type: 'p',
+              text: 'For a model that outputs probabilities, class weighting and resampling do not make the model "see the minority class better" in some deep sense — they mainly shift the decision boundary, which is mathematically close to just moving the threshold. The side effect is that predicted probabilities become **miscalibrated**: a model trained on a 50/50 resampled set predicts positives far more often than the true 1% base rate. With strong learners such as gradient boosting, the often-better recipe is: train on the natural distribution, optimize a ranking metric (PR-AUC), then **pick the threshold** from the cost of each error type, and calibrate if downstream consumers need real probabilities. Many careful benchmarks find SMOTE adds little on top of that for strong models; it tends to help most for weak learners and small datasets.',
+            },
+            {
+              type: 'table',
+              headers: ['Lever', 'Changes the data?', 'Effect on probabilities', 'Best when'],
+              rows: [
+                ['Threshold tuning', 'No', 'None (probabilities untouched)', 'Default first move with any probabilistic model'],
+                ['Class weights', 'No', 'Inflates minority probabilities', 'Linear models, neural nets, quick fix'],
+                ['Random undersampling', 'Yes (drops majority rows)', 'Inflates minority probabilities; correctable analytically', 'Huge datasets where training cost matters'],
+                ['SMOTE / variants', 'Yes (synthetic minority rows)', 'Inflates minority probabilities', 'Weak learners, small data; risky with high-dimensional or categorical features'],
+                ['Focal loss', 'No', 'Down-weights easy examples', 'Deep learning detection/segmentation with extreme imbalance'],
+              ],
             },
             {
               type: 'callout',
               kind: 'pitfall',
               text: 'Applying SMOTE (or any resampling) before splitting into train/test — or worse, before cross-validation folds are created — leaks synthetic points derived from test-set neighbors into training, and can even place near-duplicate synthetic/original pairs on opposite sides of the split. Always split first, then resample only the training fold.',
+            },
+          ],
+        },
+        {
+          id: 'probability-calibration-thresholds',
+          title: 'Probability Calibration and Decision Thresholds',
+          summary:
+            'A model can rank examples well and still output probabilities that are badly wrong — calibration makes "0.8" really mean 80%, and threshold selection turns those probabilities into decisions that minimize real business cost.',
+          keyPoints: [
+            'A classifier is **calibrated** if, among all examples it scores at 0.7, about 70% are actually positive. Ranking metrics like ROC-AUC are blind to calibration: any monotonic distortion of the scores leaves AUC unchanged.',
+            'Common sources of miscalibration: resampling/class weights, boosting (pushes scores toward the extremes), naive Bayes (overconfident), max-margin models like SVMs (no probabilities at all), and modern deep networks (often overconfident).',
+            'Measure with a **reliability diagram** plus **Brier score** or **log loss**; expected calibration error (ECE) is a popular summary but depends on binning choices.',
+            'Fix with a post-hoc mapping fitted on held-out data: **Platt scaling** (sigmoid, few parameters, good for small data), **isotonic regression** (non-parametric, needs more data), or **temperature scaling** for neural networks.',
+            'The optimal threshold depends on costs, not on 0.5: with calibrated `p`, flag when `p · cost_FN > (1 - p) · cost_FP`, i.e. `p > cost_FP / (cost_FP + cost_FN)`.',
+          ],
+          blocks: [
+            {
+              type: 'p',
+              text: 'Calibration matters whenever the probability itself is used, not just the ordering: expected-loss pricing (`p(default) × exposure`), ranking ads by `p(click) × bid`, combining several models, triggering an alert when risk exceeds 30%, or reporting a risk to a clinician. If the scores feed only a top-k list, calibration is irrelevant and you can skip it.',
+            },
+            {
+              type: 'code',
+              language: 'python',
+              title: 'diagnose and fix calibration, then pick a cost-based threshold',
+              code: `import numpy as np
+from sklearn.calibration import CalibratedClassifierCV, calibration_curve
+from sklearn.metrics import brier_score_loss, log_loss
+from sklearn.ensemble import HistGradientBoostingClassifier
+
+base = HistGradientBoostingClassifier(max_iter=300)
+
+# cross-fitted calibration: each calibrator is fitted on data its model did not train on
+calibrated = CalibratedClassifierCV(base, method="isotonic", cv=5).fit(X_train, y_train)
+
+p = calibrated.predict_proba(X_test)[:, 1]
+print("Brier:", brier_score_loss(y_test, p), "log loss:", log_loss(y_test, p))
+
+frac_pos, mean_pred = calibration_curve(y_test, p, n_bins=10, strategy="quantile")
+# plot mean_pred (x) against frac_pos (y): a perfectly calibrated model lies on y = x
+
+# cost-based threshold: missing a fraud costs 200, a false alarm (manual review) costs 5
+cost_fp, cost_fn = 5, 200
+threshold = cost_fp / (cost_fp + cost_fn)      # ~= 0.024 -- nowhere near 0.5
+decisions = p >= threshold`,
+            },
+            {
+              type: 'code',
+              language: 'python',
+              title: 'let cross-validation choose the threshold (scikit-learn 1.5+)',
+              code: `from sklearn.model_selection import TunedThresholdClassifierCV
+from sklearn.metrics import make_scorer, fbeta_score
+
+# optimize the threshold for F2 (recall weighted twice as much as precision)
+tuned = TunedThresholdClassifierCV(
+    base, scoring=make_scorer(fbeta_score, beta=2), cv=5
+).fit(X_train, y_train)
+print("chosen threshold:", tuned.best_threshold_)
+y_pred = tuned.predict(X_test)`,
+            },
+            {
+              type: 'table',
+              headers: ['Method', 'How it works', 'Data needed', 'Notes'],
+              rows: [
+                ['Platt / sigmoid', 'Fit logistic regression on the model\'s scores', 'Small (hundreds of points)', 'Assumes a sigmoid-shaped distortion'],
+                ['Isotonic regression', 'Fit a monotonic step function', 'Larger (thousands+)', 'Flexible, can overfit small calibration sets'],
+                ['Temperature scaling', 'Divide logits by one learned scalar T before softmax', 'Small', 'Standard for neural nets; does not change argmax predictions'],
+                ['Prior shift correction', 'Re-weight odds by (true prior / training prior)', 'Only the class ratios', 'Undo the effect of resampling analytically'],
+              ],
+            },
+            {
+              type: 'callout',
+              kind: 'pitfall',
+              text: 'Fitting the calibrator on the same data the model was trained on learns nothing — the model is already overconfident on its own training rows. Use a separate calibration split or cross-fitting (`CalibratedClassifierCV` with `cv`), and re-check calibration in production: drift in the base rate (e.g. fraud doubling during a holiday season) silently miscalibrates even a perfectly calibrated model.',
+            },
+          ],
+        },
+        {
+          id: 'time-series-forecasting-ml',
+          title: 'Time Series and Forecasting with ML',
+          summary:
+            'Time-ordered data breaks the i.i.d. assumption behind most of classical ML — forecasting needs lag features built without peeking ahead, forward-chaining validation, strong naive baselines, and an explicit plan for horizon, seasonality and uncertainty.',
+          keyPoints: [
+            'Frame the problem precisely: **forecast horizon** (1 day? 13 weeks?), **granularity**, **what is known in advance** (calendar, promotions, prices) versus only historically (sales, weather actuals).',
+            'Tree models and linear models become forecasters through **feature engineering**: lags (`y_{t-7}`), rolling statistics computed only on past values, calendar features, and known future covariates.',
+            '**Always beat a naive baseline**: last value, seasonal naive (same day last week/year), or a moving average. Many "ML forecasts" lose to seasonal naive once evaluated honestly.',
+            'Validate with **rolling-origin (backtest) evaluation** over several cut-off dates, never random k-fold; the gap between cut-off and target must equal the real deployment horizon.',
+            'Multi-step strategies: **recursive** (feed predictions back as lags — errors compound), **direct** (one model per horizon), or multi-output models. Global models trained across many related series usually beat one model per series.',
+          ],
+          blocks: [
+            {
+              type: 'mermaid',
+              code: `flowchart LR
+    subgraph B1["Backtest 1"]
+        T1["Train: Jan-Jun"] --> V1["Validate: Jul"]
+    end
+    subgraph B2["Backtest 2"]
+        T2["Train: Jan-Jul"] --> V2["Validate: Aug"]
+    end
+    subgraph B3["Backtest 3"]
+        T3["Train: Jan-Aug"] --> V3["Validate: Sep"]
+    end
+    V1 --> Avg["Average error across cut-offs"]
+    V2 --> Avg
+    V3 --> Avg`,
+            },
+            {
+              type: 'code',
+              language: 'python',
+              title: 'leak-free lag features for a global gradient-boosting forecaster',
+              code: `import pandas as pd
+
+df = df.sort_values(["store_id", "date"])
+g = df.groupby("store_id")["sales"]
+
+HORIZON = 7   # we forecast 7 days ahead, so the newest usable value is sales at t-7
+for lag in [HORIZON, HORIZON + 7, HORIZON + 21, 364]:
+    df[f"lag_{lag}"] = g.shift(lag)
+
+# rolling stats must be shifted FIRST so the window ends at t - HORIZON, not at t
+df["roll_mean_28"] = g.transform(lambda s: s.shift(HORIZON).rolling(28).mean())
+df["dow"] = df["date"].dt.dayofweek
+df["is_promo"] = df["promo_planned"]        # known in advance -> legitimate future covariate
+
+# time-based split: everything before the cut-off trains, the following weeks validate
+cutoff = pd.Timestamp("2026-06-01")
+train = df[df["date"] < cutoff]
+valid = df[(df["date"] >= cutoff) & (df["date"] < cutoff + pd.Timedelta(days=28))]`,
+            },
+            {
+              type: 'table',
+              headers: ['Approach', 'Strengths', 'Weaknesses'],
+              rows: [
+                ['Seasonal naive / ETS / ARIMA', 'Strong baselines, interpretable, work on short single series', 'One series at a time; awkward with many covariates'],
+                ['Gradient boosting on lag features', 'Handles covariates, many series, non-linearity; usually the strongest practical choice', 'Cannot extrapolate trends beyond seen range; feature engineering is on you'],
+                ['Deep sequence models (N-BEATS/TFT-style)', 'Learn across thousands of series, multi-horizon outputs', 'Data hungry, heavier to train and serve'],
+                ['Pretrained time-series foundation models', 'Zero-shot forecasts with no training', 'Quality varies by domain; benchmark against seasonal naive and boosting before adopting'],
+              ],
+            },
+            {
+              type: 'callout',
+              kind: 'tip',
+              text: 'Forecasts drive inventory and staffing decisions, which care about ranges, not points. Produce prediction intervals (quantile losses, conformal prediction on backtest residuals) and check their coverage in backtests: an "80% interval" that contains the truth only 55% of the time is a planning hazard.',
+            },
+            {
+              type: 'callout',
+              kind: 'pitfall',
+              text: 'Tree-based models predict within the range of targets they have seen. If sales are trending upward, a boosted model will flatten out at the historical maximum. Model the trend separately (e.g. predict differences, ratios to a rolling level, or detrended values) and let the trees model the residual structure.',
             },
           ],
         },
@@ -1142,6 +1890,38 @@ W1 -= learning_rate * d_W1`,
               kind: 'tip',
               text: 'In an interview, precisely stating **why** backprop is efficient (it reuses the backward-flowing gradient rather than recomputing each weight\'s full derivative chain independently — turning what would be exponential work into work linear in the number of layers) is what separates "I can name backpropagation" from "I understand backpropagation."',
             },
+            {
+              type: 'p',
+              text: 'Modern frameworks never make you write the backward pass by hand. PyTorch records the operations of the forward pass in a computation graph and runs **reverse-mode automatic differentiation**: one backward pass yields the gradient of a scalar loss with respect to every parameter, at a cost of only a small constant multiple of the forward pass. The price is memory: every intermediate activation needed by the backward pass must be stored until it is used, which is why activation memory, not parameter memory, often limits batch size — and why techniques like gradient (activation) checkpointing trade recomputation for memory.',
+            },
+            {
+              type: 'code',
+              language: 'python',
+              title: 'the same network with autograd, and a numerical gradient check',
+              code: `import torch
+
+torch.manual_seed(0)
+X = torch.randn(64, 10)
+y = torch.randint(0, 2, (64, 1)).float()
+W1 = torch.randn(10, 16, requires_grad=True)
+W2 = torch.randn(16, 1, requires_grad=True)
+
+def loss_fn():
+    h = torch.relu(X @ W1)
+    logits = h @ W2
+    return torch.nn.functional.binary_cross_entropy_with_logits(logits, y)
+
+loss = loss_fn()
+loss.backward()                  # reverse-mode autodiff fills W1.grad and W2.grad
+
+# finite-difference check on one weight: (L(w + eps) - L(w - eps)) / (2 * eps)
+eps = 1e-3
+with torch.no_grad():
+    W1[0, 0] += eps; up = loss_fn()
+    W1[0, 0] -= 2 * eps; down = loss_fn()
+    W1[0, 0] += eps
+print(W1.grad[0, 0].item(), ((up - down) / (2 * eps)).item())   # should agree closely`,
+            },
           ],
         },
         {
@@ -1165,6 +1945,8 @@ W1 -= learning_rate * d_W1`,
                 ['Tanh', '(-1, 1)', 'Yes', 'Yes, at both extremes', 'Occasionally in RNNs; rarely in modern deep hidden layers'],
                 ['ReLU', '[0, infinity)', 'No', 'No for positive inputs; "dies" for negative', 'Default for hidden layers in most modern networks'],
                 ['Leaky ReLU / ELU', '(-infinity, infinity) roughly', 'Closer to zero-centered', 'Mitigated', 'When dying ReLU is observed to be a real problem'],
+                ['GELU', 'about (-0.17, infinity)', 'Roughly', 'No; smooth, small negative region', 'Default in BERT/GPT-style Transformers'],
+                ['SiLU / Swish (x · sigmoid(x)), and SwiGLU gating', '(-0.28, infinity) for SiLU', 'Roughly', 'No; smooth', 'Modern LLM feed-forward blocks (SwiGLU), EfficientNet-style CNNs'],
                 ['Softmax', '(0, 1), sums to 1', 'N/A', 'N/A (used only at output)', 'Multi-class classification output layer'],
               ],
             },
@@ -1250,10 +2032,61 @@ def sigmoid_deriv(z):
 velocity = beta * velocity + (1 - beta) * gradient   # exponential moving average of gradients
 weights -= learning_rate * velocity
 
-# Adam (simplified, no bias correction shown)
+# (PyTorch's SGD uses the undamped form: velocity = momentum * velocity + gradient)
+
+# Adam, step t = 1, 2, 3, ...
 m = beta1 * m + (1 - beta1) * gradient                 # 1st moment: mean of gradients
 v = beta2 * v + (1 - beta2) * (gradient ** 2)           # 2nd moment: mean of squared gradients
-weights -= learning_rate * m / (np.sqrt(v) + epsilon)   # adaptive per-parameter step`,
+m_hat = m / (1 - beta1 ** t)                            # bias correction: m and v start at 0,
+v_hat = v / (1 - beta2 ** t)                            # so early estimates are too small
+weights -= learning_rate * m_hat / (np.sqrt(v_hat) + epsilon)
+
+# AdamW: weight decay applied directly to the weights, NOT added to the gradient
+weights -= learning_rate * weight_decay * weights`,
+            },
+            {
+              type: 'heading',
+              text: 'AdamW and learning-rate schedules: the modern default',
+            },
+            {
+              type: 'p',
+              text: 'Adding an L2 term to the loss and using Adam does **not** behave like weight decay: the L2 gradient gets divided by `sqrt(v_hat)` along with everything else, so parameters with large historical gradients are barely regularized. **AdamW** (Loshchilov and Hutter) decouples the two by shrinking weights directly at each step. In PyTorch, `torch.optim.Adam(..., weight_decay=...)` is the coupled L2 version and `torch.optim.AdamW` is the decoupled one; for Transformers and most modern networks, AdamW is the standard choice. Exclude biases and normalization parameters from weight decay.',
+            },
+            {
+              type: 'code',
+              language: 'python',
+              title: 'AdamW with linear warmup + cosine decay',
+              code: `import math
+import torch
+
+decay, no_decay = [], []
+for name, p in model.named_parameters():
+    (no_decay if p.ndim < 2 else decay).append(p)    # biases and norm weights: no decay
+
+optimizer = torch.optim.AdamW(
+    [{"params": decay, "weight_decay": 0.05},
+     {"params": no_decay, "weight_decay": 0.0}],
+    lr=3e-4, betas=(0.9, 0.95),
+)
+
+warmup, total = 1_000, 50_000
+def lr_lambda(step):
+    if step < warmup:
+        return (step + 1) / warmup                         # linear warmup
+    progress = (step - warmup) / max(1, total - warmup)
+    return 0.5 * (1 + math.cos(math.pi * progress))       # cosine decay to 0
+
+scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda)
+# per training step: loss.backward(); optimizer.step(); scheduler.step(); optimizer.zero_grad()`,
+            },
+            {
+              type: 'list',
+              items: [
+                '**Warmup** prevents Adam\'s noisy early second-moment estimates (and large initial gradients) from producing huge, destabilizing updates in the first few hundred steps.',
+                '**Decay** (cosine, linear, or step) lets training take big exploratory steps early and fine, precise steps late; most of the final-loss gains of a schedule come from the low-learning-rate phase at the end.',
+                '**Learning rate is the hyperparameter to tune first.** A learning-rate range test (increase the LR exponentially over a few hundred steps and watch where the loss starts rising) gives a sensible upper bound in minutes.',
+                '**Batch size and LR interact**: larger batches give less noisy gradients and usually tolerate a larger learning rate (roughly linear scaling for SGD, closer to square-root scaling for Adam), up to a critical batch size beyond which extra batch size buys little.',
+              ],
             },
             {
               type: 'callout',
@@ -1270,7 +2103,7 @@ weights -= learning_rate * m / (np.sqrt(v) + epsilon)   # adaptive per-parameter
           keyPoints: [
             '**L2 regularization (weight decay)** adds `λ * sum(w²)` to the loss — penalizes large weights, encouraging the model to spread influence across many features/paths rather than relying heavily on a few; the most common regularizer for neural nets.',
             '**L1 regularization** adds `λ * sum(|w|)` — tends to push many weights to *exactly* zero, producing sparse models (useful for implicit feature selection), unlike L2, which shrinks weights but rarely zeroes them out entirely.',
-            '**Dropout**: during training, each neuron is randomly "dropped" (set to zero) with some probability p on every forward pass — forces the network to not rely on any single neuron or fixed co-adapted group of neurons, since any of them might vanish; at inference time, all neurons are used, typically with outputs scaled to match the expected magnitude seen during training.',
+            '**Dropout**: during training, each neuron is randomly "dropped" (set to zero) with some probability p on every forward pass — forces the network to not rely on any single neuron or fixed co-adapted group of neurons, since any of them might vanish; at inference time, all neurons are used. Modern frameworks implement **inverted dropout**: surviving activations are scaled up by `1 / (1 - p)` during training, so that inference needs no rescaling at all.',
             '**Early stopping**: monitor validation loss during training and stop (or restore the best checkpoint) once it stops improving, even if training loss is still decreasing — directly targets the exact point where the model starts fitting noise rather than signal.',
             'These techniques compose freely and are commonly used together (e.g., L2 + dropout + early stopping in the same training run) — each attacks overfitting through a different mechanism, so combining them is usually additive rather than redundant.',
           ],
@@ -1296,16 +2129,18 @@ weights -= learning_rate * m / (np.sqrt(v) + epsilon)   # adaptive per-parameter
               type: 'code',
               language: 'python',
               title: 'dropout and L2 weight decay in a PyTorch model',
-              code: `import torch.nn as nn
+              code: `import torch
+import torch.nn as nn
 
 model = nn.Sequential(
     nn.Linear(784, 256),
     nn.ReLU(),
-    nn.Dropout(p=0.3),      # 30% of activations zeroed during training only
+    nn.Dropout(p=0.3),      # 30% of activations zeroed during training only (model.train())
     nn.Linear(256, 10),
 )
 
-optimizer = torch.optim.Adam(model.parameters(), lr=1e-3, weight_decay=1e-4)  # L2 penalty
+# AdamW = decoupled weight decay; Adam(weight_decay=...) would add a coupled L2 term instead
+optimizer = torch.optim.AdamW(model.parameters(), lr=1e-3, weight_decay=1e-2)
 
 # early stopping, monitoring validation loss
 best_val_loss, patience, patience_counter = float('inf'), 5, 0
@@ -1334,10 +2169,10 @@ for epoch in range(max_epochs):
             'Batch normalization re-standardizes each layer\'s activations (per mini-batch) to have zero mean and unit variance before a learned rescale — stabilizing and accelerating training by preventing the distribution of each layer\'s inputs from shifting wildly as earlier layers\' weights update.',
           keyPoints: [
             'For each mini-batch, batch norm normalizes each activation to zero mean/unit variance (using that batch\'s statistics), then applies a learned scale (`γ`) and shift (`β`) — so the network can still represent any distribution it needs, but starts from a well-behaved, standardized baseline at every layer.',
-            'It addresses **internal covariate shift**: as earlier layers\' weights update during training, the distribution of inputs to later layers keeps shifting, forcing those later layers to continuously re-adapt — batch norm keeps each layer\'s input distribution comparatively stable throughout training.',
+            'It was originally motivated by **internal covariate shift** (later layers chasing the shifting input distribution produced by earlier layers). Later work (Santurkar et al., 2018) showed that reducing that shift is not the main reason it works: batch norm chiefly makes the loss landscape **smoother** (better-conditioned gradients), which is what permits larger learning rates. Know both explanations; interviewers increasingly expect the second.',
             'In practice, batch norm allows meaningfully higher learning rates, speeds up convergence, and acts as a mild regularizer (since each batch\'s statistics add a small amount of noise, similar in spirit to dropout) — often reducing (though not eliminating) the need for other regularization.',
             'At inference time, there usually is no "batch" (predictions can be made one example at a time), so batch norm uses a running average of mean/variance accumulated *during training*, not the statistics of whatever batch happens to be at inference — a common source of subtle train/eval-mode bugs if forgotten.',
-            'Batch norm is sensitive to small batch sizes (batch statistics become noisy/unreliable) — alternatives like **layer normalization** (normalizes across features for a single example, not across the batch) are preferred in settings like Transformers and small-batch/sequential training, where per-batch statistics are unreliable or the batch structure itself is awkward.',
+            'Batch norm is sensitive to small batch sizes (batch statistics become noisy/unreliable) — alternatives like **layer normalization** (normalizes across features for a single example, not across the batch) are preferred in settings like Transformers and small-batch/sequential training; **RMSNorm** (layer norm without mean-centering, cheaper) is the common choice in recent LLMs, and **group normalization** is common in detection/segmentation models trained with tiny per-GPU batches.',
           ],
           blocks: [
             {
@@ -1370,6 +2205,88 @@ model.eval()    # uses the ACCUMULATED running mean/variance from training, not 
               type: 'callout',
               kind: 'pitfall',
               text: 'Forgetting to call `model.eval()` before inference is one of the most common real-world PyTorch bugs involving batch norm (and dropout) — the model silently keeps using per-batch statistics (or keeps applying dropout) at inference time, producing inconsistent, batch-size-dependent, and often visibly worse predictions than the same model correctly switched to evaluation mode.',
+            },
+          ],
+        },
+        {
+          id: 'training-deep-networks-in-practice',
+          title: 'Training Deep Networks in Practice: Init, Residuals, Precision, and Debugging',
+          summary:
+            'Getting a deep network to train reliably depends on a handful of engineering ideas — careful initialization, residual connections, normalization, gradient clipping, mixed precision and a disciplined debugging routine — more than on exotic architectures.',
+          keyPoints: [
+            '**Initialization** keeps activation and gradient variance roughly constant across layers: Xavier/Glorot (`Var(w) = 2 / (fan_in + fan_out)`) for tanh/sigmoid, He/Kaiming (`Var(w) = 2 / fan_in`) for ReLU. Bad init alone can make a deep network untrainable.',
+            '**Residual connections** (`x + F(x)`) give gradients an identity path through the network, which is what made 100+ layer networks trainable (ResNet) and is a core ingredient of every Transformer.',
+            '**Gradient clipping** (rescale the global gradient norm to at most a threshold, often 1.0) prevents a single bad batch from blowing up training — standard for RNNs and Transformers.',
+            '**Mixed precision** (bf16 or fp16 compute with fp32 master weights) roughly halves memory and speeds up training substantially on modern GPUs; bf16 has fp32\'s exponent range and usually needs no loss scaling, fp16 does.',
+            'Debug systematically: overfit a single batch first, check the initial loss against its theoretical value (`ln(num_classes)` for balanced softmax), visualize inputs after augmentation, and track gradient norms per layer.',
+          ],
+          blocks: [
+            {
+              type: 'mermaid',
+              code: `flowchart LR
+    X["x"] --> F["F(x): conv/linear, norm, activation"]
+    X --> Add(("+"))
+    F --> Add
+    Add --> Out["x + F(x)"]`,
+            },
+            {
+              type: 'p',
+              text: 'Why residuals work: the gradient of `y = x + F(x)` with respect to `x` is `I + dF/dx`. Even if `dF/dx` is small, the identity term carries the gradient straight back to earlier layers, so stacking blocks no longer multiplies gradients by many small factors. It also changes what each block must learn: instead of a full mapping, a block learns a *correction* to its input, and "do nothing" (F = 0) is easy to represent — so adding layers rarely makes the network worse, which was not true of plain deep stacks.',
+            },
+            {
+              type: 'code',
+              language: 'python',
+              title: 'a modern PyTorch training loop: bf16 autocast, clipping, compile, eval mode',
+              code: `import torch
+import torch.nn as nn
+
+device = "cuda" if torch.cuda.is_available() else "cpu"
+model = MyNet().to(device)
+model = torch.compile(model)                 # graph capture + kernel fusion (PyTorch 2.x)
+optimizer = torch.optim.AdamW(model.parameters(), lr=3e-4, weight_decay=0.05)
+loss_fn = nn.CrossEntropyLoss(label_smoothing=0.1)
+
+for epoch in range(num_epochs):
+    model.train()
+    for xb, yb in train_loader:
+        xb, yb = xb.to(device, non_blocking=True), yb.to(device, non_blocking=True)
+        with torch.autocast(device_type=device, dtype=torch.bfloat16):
+            loss = loss_fn(model(xb), yb)
+        optimizer.zero_grad(set_to_none=True)
+        loss.backward()
+        grad_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+        optimizer.step()
+
+    model.eval()                              # dropout off, batch norm uses running stats
+    with torch.inference_mode():              # no autograd bookkeeping
+        val_loss = sum(loss_fn(model(xb.to(device)), yb.to(device)).item()
+                       for xb, yb in val_loader) / len(val_loader)`,
+            },
+            {
+              type: 'table',
+              headers: ['Symptom', 'Likely cause', 'First thing to try'],
+              rows: [
+                ['Loss is NaN/inf after some steps', 'LR too high, fp16 overflow, log(0), division by zero', 'Lower LR, add warmup, clip gradients, use bf16 or loss scaling, check for log of zero'],
+                ['Loss stuck at ln(num_classes)', 'Labels misaligned, bug in data pipeline, LR far too small, dead ReLUs', 'Overfit one batch; inspect a few (input, label) pairs by eye'],
+                ['Train loss falls, val loss rises early', 'Overfitting, or train/val preprocessing mismatch', 'More augmentation/regularization; diff the two pipelines'],
+                ['Training loss very noisy', 'Batch too small, LR too high, unshuffled data', 'Larger batch or lower LR; confirm shuffling'],
+                ['Great validation, poor production', 'Leakage, eval-mode not set, train/serve skew', 'Check model.eval(), identical preprocessing, out-of-time test'],
+                ['GPU utilization low', 'Data loading bottleneck', 'More DataLoader workers, pinned memory, pre-processed shards'],
+              ],
+            },
+            {
+              type: 'list',
+              items: [
+                '**Data augmentation** is often the strongest regularizer for vision and audio: random crops, flips, color jitter, mixup/cutmix. Augment only training data and only in ways that preserve the label (do not horizontally flip text or digits like 6/9).',
+                '**Label smoothing** replaces the one-hot target with `1 - ε` on the true class and `ε / (K - 1)` on the others, discouraging overconfident logits and often improving calibration and accuracy.',
+                '**Reproducibility**: seed Python, NumPy and PyTorch, log library versions and data snapshot IDs, and know that full determinism on GPUs requires deterministic algorithms (`torch.use_deterministic_algorithms(True)`) at some speed cost.',
+                '**Checkpoint** model, optimizer, scheduler and RNG state together so a run can resume exactly, and keep the best checkpoint by validation metric, not the last one.',
+              ],
+            },
+            {
+              type: 'callout',
+              kind: 'tip',
+              text: 'The single most valuable debugging habit: before any long run, train on one small batch (e.g. 32 examples) and confirm the loss goes to nearly zero. If a model cannot memorize 32 examples, there is a bug in the model, loss, labels or optimizer — no amount of tuning on the full dataset will fix it.',
             },
           ],
         },
@@ -1491,7 +2408,7 @@ model = nn.Sequential(
             'Attention scores are computed as the dot product of a token\'s Query with every token\'s Key (including its own), scaled by `sqrt(d_k)` (the key dimension, to keep gradients well-behaved as dimensionality grows) — these scores are then passed through **softmax** to produce a probability distribution (attention weights) over all positions.',
             'The output for each token is the **weighted sum of all tokens\' Values**, weighted by that attention distribution — so each token\'s new representation is a learned, content-based blend of every other token\'s information, not just its immediate neighbors.',
             '**Multi-head attention** runs several independent attention computations (heads) in parallel, each with its own learned Q/K/V projections, then concatenates and linearly combines their outputs — different heads can learn to attend to different kinds of relationships (e.g., one head tracking syntactic dependency, another tracking coreference) simultaneously.',
-            'Because self-attention has no inherent notion of sequence order (unlike an RNN\'s step-by-step structure), Transformers add **positional encodings** to the input embeddings to inject order information; and because there is no sequential dependency between steps, attention over an entire sequence is computed in parallel, which is a major reason Transformers train so much faster than RNNs at scale on modern hardware.',
+            'Because self-attention has no inherent notion of sequence order (unlike an RNN\'s step-by-step structure), Transformers inject order information — originally fixed sinusoidal or learned **positional embeddings** added to the inputs, and in most current LLMs **rotary position embeddings (RoPE)**, which rotate queries and keys so that attention scores depend on relative distance; and because there is no sequential dependency between steps, attention over an entire sequence is computed in parallel, which is a major reason Transformers train so much faster than RNNs at scale on modern hardware.',
           ],
           blocks: [
             {
@@ -1518,7 +2435,7 @@ def softmax(x, axis=-1):
     e = np.exp(x)
     return e / np.sum(e, axis=axis, keepdims=True)
 
-def self_attention(X, W_q, W_k, W_v):
+def self_attention(X, W_q, W_k, W_v, causal=False):
     # X: (seq_len, d_model)
     Q = X @ W_q     # (seq_len, d_k)
     K = X @ W_k     # (seq_len, d_k)
@@ -1526,6 +2443,10 @@ def self_attention(X, W_q, W_k, W_v):
 
     d_k = Q.shape[-1]
     scores = (Q @ K.T) / np.sqrt(d_k)     # (seq_len, seq_len) -- every token vs every token
+    if causal:                             # decoder/LLM: token i may not look at tokens > i
+        n = scores.shape[0]
+        future = np.triu(np.ones((n, n), dtype=bool), k=1)
+        scores = np.where(future, -np.inf, scores)
     weights = softmax(scores, axis=-1)     # each row sums to 1
     output = weights @ V                    # (seq_len, d_v) -- weighted blend of all Values
     return output, weights`,
@@ -1543,7 +2464,140 @@ def self_attention(X, W_q, W_k, W_v):
             {
               type: 'callout',
               kind: 'tip',
-              text: 'The scaling factor `sqrt(d_k)` is not cosmetic: without it, dot products grow large in magnitude as dimensionality increases, pushing softmax into a saturated regime with near-zero gradients almost everywhere except one dominant position — scaling keeps the pre-softmax scores in a range where softmax\'s gradient stays well-behaved and training remains stable.',
+              text: 'The scaling factor `sqrt(d_k)` is not cosmetic: if query and key components are roughly independent with unit variance, their dot product has variance `d_k`, so raw scores grow with dimensionality and push softmax into a saturated regime with near-zero gradients almost everywhere except one dominant position — dividing by `sqrt(d_k)` restores unit variance and keeps training stable.',
+            },
+            {
+              type: 'heading',
+              text: 'The full block, and what changed since 2017',
+            },
+            {
+              type: 'mermaid',
+              code: `flowchart TB
+    In["Token embeddings"] --> N1["RMSNorm / LayerNorm"]
+    N1 --> MHA["Multi-head self-attention (causal mask in decoders)"]
+    MHA --> R1(("+"))
+    In --> R1
+    R1 --> N2["RMSNorm / LayerNorm"]
+    N2 --> FFN["Feed-forward MLP, e.g. SwiGLU, about 4x wider"]
+    FFN --> R2(("+"))
+    R1 --> R2
+    R2 --> Next["Next block (repeat N times)"]`,
+            },
+            {
+              type: 'table',
+              headers: ['Component', 'Original Transformer (2017)', 'Typical modern LLM practice', 'Why'],
+              rows: [
+                ['Architecture', 'Encoder-decoder', 'Decoder-only (GPT-style) for generation; encoder-only (BERT-style) for embeddings/classification', 'Decoder-only scales simply with next-token prediction'],
+                ['Norm placement', 'Post-norm (after residual add)', 'Pre-norm (before each sub-layer)', 'Much more stable training at depth'],
+                ['Normalization', 'LayerNorm', 'RMSNorm', 'Cheaper, works as well'],
+                ['Positions', 'Sinusoidal, added to inputs', 'RoPE applied to queries/keys', 'Relative positions, better length handling'],
+                ['Feed-forward activation', 'ReLU', 'GELU or SwiGLU', 'Better quality per parameter'],
+                ['Attention heads', 'Full multi-head', 'Grouped-query attention (shared K/V heads)', 'Smaller KV cache, faster inference'],
+                ['Attention kernel', 'Naive softmax(QK^T)V', 'Fused, memory-efficient kernels (FlashAttention-style)', 'Avoids materializing the n x n matrix in GPU memory'],
+              ],
+            },
+            {
+              type: 'callout',
+              kind: 'note',
+              text: 'Self-attention costs O(n²·d) time and, naively, O(n²) memory in sequence length n. Fused kernels remove the memory blow-up but not the quadratic compute, which is why long-context work explores sparse/sliding-window attention, state-space and linear-attention models. At inference, decoder models cache past keys and values (the **KV cache**) so each new token costs O(n) instead of recomputing the whole sequence — and that cache, not the weights, is often what limits batch size and context length in serving.',
+            },
+          ],
+        },
+        {
+          id: 'transfer-learning-embeddings',
+          title: 'Transfer Learning, Fine-Tuning, and Embeddings',
+          summary:
+            'Most deep learning in practice starts from a pretrained model rather than random weights — you reuse representations learned on huge datasets, either as frozen feature extractors (embeddings) or by fine-tuning some or all weights on your smaller labeled dataset.',
+          keyPoints: [
+            '**Self-supervised pretraining** (next-token prediction, masked tokens, contrastive image-text objectives) learns general representations from unlabeled data; the expensive part happens once, and everyone else adapts the result.',
+            'Adaptation ladder, cheapest first: **zero-/few-shot prompting** of a foundation model, **frozen embeddings + a simple classifier**, **parameter-efficient fine-tuning** (LoRA and similar adapters), then **full fine-tuning**.',
+            'An **embedding** maps an input (sentence, image, product, user) to a dense vector where geometric closeness reflects semantic similarity — enabling search, clustering, deduplication, recommendation, and strong tabular features.',
+            '**LoRA** freezes the pretrained weight matrix `W` and learns a low-rank update `W + B·A` (rank r much smaller than the matrix dimensions), training a tiny fraction of the parameters with quality often close to full fine-tuning.',
+            'Fine-tuning failure modes: **catastrophic forgetting** of general abilities, overfitting a small dataset, and evaluation contamination when the pretraining data already contained your test set.',
+          ],
+          blocks: [
+            {
+              type: 'mermaid',
+              code: `flowchart LR
+    Pre["Pretrained model<br/>(huge unlabeled corpus)"] --> Z["Prompting<br/>no training"]
+    Pre --> E["Frozen embeddings<br/>+ logistic regression / GBM"]
+    Pre --> L["LoRA / adapters<br/>train under 1-5% of params"]
+    Pre --> F["Full fine-tuning<br/>train all params"]
+    Z --> Cost["Increasing data, compute and risk"]
+    E --> Cost
+    L --> Cost
+    F --> Cost`,
+            },
+            {
+              type: 'table',
+              headers: ['Approach', 'Labeled data needed', 'Compute', 'Pick it when'],
+              rows: [
+                ['Prompting / in-context examples', 'None to a handful', 'Inference only', 'Prototype, task close to what the model already does'],
+                ['Frozen embeddings + linear/GBM head', 'Hundreds to thousands', 'Tiny (CPU is fine for the head)', 'Classification, retrieval, clustering on text/images; strong, cheap baseline'],
+                ['LoRA / adapters', 'Thousands', 'Moderate; one base model can serve many adapters', 'Need behavior or domain style the base model lacks'],
+                ['Full fine-tuning', 'Many thousands+', 'High; one full copy per task', 'Large domain shift, maximum quality, small enough model'],
+                ['Train from scratch', 'Very large', 'Highest', 'Truly novel modality/domain with abundant data'],
+              ],
+            },
+            {
+              type: 'code',
+              language: 'python',
+              title: 'vision transfer learning: freeze the backbone, then unfreeze with a lower LR',
+              code: `import torch
+import torch.nn as nn
+from torchvision.models import resnet50, ResNet50_Weights
+
+weights = ResNet50_Weights.DEFAULT                 # current recommended ImageNet weights
+model = resnet50(weights=weights)
+preprocess = weights.transforms()                  # use the SAME preprocessing as pretraining
+
+for p in model.parameters():                       # stage 1: frozen feature extractor
+    p.requires_grad = False
+model.fc = nn.Linear(model.fc.in_features, num_classes)   # new head, trainable
+
+optimizer = torch.optim.AdamW(model.fc.parameters(), lr=1e-3)
+# ... train a few epochs ...
+
+for p in model.layer4.parameters():                # stage 2: unfreeze the last block
+    p.requires_grad = True
+optimizer = torch.optim.AdamW([
+    {"params": model.layer4.parameters(), "lr": 1e-5},   # pretrained layers: small LR
+    {"params": model.fc.parameters(), "lr": 1e-4},
+], weight_decay=0.01)`,
+            },
+            {
+              type: 'code',
+              language: 'python',
+              title: 'text embeddings as features for a classical model',
+              code: `from sentence_transformers import SentenceTransformer
+from sklearn.linear_model import LogisticRegression
+from sklearn.model_selection import cross_val_score
+
+encoder = SentenceTransformer("all-MiniLM-L6-v2")      # small, fast general-purpose encoder
+X_emb = encoder.encode(texts, batch_size=64, normalize_embeddings=True)
+
+clf = LogisticRegression(max_iter=2000, C=1.0)
+print(cross_val_score(clf, X_emb, labels, cv=5, scoring="f1_macro").mean())
+# With normalized embeddings, cosine similarity == dot product:
+# similar = X_emb @ X_emb[query_idx]`,
+            },
+            {
+              type: 'list',
+              items: [
+                '**Why lower learning rates for pretrained layers**: early layers hold general features (edges, syntax) that are already good; large updates destroy them. Discriminative (layer-wise) learning rates and gradual unfreezing protect them.',
+                '**Domain gap decides how much to unfreeze**: natural photos to other natural photos, a frozen backbone may be enough; natural photos to X-rays or satellite imagery, fine-tune deeper.',
+                '**Embedding model choice**: evaluate on *your* data with a small labeled retrieval/classification set; public leaderboards are a starting point, not a decision. Keep the embedding model version pinned — vectors from different models (or versions) are not comparable, so changing it means re-embedding everything.',
+              ],
+            },
+            {
+              type: 'callout',
+              kind: 'pitfall',
+              text: 'Mismatched preprocessing is the classic transfer-learning bug: a backbone pretrained with specific resizing and normalization (or a specific tokenizer) silently degrades when fed differently preprocessed inputs. Always load the transforms/tokenizer that ship with the weights.',
+            },
+            {
+              type: 'callout',
+              kind: 'note',
+              text: 'Large language models, retrieval-augmented generation and agents build directly on these ideas; they are covered in depth in the Generative AI section. From a classical-ML point of view, the key shift is that the *representation* is now usually bought (pretrained), while your leverage lies in data quality, evaluation and the adaptation method.',
             },
           ],
         },
@@ -1583,6 +2637,49 @@ def self_attention(X, W_q, W_k, W_v):
               type: 'callout',
               kind: 'pitfall',
               text: '**Training/serving skew** — when the feature computation used at training time differs even slightly from what runs at inference time (different code paths, different data freshness, a bug in one but not the other) — is one of the most common causes of a model that looked great in offline evaluation but performs poorly in production. A shared feature pipeline/feature store used by both training and serving is the standard fix.',
+            },
+            {
+              type: 'code',
+              language: 'python',
+              title: 'experiment tracking and model registration with MLflow',
+              code: `import mlflow
+import mlflow.sklearn
+from sklearn.metrics import roc_auc_score
+
+mlflow.set_experiment("churn-model")
+
+with mlflow.start_run(run_name="hgb-v3"):
+    mlflow.log_params(params)
+    mlflow.set_tags({"git_sha": GIT_SHA, "data_snapshot": "2026-09-30"})
+
+    model.fit(X_train, y_train)
+    auc = roc_auc_score(y_val, model.predict_proba(X_val)[:, 1])
+    mlflow.log_metric("val_roc_auc", auc)
+
+    # log the whole Pipeline (preprocessing + model) with an input example,
+    # so the serving signature is recorded alongside the artifact
+    mlflow.sklearn.log_model(model, name="model", input_example=X_val.iloc[:5],
+                             registered_model_name="churn-model")`,
+            },
+            {
+              type: 'table',
+              headers: ['Version this', 'Why', 'Typical tool'],
+              rows: [
+                ['Code (training + serving)', 'Reproduce behavior, audit changes', 'Git'],
+                ['Data snapshot / query + timestamp', 'Same code on different data is a different model', 'Data versioning (lakehouse time travel, DVC)'],
+                ['Feature definitions', 'Avoid training/serving skew', 'Feature store or shared feature library'],
+                ['Hyperparameters, seeds, library versions', 'Reproduce the exact run', 'Experiment tracker, lockfiles, container images'],
+                ['Model artifact + signature + metrics', 'Promote, roll back, compare', 'Model registry with stages/aliases'],
+                ['Evaluation dataset and thresholds', 'Comparable gates across versions', 'Versioned eval sets, CI checks'],
+              ],
+            },
+            {
+              type: 'list',
+              items: [
+                '**CI/CD for ML** adds gates that ordinary software lacks: data validation (schema, ranges, null rates), training reproducibility checks, minimum-metric gates on a fixed evaluation set, slice-level regression checks, and fairness/latency budgets before a model can be promoted.',
+                '**Continuous training** pipelines retrain on a schedule or on a drift trigger — but automatic retraining without automatic evaluation gates just automates shipping regressions.',
+                '**Model cards / documentation** record intended use, training data, evaluation slices, known limitations and owners; increasingly expected by regulators and internal risk teams.',
+              ],
             },
           ],
         },
@@ -1634,6 +2731,54 @@ def self_attention(X, W_q, W_k, W_v):
               kind: 'tip',
               text: 'A/B testing a new model safely means routing a small, randomized slice of live traffic to the new (challenger) model while the majority continues on the current (control) model, comparing business/quality metrics with statistical rigor before a full rollout — combined with the ability to instantly roll back if the challenger underperforms. This is strictly safer than a full "big bang" cutover, which offers no fallback if the new model turns out worse in ways offline evaluation missed.',
             },
+            {
+              type: 'heading',
+              text: 'Measuring drift, and what to monitor',
+            },
+            {
+              type: 'code',
+              language: 'python',
+              title: 'population stability index (PSI) for one numeric feature',
+              code: `import numpy as np
+
+def psi(expected, actual, bins=10, eps=1e-6):
+    """PSI = sum((a - e) * ln(a / e)) over bins defined on the TRAINING (expected) data."""
+    edges = np.quantile(expected, np.linspace(0, 1, bins + 1))
+    edges[0], edges[-1] = -np.inf, np.inf
+    e = np.histogram(expected, edges)[0] / len(expected)
+    a = np.histogram(actual, edges)[0] / len(actual)
+    e, a = np.clip(e, eps, None), np.clip(a, eps, None)
+    return float(np.sum((a - e) * np.log(a / e)))
+
+score = psi(train_df["income"], last_week_df["income"])
+# common rule of thumb: < 0.1 stable, 0.1-0.25 moderate shift, > 0.25 investigate`,
+            },
+            {
+              type: 'table',
+              headers: ['Layer', 'What to monitor', 'Needs labels?'],
+              rows: [
+                ['Data quality', 'Schema, null rate, out-of-range values, category cardinality, upstream freshness', 'No'],
+                ['Input drift', 'PSI / KS test / Jensen-Shannon per feature, embedding drift for text/images', 'No'],
+                ['Prediction drift', 'Distribution of scores and of predicted classes, share above threshold', 'No'],
+                ['Model quality', 'AUC, precision/recall, calibration once labels arrive (often delayed)', 'Yes'],
+                ['Business outcome', 'Conversion, losses prevented, complaints, override rate by humans', 'Indirectly'],
+                ['Operational', 'Latency p50/p99, error rate, throughput, cost per 1k predictions', 'No'],
+              ],
+            },
+            {
+              type: 'list',
+              items: [
+                '**Shadow deployment**: the new model receives a copy of live traffic and logs predictions without affecting users — perfect for catching skew, latency and crash bugs before any user-facing test.',
+                '**Canary release**: a small percentage of real traffic is served by the new model with automatic rollback on guardrail breaches; an A/B test adds a proper statistical comparison of business metrics.',
+                '**Feedback loops**: the model\'s decisions change the data you later train on (a fraud model blocks transactions, so you never learn whether they were fraud; a recommender only gets clicks on what it showed). Keep a small randomized exploration/holdout slice to get unbiased labels.',
+                '**Alert on what is actionable**: dozens of per-feature drift alerts with no owner train people to ignore alerts. Prioritize features by importance and tie alerts to a runbook.',
+              ],
+            },
+            {
+              type: 'callout',
+              kind: 'warning',
+              text: 'Statistical drift tests become "significant" for trivially small shifts once you have millions of rows. Judge drift by effect size (PSI, distance metrics) and by its impact on prediction distribution and performance, not by p-values alone.',
+            },
           ],
         },
         {
@@ -1663,11 +2808,23 @@ def self_attention(X, W_q, W_k, W_v):
               title: 'SHAP values for a single prediction',
               code: `import shap
 
-explainer = shap.TreeExplainer(model)      # model-specific, fast explainer for tree ensembles
-shap_values = explainer.shap_values(X_test)
+# shap.Explainer picks a fast algorithm automatically (TreeExplainer for tree ensembles)
+explainer = shap.Explainer(model, X_train.sample(500, random_state=0))  # background data
+sv = explainer(X_test)                      # an Explanation object: values, base_values, data
 
-# for a single prediction: which features pushed it up/down, and by how much
-shap.force_plot(explainer.expected_value, shap_values[0], X_test.iloc[0])`,
+shap.plots.waterfall(sv[0])                 # one prediction: how each feature moved it
+shap.plots.beeswarm(sv)                     # global view: importance AND direction of effect
+# base_value + sum(sv[0].values) == the model output for X_test[0] (in log-odds for classifiers)`,
+            },
+            {
+              type: 'list',
+              items: [
+                '**Global vs local**: permutation importance and mean |SHAP| describe the model overall; SHAP/LIME values for one row explain one decision. Partial dependence and ICE plots show *how* the prediction changes as one feature varies.',
+                '**Explanations describe the model, not the world**: a large SHAP value for "zip code" says the model relies on it, not that zip code causes the outcome.',
+                '**Correlated features** are hard for every attribution method: credit is split between correlated features somewhat arbitrarily, and perturbation methods (LIME, KernelSHAP, permutation) may evaluate the model on unrealistic feature combinations.',
+                '**LIME instability**: re-running LIME with a different random seed or neighborhood width can produce a different explanation; check stability before showing explanations to users.',
+                '**Interpretable-by-design** models (sparse linear models, small trees, monotonic GBMs, generalized additive models such as EBMs) are often a better answer than post-hoc explanations in regulated settings.',
+              ],
             },
             {
               type: 'list',
@@ -1843,6 +3000,66 @@ shap.force_plot(explainer.expected_value, shap_values[0], X_test.iloc[0])`,
               question: 'What is A/B testing a model in production, and why is it safer than a full rollout based on offline evaluation alone?',
               answer:
                 'A/B testing a new (challenger) model means routing a small, randomized slice of live production traffic to it while the majority of traffic continues to be served by the current (control) model, then comparing business and quality metrics between the two groups with statistical rigor before deciding whether to roll the challenger out further. This is safer than trusting offline evaluation alone because offline metrics, however carefully computed on a held-out test set, can still miss real-world effects that only show up under live conditions — subtly different production data distributions, latency or infrastructure interactions, or downstream user behavior changes that no static test set could capture. Because only a limited slice of traffic is exposed to the challenger, and the rollout can be halted or rolled back the moment metrics look wrong, the blast radius of a bad model is contained, unlike a full "big bang" cutover with no live comparison and no easy way to detect a regression before it affects everyone.',
+            },
+            {
+              question: 'Your model scores 0.97 AUC offline but performs poorly in production. Walk me through how you would investigate.',
+              answer:
+                'I would treat the offline number as a hypothesis to be falsified and check, in order of likelihood: (1) Leakage — is any feature a consequence of the label or computed with information from after the prediction time; was preprocessing, resampling or feature selection fitted before the split; do entities or near-duplicates appear on both sides of the split? An AUC that high on a hard problem is itself a red flag, and ablating the top feature or running an out-of-time evaluation usually exposes it. (2) Training/serving skew — diff the feature values the model saw offline against what the serving path logs for the same entities, since different code paths, null handling or data freshness are common. (3) Distribution shift — adversarial validation between training data and recent production data shows whether they are distinguishable and which features differ. (4) Label and metric mismatch — the offline label may be a proxy of what production cares about, or the threshold and calibration may be wrong even though ranking is good. (5) Operational issues such as eval-mode bugs, stale models or silent fallbacks. Only after ruling those out would I conclude the model genuinely does not generalize and revisit data and modeling.',
+            },
+            {
+              question: 'How do you do hyperparameter tuning without fooling yourself about the final performance?',
+              answer:
+                'The score of the best configuration found by a search is the maximum of many noisy estimates, so it is optimistically biased, and the bias grows with the number of configurations tried. I keep a test set completely out of the loop and put every fitted preprocessing step inside a Pipeline so each CV fold re-fits it. For the search itself I use random or Bayesian search with log-scaled ranges for rates and regularization strengths, plus early stopping or successive halving to save compute. To estimate the quality of the whole procedure, I use nested cross-validation, where an outer loop evaluates a model that itself tunes in an inner loop, or I report the single score on the untouched test set. I also prefer the simplest configuration within one standard error of the best, since differences below the CV noise level are not real, and I match the splitter to the data: grouped for repeated entities, forward-chaining for time.',
+            },
+            {
+              question: 'Explain Ridge, Lasso and Elastic Net. Why does Lasso give sparse solutions, and when does it fail?',
+              answer:
+                'All three add a penalty on coefficient size to the loss. Ridge penalizes the sum of squares, which shrinks every coefficient smoothly and, in the eigenbasis of the covariance, shrinks the poorly determined low-variance directions the most; it also makes X^T X invertible, so it handles collinearity and more features than rows. Lasso penalizes the sum of absolute values. The L1 constraint region has corners on the axes, and the loss contours tend to touch the region at a corner, which sets some coefficients exactly to zero; equivalently the L1 penalty has a constant gradient pulling small weights to zero, while the L2 gradient vanishes as the weight shrinks. Elastic Net blends both. Lasso struggles with groups of correlated features, where it arbitrarily keeps one and the selected set is unstable across resamples, and it can select at most n features when p exceeds n. Elastic Net is the usual fix. In all cases features must be standardized first, and the penalty strength chosen by cross-validation. Probabilistically, Ridge is a Gaussian prior and Lasso a Laplace prior on the weights.',
+            },
+            {
+              question: 'ROC-AUC or PR-AUC for a fraud model with 0.1% positives, and how do you pick the operating threshold?',
+              answer:
+                'PR-AUC (average precision) is the more informative ranking metric here. ROC-AUC uses the false-positive rate, which divides by the enormous number of negatives, so a model can generate thousands of false alarms while its FPR and AUC still look excellent. Precision divides by the number flagged, so it reflects the experience of the analysts reviewing alerts. I would quote the PR-AUC baseline, which equals the prevalence of 0.1%. The threshold is a separate decision from the ranking metric: with calibrated probabilities, flag a case when p times the cost of a missed fraud exceeds (1 minus p) times the cost of a false alarm, which gives p greater than cost_FP over cost_FP plus cost_FN. In practice the threshold is often set by capacity, such as the number of cases the review team can handle per day, or by a precision floor, and it is tuned on a validation set or with cross-validation, then monitored because the base rate shifts over time.',
+            },
+            {
+              question: 'What is probability calibration, why does it matter, and how do you fix a miscalibrated model?',
+              answer:
+                'A model is calibrated when among the cases it scores at 0.7, about 70 percent are truly positive. Ranking metrics such as AUC are unchanged by any monotonic transformation of the scores, so a model can have a perfect AUC and useless probabilities. Calibration matters whenever the probability itself is used: expected-loss calculations, combining model outputs, ranking by probability times value, or showing a risk to a person. Boosted trees, naive Bayes, SVMs, resampled or class-weighted training and large neural networks are all commonly miscalibrated. I diagnose with a reliability diagram and Brier score or log loss, then fit a monotonic mapping on held-out data that the base model was not trained on: Platt scaling for small calibration sets, isotonic regression when there is plenty of data, temperature scaling for neural networks. Fitting the calibrator on the training data learns nothing, and calibration should be rechecked in production because a shift in the base rate miscalibrates even a good model.',
+            },
+            {
+              question: 'Why is Adam with L2 regularization different from AdamW, and what does a good LR schedule look like for a Transformer?',
+              answer:
+                'With Adam, an L2 penalty added to the loss becomes part of the gradient and is then divided by the running root-mean-square of gradients, so weights with large historical gradients are barely regularized and the effective decay is entangled with the adaptive scaling. AdamW decouples weight decay: it shrinks the weights directly at each step, independent of the gradient statistics, which makes the decay hyperparameter behave predictably and generalizes better in practice. Typically biases and normalization parameters are excluded from decay. For Transformers the standard schedule is a linear warmup over the first few hundred to few thousand steps, which protects against noisy early second-moment estimates and large initial updates, followed by cosine or linear decay to a small fraction of the peak rate, combined with gradient clipping at a norm of about 1. The peak learning rate is the most important hyperparameter, and an LR range test finds a sensible value cheaply.',
+            },
+            {
+              question: 'Why do residual connections make deep networks trainable?',
+              answer:
+                'A residual block computes y = x + F(x). Its Jacobian with respect to x is the identity plus dF/dx, so the gradient has a direct path back to earlier layers that does not get multiplied by many small factors as depth grows, which counters vanishing gradients. It also changes the optimization problem: each block only has to learn a correction to its input, and the identity function (F equals zero) is easy to represent, so adding layers rarely makes the network worse than a shallower one, which was the degradation seen in plain deep stacks before ResNets. Residuals also give the network an ensemble-like set of paths of different effective depths. Every Transformer layer wraps both attention and the feed-forward network in residual connections, and modern ones normalize before each sub-layer (pre-norm) because it keeps the residual stream clean and training stable at depth.',
+            },
+            {
+              question: 'How would you tune a gradient-boosted model, and what are the main regularization levers?',
+              answer:
+                'I start with a moderately low learning rate such as 0.05, set a large tree cap, and use early stopping on a validation set so the number of trees is chosen automatically. Then I tune tree complexity, which is the biggest lever for bias versus variance: max_depth or num_leaves and min_child_weight or min_child_samples, which stop leaves from fitting a handful of noisy rows. Next row and column subsampling, which decorrelate trees and regularize, then L2 and L1 on leaf values and the split-gain threshold gamma. At the end I lower the learning rate and raise the tree cap for small final gains. Underlying this, XGBoost-style libraries fit trees to gradients and hessians of the loss, with the optimal leaf value equal to minus the summed gradient over the summed hessian plus lambda, so lambda and the minimum hessian per leaf directly limit how confidently a leaf can move the prediction. I would also consider monotonic constraints where domain knowledge supports them and watch for leaf-wise growth overfitting on small data in LightGBM.',
+            },
+            {
+              question: 'When would you fine-tune a pretrained model versus use its embeddings versus just prompt it?',
+              answer:
+                'I go up the ladder only as far as evaluation forces me. Prompting or few-shot examples need no training and are the right prototype when the task is close to what the model already does. If I have a few hundred to a few thousand labels and a classification, retrieval or clustering task, frozen embeddings with a logistic regression or gradient-boosted head are a cheap, strong, easily debugged baseline. Parameter-efficient fine-tuning such as LoRA, which learns a low-rank update to frozen weights, is the next step when I need behavior, format or domain language the base model lacks, since it trains a tiny fraction of the parameters and lets one base model serve many adapters. Full fine-tuning is for large domain shifts with enough data and a clear quality gap. Throughout I use a held-out set from my real distribution, watch for catastrophic forgetting and contamination of the test set by pretraining data, keep the original preprocessing or tokenizer, and pin the embedding model version because vectors from different models are not comparable.',
+            },
+            {
+              question: 'What are the main causes of data leakage, and how do you design a workflow that prevents them structurally?',
+              answer:
+                'The main causes are target leakage (a feature that is a consequence or proxy of the label, such as an account-closed flag in a churn model), preprocessing leakage (scalers, imputers, encoders, PCA or feature selection fitted before splitting, or resampling before cross-validation), temporal leakage (features computed with data after the prediction time, or a random split of time-ordered data), and entity or duplicate leakage (the same patient, user or near-duplicate item on both sides of a split). Structurally, I prevent them by defining each training example by an entity and a prediction timestamp and building features strictly from earlier data using point-in-time joins; by splitting the way production will encounter data (by time, group or both) before any fitting; by keeping all fitted transformations inside a Pipeline that cross-validation re-fits per fold; by locking a final out-of-time test set; and by sanity checks such as ablating the top feature, adversarial validation between splits, and being suspicious of results that look too good.',
+            },
+            {
+              question: 'Why can tree-based models fail at forecasting, and how would you build a robust ML forecaster?',
+              answer:
+                'Trees predict averages of targets seen in training leaves, so they cannot extrapolate: if demand is trending beyond its historical range, the forecast flattens at the old maximum. Also, a random train-test split on time series lets the model learn from the future. A robust setup starts with a naive and seasonal-naive baseline that the model must beat, then frames the task for a fixed horizon with lag and rolling features shifted so that the newest value used is the one actually available at forecast time, plus calendar features and covariates that are known in advance such as planned promotions. To handle trend I model differences, ratios to a rolling level, or a detrended series. I train a global model across related series, validate with rolling-origin backtests at several cut-off dates, never random k-fold, report errors by horizon and series segment with a scale-free metric such as WAPE or MASE, and produce calibrated prediction intervals whose coverage I verify in backtests.',
+            },
+            {
+              question: 'What does mixed-precision training do, and what can go wrong?',
+              answer:
+                'Mixed precision runs most of the forward and backward computation in a 16-bit format (bf16 or fp16) while keeping master weights and sensitive reductions in fp32. That roughly halves activation memory and uses fast tensor-core hardware, giving large speedups with little accuracy loss. fp16 has a small exponent range, so small gradients underflow to zero and large values overflow; it needs dynamic loss scaling to avoid this. bf16 keeps fp32\'s exponent range with fewer mantissa bits, so it generally trains without loss scaling but has lower precision, which can matter for accumulations and some losses. Typical failures are NaN/inf losses from overflow or log of zero, silent loss of small updates when accumulating in low precision, and instability in operations like softmax, layer norm and large reductions, which frameworks keep in fp32 under autocast. I check for NaNs, track gradient norms, and compare against an fp32 run on a small setup when something looks off.',
             },
           ],
         },

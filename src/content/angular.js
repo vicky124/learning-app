@@ -16,8 +16,9 @@ export const angularSection = {
             'A **framework**, not a library: Angular owns the application structure (bootstrapping, DI, routing, forms) and calls your code, where React is a rendering library you build an architecture around yourself.',
             'TypeScript is mandatory and deeply integrated — decorators, DI tokens, typed forms, and the template type-checker all depend on it.',
             '"Modern Angular" (v17 onward) is a substantially different framework from the Angular of 2016–2022: standalone components instead of `NgModule`s, built-in `@if`/`@for` control flow, **signals** for reactivity, and zoneless change detection.',
+            'As of late 2026 the current major is **Angular 22** (released June 2026): OnPush is the default change-detection strategy, Signal Forms and the `resource()`/`httpResource()` APIs are stable, `HttpClient` uses Fetch by default, and new projects are zoneless and tested with Vitest.',
             'Angular is not AngularJS: AngularJS (1.x, 2010) was a different JavaScript framework that reached end-of-life in 2021. Angular 2+ was a full rewrite and shares only the name.',
-            'Angular ships a new major version roughly every six months, each with 18 months of support, and provides automated `ng update` migrations for breaking changes.',
+            'Angular ships a new major version roughly every six months, each with 18 months of support (6 months active + 12 months LTS), and provides automated `ng update` migrations for breaking changes.',
           ],
           blocks: [
             {
@@ -48,9 +49,32 @@ export const angularSection = {
               ],
             },
             {
+              type: 'heading',
+              text: 'How Angular turns your code into a running app',
+            },
+            {
+              type: 'p',
+              text: 'The most important internal fact about Angular is that **templates are compiled ahead of time** (AOT). The Angular compiler (`ngtsc`, a TypeScript compiler plugin) reads every component\'s template and turns it into plain JavaScript *template functions* made of low-level instructions — "create element", "bind property", "listen to event". There is no template parsing and no virtual DOM at runtime: on each update Angular simply re-runs the "update" half of those instructions and compares each binding against the previous value it stored. This is why template errors (a misspelled input, a wrong type passed to a child) can be caught at **build time** with `strictTemplates`, and why the runtime can be so small and fast.',
+            },
+            {
+              type: 'table',
+              headers: ['Era', 'Versions', 'Defining characteristics'],
+              rows: [
+                ['Classic Angular', 'v2 – v13', '`NgModule`s, decorators everywhere, Zone.js, View Engine then Ivy compiler'],
+                ['Transition', 'v14 – v16', 'Standalone components (preview → stable), typed forms, `inject()`, first signals preview'],
+                ['Modern Angular', 'v17 – v20', 'Built-in control flow, `@defer`, signal inputs/outputs/queries, `linkedSignal`, zoneless preview, Vite/esbuild builder'],
+                ['Signals-first Angular', 'v21 – v22+', 'Zoneless and Vitest by default, Signal Forms, stable resources, OnPush as the default strategy'],
+              ],
+            },
+            {
               type: 'callout',
               kind: 'note',
               text: 'A lot of Angular content online still teaches the pre-v17 style: `NgModule`s everywhere, `*ngIf`/`*ngFor`, `@Input()` decorators, and `zone.js`-driven change detection. That code still works and you will meet it in older codebases, but this guide teaches the modern style first and points out the legacy equivalent where it matters.',
+            },
+            {
+              type: 'callout',
+              kind: 'tip',
+              text: 'When *not* to choose Angular: a small marketing site, a content-heavy blog, or a widget embedded in someone else\'s page. Angular\'s strengths (DI, structure, first-party everything) pay off over years and many contributors; for small, short-lived projects its conventions can feel like overhead.',
             },
           ],
         },
@@ -63,7 +87,8 @@ export const angularSection = {
             '`ng new my-app` scaffolds a project; `ng serve` runs a dev server with hot reload; `ng build` produces an optimized production bundle in `dist/`.',
             '`ng generate component|service|pipe|directive|guard <name>` (short: `ng g c <name>`) creates correctly-wired files following the style guide.',
             '`main.ts` calls `bootstrapApplication(AppComponent, appConfig)` — there is no root `NgModule` in a modern app.',
-            '`app.config.ts` is where app-wide providers live: `provideRouter(routes)`, `provideHttpClient()`, and so on.',
+            '`app.config.ts` is where app-wide providers live: `provideRouter(routes)`, `provideHttpClient()`, and so on — the `provideX()` functions replace the old `XModule.forRoot()` pattern.',
+            'The build uses esbuild + Vite (`@angular/build:application`): fast rebuilds, ESM output, and a single builder for browser, SSR, and prerendering.',
             '`angular.json` configures the build (budgets, assets, styles, environments); `ng update` runs automated code migrations between major versions.',
           ],
           blocks: [
@@ -115,23 +140,50 @@ import { appConfig } from './app/app.config';
 bootstrapApplication(App, appConfig).catch(err => console.error(err));
 
 // app.config.ts
-import { ApplicationConfig, provideZonelessChangeDetection } from '@angular/core';
+import { ApplicationConfig, provideBrowserGlobalErrorListeners } from '@angular/core';
 import { provideRouter, withComponentInputBinding } from '@angular/router';
-import { provideHttpClient, withFetch } from '@angular/common/http';
+import { provideHttpClient, withInterceptors } from '@angular/common/http';
 import { routes } from './app.routes';
+import { authInterceptor } from './auth/auth.interceptor';
 
 export const appConfig: ApplicationConfig = {
   providers: [
-    provideZonelessChangeDetection(),
+    provideBrowserGlobalErrorListeners(),       // report uncaught errors to ErrorHandler
     provideRouter(routes, withComponentInputBinding()),
-    provideHttpClient(withFetch()),
+    provideHttpClient(withInterceptors([authInterceptor])), // Fetch backend is the default since v22
   ],
-};`,
+};
+// New projects are zoneless by default (v21+). Older apps opt in with
+// provideZonelessChangeDetection() and remove zone.js from polyfills.`,
+            },
+            {
+              type: 'heading',
+              text: 'What the build actually does',
+            },
+            {
+              type: 'p',
+              text: 'Since v17 the default builder is `@angular/build:application`, built on **esbuild** for bundling and **Vite** for the dev server. `ng build` type-checks your TypeScript *and* templates, compiles templates AOT, tree-shakes unused code (including `providedIn: \'root\'` services nobody injects), splits every lazy route and `@defer` block into its own chunk, and — if SSR is enabled — produces a server bundle alongside the browser bundle. The old webpack-based `@angular-devkit/build-angular:browser` builder still exists for legacy projects, but it is markedly slower; `ng update` offers a migration to the application builder.',
+            },
+            {
+              type: 'table',
+              headers: ['File', 'Owns', 'Change it when…'],
+              rows: [
+                ['`angular.json`', 'Build targets, budgets, assets, styles, file replacements, SSR/prerender options', 'Adding global styles, tightening budgets, configuring environments'],
+                ['`tsconfig.json`', 'TypeScript strictness and `angularCompilerOptions` (`strictTemplates`, `strictInjectionParameters`)', 'Enabling stricter checks — do this early, it is painful later'],
+                ['`app.config.ts`', 'Runtime providers for the whole app', 'Adding router features, HTTP interceptors, hydration, global error handling'],
+                ['`app.routes.ts`', 'The URL → component map', 'Adding pages and lazy features'],
+                ['`package.json`', 'Exact versions of `@angular/*` packages (they must all match)', 'Only through `ng update`, never by hand-editing one package'],
+              ],
             },
             {
               type: 'callout',
               kind: 'tip',
               text: 'Recent CLI versions generate shorter file names (`app.ts` rather than `app.component.ts`) following the updated style guide. Both conventions work — match whatever the codebase you are in already uses.',
+            },
+            {
+              type: 'callout',
+              kind: 'pitfall',
+              text: 'Upgrading by bumping versions in `package.json` skips the automated migrations that `ng update` runs — and those migrations are where breaking changes (renamed APIs, changed defaults like OnPush in v22) get rewritten for you. Always upgrade **one major at a time** with `ng update @angular/core@N @angular/cli@N`, commit, then do the next.',
             },
           ],
         },
@@ -145,7 +197,8 @@ export const appConfig: ApplicationConfig = {
             '`template`/`templateUrl` hold the HTML; `styles`/`styleUrl` hold CSS that is **scoped to this component** by default (emulated view encapsulation).',
             '`imports` lists every component, directive, and pipe the template uses — standalone components declare their own dependencies directly.',
             'Components are standalone by default since Angular 19; you no longer write `standalone: true`, and you do not need an `NgModule` to declare them.',
-            'Class fields are available in the template; keep logic in the class and keep the template declarative.',
+            'Class fields are available in the template; keep logic in the class and keep the template declarative. Mark template-only members `protected` so they are not part of the public API.',
+            'Since v22, components use `ChangeDetectionStrategy.OnPush` **by default**; the old always-check behaviour is now called `Eager` and must be opted into explicitly.',
           ],
           blocks: [
             {
@@ -194,6 +247,45 @@ export class ProductCard {
     Template --> DOM["Rendered DOM<br/>host element: app-product-card"]`,
             },
             {
+              type: 'heading',
+              text: 'The host element and component metadata worth knowing',
+            },
+            {
+              type: 'p',
+              text: 'Every component renders *inside* a real DOM element — its **host element** (`<app-product-card>`). The host is a custom element the browser treats as an unknown inline element, so it has `display: inline` by default; a very common layout surprise is a card component whose host does not behave like a block. Fix it with `:host { display: block; }` in the component styles, and bind classes, attributes, and listeners on the host with the `host` metadata rather than wrapping everything in an extra `<div>`.',
+            },
+            {
+              type: 'code',
+              language: 'ts',
+              title: 'host bindings, encapsulation, and explicit strategy',
+              code: `@Component({
+  selector: 'app-alert',
+  template: \`<ng-content />\`,
+  styles: \`:host { display: block; padding: .75rem; border-radius: 6px; }
+           :host(.danger) { background: #fde8e8; }\`,
+  host: {
+    role: 'alert',
+    '[class.danger]': 'level() === "danger"',
+    '(click)': 'dismissed.emit()',
+  },
+  // OnPush is the default since v22; older versions need this line explicitly
+  changeDetection: ChangeDetectionStrategy.OnPush,
+})
+export class Alert {
+  level = input<'info' | 'danger'>('info');
+  dismissed = output<void>();
+}`,
+            },
+            {
+              type: 'table',
+              headers: ['ViewEncapsulation', 'How styles are scoped', 'Use when'],
+              rows: [
+                ['`Emulated` (default)', 'Compiler adds `_ngcontent-*` / `_nghost-*` attributes and rewrites selectors', 'Almost always'],
+                ['`ShadowDom`', 'Real browser Shadow DOM; global styles do not leak in', 'Web components / strict isolation (watch out: global themes and fonts stop applying)'],
+                ['`None`', 'Styles become global', 'Rarely — theming a third-party widget; prefer a global stylesheet instead'],
+              ],
+            },
+            {
               type: 'callout',
               kind: 'warning',
               text: 'Forgetting to add a child component, directive, or pipe to `imports` is the most common beginner error in standalone Angular. The compiler reports it as *"is not a known element"* (for a component) or *"No pipe found with name"* — the fix is almost always a missing import, not a missing module.',
@@ -212,6 +304,8 @@ export class ProductCard {
             '**Two-way binding** `[(value)]="field"` — "banana in a box" — is sugar for a property binding plus an `xxxChange` event binding.',
             '`[class.active]`, `[style.width.px]`, and `[attr.aria-label]` target a single class, style, or real HTML attribute.',
             '**Template reference variables** (`#nameInput`) give the template a handle to an element or component instance.',
+            '`@let name = expr;` declares a read-only local variable in the template — handy for avoiding repeated signal reads or `async` pipes.',
+            'Template expressions are a restricted TypeScript subset: no assignments (except in event handlers), no `new`, no globals like `window` or `console` — only members of the component class plus template-local variables.',
           ],
           blocks: [
             {
@@ -254,6 +348,21 @@ export class ProductCard {
               text: 'Property vs attribute is a real distinction. `<input [value]="name">` sets the live `value` *property*; HTML attributes only set the *initial* value. Attributes that have no matching DOM property (like `colspan` or ARIA attributes) need `[attr.x]` binding instead.',
             },
             {
+              type: 'code',
+              language: 'html',
+              title: '@let, template literals, and safe navigation',
+              code: `@let user = currentUser();
+@let total = cart.total();
+
+<h2>{{ \`Hi \${user?.firstName ?? 'guest'}\` }}</h2>   <!-- untagged template literal -->
+<p>Total: {{ total | currency }}</p>
+<p>Plan: {{ user?.subscription?.plan }}</p>           <!-- ?. yields undefined since v22 (was null) -->`,
+            },
+            {
+              type: 'p',
+              text: '**How a binding is evaluated.** For each binding the compiler generates an update instruction that evaluates the expression and compares the result with the value stored from the previous check using `Object.is`-style identity. Only if it differs does Angular touch the DOM. This is why identity matters so much in Angular: a getter that returns a *new* array or object every time (`get items() { return this.all.filter(...) }`) is always "different", and in dev mode it trips the `ExpressionChangedAfterItHasBeenChecked` error (`NG0100`) when the value changes between the check and the dev-mode verification pass.',
+            },
+            {
               type: 'callout',
               kind: 'tip',
               text: 'Template expressions should be cheap and side-effect free — they are re-evaluated whenever change detection checks the component. Avoid calling ordinary methods that do real work from templates; read a signal or a `computed()` instead, which caches its result.',
@@ -271,6 +380,8 @@ export class ProductCard {
             '`@for` exposes implicit variables: `$index`, `$first`, `$last`, `$even`, `$odd`, `$count`.',
             '`@switch (value) { @case (\'a\') { … } @default { … } }` replaces the `ngSwitch` directive trio.',
             'Blocks are part of the compiler, not directives — no import needed, and the compiled output is faster than the directive equivalents.',
+            'Because the compiler understands the blocks, `@if` and `@switch` **narrow types** like TypeScript does: inside `@case (\'error\')` on a discriminated union, the error-only fields are type-safe.',
+            '`*ngIf`, `*ngFor`, and `*ngSwitch` are deprecated; plan to migrate with `ng generate @angular/core:control-flow`.',
           ],
           blocks: [
             {
@@ -307,6 +418,34 @@ export class ProductCard {
 <li *ngFor="let todo of todos; trackBy: trackById; let i = index">
   {{ i + 1 }}. {{ todo.title }}
 </li>`,
+            },
+            {
+              type: 'code',
+              language: 'ts',
+              title: 'type narrowing with a discriminated union',
+              code: `type LoadState =
+  | { status: 'loading' }
+  | { status: 'error'; message: string }
+  | { status: 'ok'; items: Product[] };
+
+@Component({
+  selector: 'app-list',
+  template: \`
+    @let s = state();            <!-- read the signal once into a local -->
+    @switch (s.status) {
+      @case ('loading') { <app-spinner /> }
+      @case ('error')   { <p>{{ s.message }}</p> }   <!-- narrowed: message exists -->
+      @case ('ok')      { <app-grid [items]="s.items" /> }
+    }
+  \`,
+})
+export class List {
+  state = input.required<LoadState>();
+}`,
+            },
+            {
+              type: 'p',
+              text: '**How `@for` reconciles.** When the collection changes, Angular computes the track key for every new item, matches keys against the existing views, and then performs the minimum set of operations: reuse views whose key is unchanged (updating only their bindings), move views whose position changed, create views for new keys, and destroy views for removed keys. The `track` expression is evaluated for every item on every change, so keep it a trivial property read — never call a function that does work.',
             },
             {
               type: 'callout',
@@ -380,6 +519,28 @@ export class Rating {
     Parent <--> Svc`,
             },
             {
+              type: 'table',
+              headers: ['Need', 'Signal API (modern)', 'Decorator API (legacy)'],
+              rows: [
+                ['Data in', '`name = input<string>()`', '`@Input() name?: string`'],
+                ['Required data in', '`name = input.required<string>()`', '`@Input({ required: true }) name!: string`'],
+                ['Event out', '`saved = output<Item>()`', '`@Output() saved = new EventEmitter<Item>()`'],
+                ['Two-way', '`value = model(0)`', '`@Input() value` + `@Output() valueChange`'],
+                ['Child query', '`chart = viewChild.required(ChartCmp)`', '`@ViewChild(ChartCmp) chart!: ChartCmp`'],
+                ['React to input change', '`computed()` / `effect()`', '`ngOnChanges(changes)`'],
+                ['Observable as output', '`outputFromObservable(obs$)`', '`@Output() x = obs$` (worked by accident)'],
+              ],
+            },
+            {
+              type: 'p',
+              text: '**Why signal inputs are a real improvement, not just new syntax.** With decorator inputs, a value could change at any time and you had to remember to react in `ngOnChanges`, comparing `SimpleChanges` by hand. A signal input is a read-only signal that Angular sets before each check of the component, so anything derived from it — `computed(() => this.price() * this.qty())` — is always consistent, with no lifecycle hook. Inputs are also read-only from inside the child (you cannot accidentally overwrite the parent\'s value), which removes a whole class of "the child mutated its input and the parent overwrote it again" bugs. When the child genuinely needs to change the value, that is what `model()` is for — it makes the two-way contract explicit.',
+            },
+            {
+              type: 'callout',
+              kind: 'pitfall',
+              text: 'Passing a mutable object through an input and then mutating it inside the child (`this.user().name = \'x\'`) silently changes the parent\'s data without any change notification — the parent\'s OnPush view will not update, and other consumers see inconsistent state. Treat inputs as immutable; emit an output or use `model()` to request a change.',
+            },
+            {
               type: 'callout',
               kind: 'note',
               text: 'The older decorator API — `@Input() name!: string;`, `@Output() changed = new EventEmitter<string>();`, `@ViewChild(\'ref\') el!: ElementRef;` — still works. The signal-based functions are preferred for new code because inputs become reactive values you can `computed()` from directly, instead of needing `ngOnChanges` to react to changes.',
@@ -398,6 +559,8 @@ export class Rating {
             '`linkedSignal()` is writable state whose value resets from a source signal, e.g. "the selected item, reset to the first item whenever the list changes".',
             'Signals let Angular know **exactly which components** need re-rendering, which is what makes zoneless change detection possible.',
             'Signals and immutability: `.update()` should return a new array/object — mutating in place does not change the reference, so consumers are not notified.',
+            'Signals use **push-pull** propagation: a write pushes a "maybe dirty" flag through the dependency graph, and values are pulled (recomputed) lazily only when someone reads them — so there are no glitches (inconsistent intermediate states) and no wasted computation.',
+            '`untracked(() => …)` reads a signal without creating a dependency; a custom `equal` function on `signal()`/`computed()` controls when a new value counts as a change.',
           ],
           blocks: [
             {
@@ -447,6 +610,50 @@ export class Cart {
               text: 'The most common signals mistake is using `effect()` to copy one signal into another (`effect(() => this.b.set(this.a() * 2))`). That creates an extra change-detection pass and timing bugs; use `computed()` for derived values, and `linkedSignal()` when the derived value must also be locally writable.',
             },
             {
+              type: 'heading',
+              text: 'How signals work under the hood',
+            },
+            {
+              type: 'list',
+              ordered: true,
+              items: [
+                '**Tracking.** While a `computed`, `effect`, or template is executing, Angular sets it as the *active consumer*. Every signal read during that execution registers itself as a producer of that consumer. Dependencies are therefore **dynamic**: a `computed` that reads `a()` only inside an `if` branch depends on `a` only while that branch runs.',
+                '**Notification (push).** `set()` bumps the signal\'s version and walks its consumers, marking them *possibly stale*. Nothing is recomputed yet. For templates, being marked stale schedules change detection for that specific view.',
+                '**Re-evaluation (pull).** When a stale `computed` is next read, it checks whether any producer\'s version actually changed; only then does it rerun its function. If the new value is `equal` to the old one, *its* consumers are not considered changed — so a `computed` acts as a firewall that stops unnecessary downstream work.',
+                '**Effects** are scheduled, not run synchronously: *root* effects (created outside components, e.g. in services) run during application change detection before the component tree is refreshed, and *view* effects (created in components) run as part of checking their component. Multiple writes in the same task therefore produce one effect run with the final values.',
+              ],
+            },
+            {
+              type: 'code',
+              language: 'ts',
+              title: 'untracked, custom equality, and effect cleanup',
+              code: `import { computed, effect, signal, untracked } from '@angular/core';
+
+const filters = signal({ q: '', page: 1 }, {
+  // treat structurally equal objects as "no change" to avoid needless refetches
+  equal: (a, b) => a.q === b.q && a.page === b.page,
+});
+const user = signal<User | null>(null);
+
+effect((onCleanup) => {
+  const { q } = filters();                       // tracked
+  const name = untracked(() => user()?.name);    // read without subscribing
+  const timer = setTimeout(() => analytics.track('search', { q, name }), 500);
+  onCleanup(() => clearTimeout(timer));          // runs before the next run and on destroy
+});`,
+            },
+            {
+              type: 'table',
+              headers: ['Primitive', 'Writable?', 'Lazy?', 'Use for'],
+              rows: [
+                ['`signal()`', 'Yes', 'n/a', 'Source state owned by a component or service'],
+                ['`computed()`', 'No', 'Yes, memoized', 'Pure derivations — the default choice for anything derived'],
+                ['`linkedSignal()`', 'Yes', 'Yes', 'State that resets/derives from a source but can be locally overridden'],
+                ['`resource()` / `httpResource()`', 'Value can be set locally', 'Fetches when params change', 'Async data that depends on signals'],
+                ['`effect()`', 'n/a', 'Scheduled', 'Side effects that leave the signal graph (DOM, storage, logging)'],
+              ],
+            },
+            {
               type: 'callout',
               kind: 'note',
               text: 'Signals vs RxJS: signals model *values that change over time* and are always synchronously readable; Observables model *streams of events over time*, with powerful operators for timing and cancellation. They are complementary — `toSignal()` and `toObservable()` from `@angular/core/rxjs-interop` convert between them.',
@@ -465,6 +672,8 @@ export class Cart {
             'Injectors form a **hierarchy**: environment injectors (root, lazy-loaded routes) and element injectors (a component\'s `providers`). Lookup walks up the tree to the nearest provider.',
             'Providing a service in a component\'s `providers` gives each instance of that component its own copy.',
             '`InjectionToken` provides non-class values (config objects, feature flags); `useClass`, `useValue`, `useFactory`, `useExisting` control how a provider creates its value.',
+            'Resolution modifiers change the lookup: `inject(X, { optional: true })`, `{ self: true }`, `{ skipSelf: true }`, `{ host: true }`.',
+            'Angular 22 adds `@Service()` — shorthand for `@Injectable({ providedIn: \'root\' })` that requires `inject()`-based dependencies — and the CLI now generates services with it.',
           ],
           blocks: [
             {
@@ -510,6 +719,49 @@ export class ProductList {
     CardEl -. "inject: looks up the tree to the nearest provider" .-> Root`,
             },
             {
+              type: 'heading',
+              text: 'Provider recipes you will use in real apps',
+            },
+            {
+              type: 'code',
+              language: 'ts',
+              title: 'factories, multi providers, abstract tokens, and feature-scoped providers',
+              code: `// 1. Program to an abstraction: components depend on the abstract class
+export abstract class Logger { abstract log(msg: string): void; }
+@Injectable() export class ConsoleLogger extends Logger { log(m: string) { console.log(m); } }
+@Injectable() export class RemoteLogger extends Logger { /* ships logs to a backend */ log(m: string) {} }
+
+// 2. A factory decides at runtime which implementation to use
+{ provide: Logger, useFactory: () => isDevMode() ? new ConsoleLogger() : new RemoteLogger() }
+
+// 3. Multi providers: many contributions collected into one array
+export const VALIDATION_RULES = new InjectionToken<Rule[]>('VALIDATION_RULES');
+providers: [
+  { provide: VALIDATION_RULES, useValue: noEmptyName, multi: true },
+  { provide: VALIDATION_RULES, useValue: maxLength200, multi: true },
+]
+const rules = inject(VALIDATION_RULES);   // [noEmptyName, maxLength200]
+
+// 4. Feature-scoped state: lives and dies with a lazy route
+export const ADMIN_ROUTES: Routes = [{
+  path: '',
+  providers: [AdminStore],               // a separate instance for the admin feature only
+  children: [/* ... */],
+}];
+
+// 5. Bundle related providers behind one function (the provideX() convention)
+export function provideAnalytics(cfg: AnalyticsConfig): EnvironmentProviders {
+  return makeEnvironmentProviders([
+    { provide: ANALYTICS_CONFIG, useValue: cfg },
+    provideAppInitializer(() => inject(AnalyticsService).init()),
+  ]);
+}`,
+            },
+            {
+              type: 'p',
+              text: '**Why the abstraction matters.** Because consumers ask for `Logger` rather than a concrete class, you swap implementations per environment, per feature, or per test without touching a single consumer. Abstract classes make good DI tokens because they exist at runtime (TypeScript interfaces do not), so they can be both the type *and* the token. `provideAppInitializer()` replaced the old `APP_INITIALIZER` multi-token for work that must finish before the app starts — keep it fast, because it delays first render.',
+            },
+            {
               type: 'callout',
               kind: 'tip',
               text: 'DI is what makes Angular code easy to test: in a test you swap the real service for a fake with `{ provide: ProductService, useValue: fakeService }`, and the component under test never knows the difference.',
@@ -532,7 +784,7 @@ export class ProductList {
             '`ngOnChanges(changes)` — runs when decorator-based `@Input()`s change; with signal inputs a `computed()` or `effect()` usually replaces it.',
             '`ngAfterViewInit` — the component\'s view and child views exist; `@ViewChild` results are available.',
             '`ngOnDestroy` — clean up subscriptions, timers, and listeners. `inject(DestroyRef).onDestroy(fn)` is the composable alternative.',
-            '`afterNextRender()` / `afterEveryRender()` run after the DOM is painted — the right place for direct DOM measurement or third-party DOM libraries, and they never run during server-side rendering.',
+            '`afterNextRender()` / `afterEveryRender()` / `afterRenderEffect()` run after Angular has updated the DOM — the right place for direct DOM measurement or third-party DOM libraries, and they never run during server-side rendering.',
           ],
           blocks: [
             {
@@ -575,6 +827,27 @@ export class Chart implements OnInit {
 }`,
             },
             {
+              type: 'code',
+              language: 'ts',
+              title: 'render phases: avoiding layout thrashing',
+              code: `constructor() {
+  afterNextRender({
+    // phases run in order earlyRead -> write -> mixedReadWrite -> read across ALL components,
+    // and each phase receives the previous phase's return value
+    earlyRead: () => this.el.nativeElement.getBoundingClientRect().height,
+    write: (height) => { this.tooltip.style.top = height + 'px'; },
+  });
+
+  // afterRenderEffect: like effect(), but runs after rendering and only when
+  // the signals it reads change — ideal for syncing a signal to a DOM library
+  afterRenderEffect(() => this.chart?.setData(this.data()));
+}`,
+            },
+            {
+              type: 'p',
+              text: 'The phase split (`earlyRead`, `write`, `mixedReadWrite`, `read`) exists because the browser recomputes layout whenever you read geometry after a write. If twenty components each "read, then write" in turn, the browser performs twenty forced layouts; with phases, Angular runs every component\'s reads, then every write, giving a single layout. `afterRender` was renamed `afterEveryRender` in v20 — use it sparingly, because it runs after *every* change detection cycle.',
+            },
+            {
               type: 'callout',
               kind: 'warning',
               text: 'Reading inputs in the `constructor` is a classic bug: they are still `undefined` (or a signal input throws `NG0950` when a required input is read too early). Anything that depends on inputs belongs in `ngOnInit`, a `computed()`, or an `effect()`.',
@@ -590,7 +863,7 @@ export class Chart implements OnInit {
             'Components are directives with a template; plain `@Directive`s attach to elements matched by their `selector` (usually an attribute like `[appHighlight]`).',
             'The `host` metadata binds properties, classes, attributes, and listeners on the host element — preferred over the older `@HostBinding`/`@HostListener` decorators.',
             'Structural directives (the `*` prefix) operate on an `<ng-template>` via `TemplateRef` and `ViewContainerRef` to create and destroy views.',
-            'Built-in attribute directives: `NgClass`, `NgStyle`, `NgModel`; `NgOptimizedImage` (`ngSrc`) for images.',
+            'Built-in attribute directives: `NgClass`, `NgStyle`, `NgModel`; `NgOptimizedImage` (`ngSrc`) for images. In new code prefer native `[class]`/`[style]` bindings over `NgClass`/`NgStyle` — they are compiled in and cheaper.',
             '`hostDirectives` lets a component or directive apply other standalone directives to its own host — composition instead of inheritance.',
           ],
           blocks: [
@@ -642,6 +915,30 @@ export class IfRole {
 // usage: <button *appIfRole="'admin'">Delete user</button>`,
             },
             {
+              type: 'p',
+              text: 'The `*` is pure syntactic sugar: `<button *appIfRole="\'admin\'">` is rewritten by the compiler into `<ng-template [appIfRole]="\'admin\'"><button>…</button></ng-template>`. The directive receives that template as `TemplateRef` and decides when to stamp it into its `ViewContainerRef`. Note that the example above destroys and recreates the view on every role change; a production version would remember whether the view is currently shown and only create or clear it when the condition actually flips, so child component state is not reset needlessly.',
+            },
+            {
+              type: 'code',
+              language: 'ts',
+              title: 'composition with hostDirectives',
+              code: `@Directive({ selector: '[appFocusRing]', host: { '[class.focus-ring]': 'true' } })
+export class FocusRing {}
+
+@Directive({ selector: '[appTooltip]' })
+export class Tooltip { tooltipText = input(''); }
+
+@Component({
+  selector: 'app-icon-button',
+  hostDirectives: [
+    FocusRing,
+    { directive: Tooltip, inputs: ['tooltipText: label'] },   // expose as <app-icon-button label="…">
+  ],
+  template: \`<ng-content />\`,
+})
+export class IconButton {}`,
+            },
+            {
               type: 'callout',
               kind: 'tip',
               text: '`hostDirectives: [Highlight, { directive: Tooltip, inputs: [\'tooltipText\'] }]` on a component bakes those behaviours in for every usage, without consumers having to remember to add the attributes — a clean way to build design-system components out of small reusable behaviours.',
@@ -659,6 +956,8 @@ export class IfRole {
             'Pipes are **pure** by default — Angular only re-runs them when the input reference changes, which makes them a cheap, cached alternative to calling methods in templates.',
             'An **impure** pipe (`pure: false`) runs on every change detection pass — powerful but expensive; `AsyncPipe` is the classic impure pipe.',
             '`AsyncPipe` (`| async`) subscribes to an Observable or Promise, renders its latest value, and unsubscribes automatically when the view is destroyed.',
+            'A pure pipe instance memoizes only its **last** call (one cache slot per usage in the template) — it is not a global cache, so an expensive pipe inside a long `@for` still runs once per row.',
+            'Pipes can `inject()` services (e.g. `LOCALE_ID` for formatting), which is something a `computed()` in a presentational component cannot do as reusably.',
           ],
           blocks: [
             {
@@ -710,6 +1009,8 @@ export class TimeAgoPipe implements PipeTransform {
             '`withComponentInputBinding()` binds `:id` path params, query params, and resolved data directly to component `input()`s.',
             'Guards are plain functions: `CanActivateFn`, `CanMatchFn`, `CanDeactivateFn`; returning a `UrlTree` redirects.',
             '`ResolveFn` loads data before the route activates; child routes, wildcard `**` routes, and `redirectTo` cover nesting and not-found pages.',
+            'Router features are opt-in functions: `withComponentInputBinding()`, `withViewTransitions()`, `withInMemoryScrolling({ scrollPositionRestoration: \'enabled\' })`, `withPreloading(PreloadAllModules)`, `withRouterConfig({...})`.',
+            'Since v22, `paramsInheritanceStrategy` defaults to `\'always\'` — child routes see their parents\' params and data. Code that relied on the old empty-path-only inheritance may need review (no automatic migration).',
           ],
           blocks: [
             {
@@ -774,6 +1075,22 @@ export class ProductDetail {
         L-->>R: ADMIN_ROUTES
         R->>C: create component in router-outlet
     end`,
+            },
+            {
+              type: 'table',
+              headers: ['Hook', 'Runs', 'Typical use'],
+              rows: [
+                ['`canMatch`', 'While matching — before the route (and its lazy chunk) is chosen', 'Feature flags, role-based route variants, keeping admin code off non-admin devices'],
+                ['`canActivate`', 'After matching, before activation', 'Auth checks on already-loaded routes'],
+                ['`canActivateChild`', 'Before any child route activates', 'One check for a whole subtree'],
+                ['`canDeactivate`', 'Before leaving the current route', '"You have unsaved changes" prompts'],
+                ['`resolve`', 'After guards pass, before activation', 'Critical data the page cannot render without'],
+              ],
+            },
+            {
+              type: 'callout',
+              kind: 'tip',
+              text: 'Resolvers block navigation: the user clicks and nothing visibly happens until the data arrives. For most pages it is better UX to navigate immediately and show a skeleton while an `httpResource` loads. Keep resolvers for small, critical data (e.g. a permission set) or when SEO/SSR requires the data before render.',
             },
             {
               type: 'callout',
@@ -874,7 +1191,155 @@ export class Signup {
             {
               type: 'callout',
               kind: 'note',
-              text: 'Angular 21 introduced experimental **Signal Forms** (`@angular/forms/signals`), where the form model is a signal and validation is declared with a schema function. It is the likely long-term direction, but reactive forms remain the stable, production choice until Signal Forms graduates from experimental.',
+              text: 'Angular 21 introduced **Signal Forms** (`@angular/forms/signals`) as experimental, and Angular 22 promoted them to **stable**. For new forms in a v22+ app, Signal Forms are now a first-class choice (next topic). Reactive forms are not deprecated and remain the right tool in existing codebases — there is no need to rewrite working forms.',
+            },
+            {
+              type: 'heading',
+              text: 'Custom form controls: ControlValueAccessor',
+            },
+            {
+              type: 'p',
+              text: 'To make your own component (a star rating, a date range picker) work with `formControlName` and `ngModel`, implement `ControlValueAccessor` — the bridge between the forms API and a UI control. Forms calls `writeValue` to push a value in, and you call the registered `onChange`/`onTouched` callbacks to push changes out.',
+            },
+            {
+              type: 'code',
+              language: 'ts',
+              title: 'a minimal ControlValueAccessor',
+              code: `@Component({
+  selector: 'app-stars',
+  template: \`
+    @for (s of [1, 2, 3, 4, 5]; track s) {
+      <button type="button" [disabled]="disabled()" (click)="select(s)" (blur)="onTouched()">
+        {{ s <= value() ? '★' : '☆' }}
+      </button>
+    }
+  \`,
+  providers: [{ provide: NG_VALUE_ACCESSOR, useExisting: forwardRef(() => Stars), multi: true }],
+})
+export class Stars implements ControlValueAccessor {
+  protected value = signal(0);
+  protected disabled = signal(false);
+  private onChange: (v: number) => void = () => {};
+  protected onTouched: () => void = () => {};
+
+  writeValue(v: number | null) { this.value.set(v ?? 0); }            // model -> view
+  registerOnChange(fn: (v: number) => void) { this.onChange = fn; }
+  registerOnTouched(fn: () => void) { this.onTouched = fn; }
+  setDisabledState(d: boolean) { this.disabled.set(d); }
+
+  select(s: number) { this.value.set(s); this.onChange(s); }          // view -> model
+}`,
+            },
+            {
+              type: 'callout',
+              kind: 'pitfall',
+              text: 'Never call `onChange` from inside `writeValue` — the form wrote that value, so echoing it back marks the control dirty and can trigger `valueChanges` loops. Also remember that `valueChanges` fires on programmatic `setValue` too; pass `{ emitEvent: false }` when you set values that should not trigger your listeners.',
+            },
+          ],
+        },
+        {
+          id: 'signal-forms',
+          title: 'Signal Forms (Stable in v22)',
+          summary:
+            'Signal Forms build a form on top of a plain signal model: `form(model, schema)` returns a field tree, validation is declared in a schema function, and every field exposes its state — value, errors, touched, dirty — as signals.',
+          keyPoints: [
+            'The **model is yours**: a `signal<T>()` holding a plain object. The form reads and writes that signal directly; there is no separate copy of the data to keep in sync.',
+            '`form(model, schemaFn)` returns a **field tree** that mirrors the shape of the model: `f.email`, `f.address.city`, `f.items[0].qty`.',
+            'Validation rules (`required`, `email`, `min`, `max`, `minLength`, `pattern`, custom `validate`, async `validateHttp`/`validateAsync`) are declared once, in the schema function, against paths.',
+            'Bind a field to an input with the `FormField` directive: `<input [formField]="f.email" />`; read state with `f.email().value()`, `.errors()`, `.touched()`, `.invalid()`.',
+            '`submit(form, action)` marks fields touched, runs only if valid, exposes `submitting()`, and lets server-side errors be mapped back onto fields.',
+            'Custom controls implement the lightweight `FormValueControl` interface (a `value` model) instead of the more ceremonious `ControlValueAccessor`.',
+          ],
+          blocks: [
+            {
+              type: 'p',
+              text: 'Reactive forms were designed in the RxJS era: each `FormControl` owns its own copy of the value, changes are announced via `valueChanges` Observables, and status is read imperatively. That works, but it duplicates state (your domain object *and* the form\'s internal values), makes typing awkward for dynamic shapes, and fits poorly with signal-based, zoneless components. Signal Forms invert the relationship: **your signal is the single source of truth**, and the form is a typed, reactive *view* over it that adds validation and interaction state.',
+            },
+            {
+              type: 'code',
+              language: 'ts',
+              title: 'a registration form with Signal Forms',
+              code: `import { Component, inject, signal } from '@angular/core';
+import { FormField, form, required, email, minLength, validate, submit } from '@angular/forms/signals';
+
+interface Registration { email: string; password: string; confirm: string; }
+
+@Component({
+  selector: 'app-register',
+  imports: [FormField],
+  templateUrl: './register.html',
+})
+export class Register {
+  private api = inject(AccountApi);
+
+  protected model = signal<Registration>({ email: '', password: '', confirm: '' });
+
+  protected f = form(this.model, (p) => {
+    required(p.email, { message: 'Email is required' });
+    email(p.email, { message: 'Enter a valid email' });
+    required(p.password);
+    minLength(p.password, 12, { message: 'Use at least 12 characters' });
+    // cross-field rule: attached to confirm, reads a sibling value
+    validate(p.confirm, ({ value, valueOf }) =>
+      value() === valueOf(p.password) ? null : { kind: 'mismatch', message: 'Passwords differ' });
+  });
+
+  async save() {
+    await submit(this.f, async (form) => {
+      await this.api.register(form().value());   // only runs when the form is valid
+    });
+  }
+}`,
+            },
+            {
+              type: 'code',
+              language: 'html',
+              title: 'register.html',
+              code: `<form (submit)="$event.preventDefault(); save()">
+  <input type="email" [formField]="f.email" />
+  @if (f.email().touched() && f.email().invalid()) {
+    @for (err of f.email().errors(); track err.kind) {
+      <small class="error">{{ err.message }}</small>
+    }
+  }
+
+  <input type="password" [formField]="f.password" />
+  <input type="password" [formField]="f.confirm" />
+
+  <button type="submit" [disabled]="f().submitting()">Create account</button>
+</form>`,
+            },
+            {
+              type: 'mermaid',
+              code: `flowchart LR
+    M["model: signal of Registration"] <--> FT["field tree from form()"]
+    S["schema function<br/>required, email, validate"] --> FT
+    FT --> St["per-field signals<br/>value, errors, touched, dirty"]
+    FT <--> D["[formField] directive"]
+    D <--> I["input element"]
+    St --> T["template: errors and disabled state"]`,
+            },
+            {
+              type: 'table',
+              headers: ['', 'Reactive forms', 'Signal Forms'],
+              rows: [
+                ['Source of truth', 'Values stored inside `FormControl`s', 'Your own `signal()` model'],
+                ['Change notification', '`valueChanges` / `statusChanges` Observables', 'Signals — works naturally with `computed()` and zoneless'],
+                ['Validation declared', 'Per control, at construction', 'Once, in a schema function over paths (reusable schemas)'],
+                ['Typing', 'Typed since v14, awkward for dynamic shapes', 'Inferred from the model type'],
+                ['Custom controls', '`ControlValueAccessor` (4 methods + provider)', '`FormValueControl` (a `value` model)'],
+                ['Maturity', 'Stable since v2, huge ecosystem', 'Stable since v22, ecosystem catching up'],
+              ],
+            },
+            {
+              type: 'callout',
+              kind: 'tip',
+              text: 'Migrate opportunistically: new forms in Signal Forms, existing reactive forms left alone unless you are already rewriting them. Mixing both in one app is fine; mixing both *in one form* is not worth the complexity. Because exact option names have shifted between the v21 preview and v22, check the official guide at [angular.dev](https://angular.dev/guide/forms/signals/overview) for your installed version.',
+            },
+            {
+              type: 'callout',
+              kind: 'pitfall',
+              text: 'The model must be replaced immutably like any signal. Writing `this.model().email = \'x\'` mutates the object without notifying anyone — the input and the validation state will be out of sync. Either let the bound inputs write through the field tree, or use `this.f.email().value.set(\'x\')` / `this.model.update(...)`.',
             },
           ],
         },
@@ -884,11 +1349,12 @@ export class Signup {
           summary:
             '`HttpClient` makes typed HTTP requests that return Observables, functional interceptors add cross-cutting behaviour like auth headers and error handling, and `httpResource()` exposes a request as signals.',
           keyPoints: [
-            'Enable with `provideHttpClient()` in `app.config.ts`; `withFetch()` uses the Fetch API (recommended, and required for good SSR support).',
+            'Enable with `provideHttpClient()` in `app.config.ts`. Since v22 the Fetch API backend is the default (`withFetch()` is now redundant and deprecated); `withXhr()` opts back into XMLHttpRequest, which you only need for **upload progress** events, since Fetch cannot report them.',
             '`http.get<T>(url)` returns a **cold** Observable — nothing is sent until something subscribes, and each subscription sends a new request.',
             'Interceptors are functions (`HttpInterceptorFn`) registered with `withInterceptors([...])`; they can modify the request, the response, or handle errors for every call.',
             'Requests are immutable: an interceptor uses `req.clone({ setHeaders: … })` to change one.',
-            '`httpResource(() => url)` (signal-based) re-fetches when signals in the URL function change and exposes `value()`, `isLoading()`, `error()`, and `reload()`.',
+            '`httpResource(() => url)` (signal-based, stable since v22) re-fetches when signals in the URL function change and exposes `value()`, `isLoading()`, `error()`, and `reload()` — it still goes through `HttpClient`, so interceptors apply.',
+            'Interceptors run in registration order on the way out and in **reverse** order on the way back in — put the auth interceptor before retry/logging deliberately, not by accident.',
             'Handle errors with RxJS `catchError`, retry transient failures with `retry({ count, delay })`.',
           ],
           blocks: [
@@ -915,7 +1381,36 @@ export const errorInterceptor: HttpInterceptorFn = (req, next) =>
   );
 
 // app.config.ts
-provideHttpClient(withFetch(), withInterceptors([authInterceptor, errorInterceptor]))`,
+provideHttpClient(withInterceptors([authInterceptor, errorInterceptor]))`,
+            },
+            {
+              type: 'code',
+              language: 'ts',
+              title: 'refreshing an expired token exactly once',
+              code: `let refreshInFlight$: Observable<string> | null = null;
+
+export const refreshInterceptor: HttpInterceptorFn = (req, next) => {
+  const auth = inject(AuthService);
+  return next(req).pipe(
+    catchError((err: HttpErrorResponse) => {
+      if (err.status !== 401 || req.url.endsWith('/auth/refresh')) return throwError(() => err);
+
+      // share ONE refresh call among all requests that failed concurrently
+      refreshInFlight$ ??= auth.refresh().pipe(
+        finalize(() => (refreshInFlight$ = null)),
+        shareReplay(1),
+      );
+      return refreshInFlight$.pipe(
+        switchMap(token => next(req.clone({ setHeaders: { Authorization: 'Bearer ' + token } }))),
+      );
+    }),
+  );
+};`,
+            },
+            {
+              type: 'callout',
+              kind: 'pitfall',
+              text: 'Without the shared `refreshInFlight$`, a page that fires five requests with an expired token triggers five refresh calls — and with rotating refresh tokens, four of them fail and log the user out. Also exclude the refresh endpoint itself, or a failed refresh will recursively try to refresh.',
             },
             {
               type: 'code',
@@ -957,6 +1452,115 @@ export class UserProfile {
               type: 'callout',
               kind: 'warning',
               text: 'Because HttpClient Observables are cold, subscribing twice sends **two requests** — a common surprise when a template uses `data$ | async` in two places. Use a single `@if (data$ | async; as data)`, convert to a signal with `toSignal()`, or share the result with `shareReplay(1)`.',
+            },
+          ],
+        },
+        {
+          id: 'resource-api',
+          title: 'Async Data with resource(), rxResource(), and httpResource()',
+          summary:
+            'Resources bring asynchronous data into the signal graph: you describe *which* data you need as a function of signals, and Angular fetches it, cancels stale requests, and exposes value, status, and errors as signals. All three APIs are stable since Angular 22.',
+          keyPoints: [
+            'A resource has two parts: **params** (a reactive function of signals that says what to load) and a **loader** (how to load it). When params change, the in-flight load is aborted and a new one starts.',
+            '`resource({ params, loader })` — loader returns a Promise and receives an `abortSignal` to pass to `fetch`.',
+            '`rxResource({ params, stream })` — the loader returns an Observable; ideal when you already have RxJS-based services.',
+            '`httpResource(() => url | request)` — the shortcut for HTTP: goes through `HttpClient`, so interceptors, the SSR transfer cache, and testing utilities all apply.',
+            'State is exposed as signals: `value()`, `hasValue()`, `error()`, `isLoading()`, and `status()` (`\'idle\' | \'loading\' | \'reloading\' | \'resolved\' | \'error\' | \'local\'`).',
+            'If params returns `undefined`, the resource goes **idle** and does not load — the idiomatic way to express "wait until the user has picked something".',
+            'Resources are for **reading** data. Mutations (POST/PUT/DELETE) are still imperative calls — then `reload()` or `set()`/`update()` the resource value optimistically.',
+          ],
+          blocks: [
+            {
+              type: 'p',
+              text: 'Before resources, the idiomatic way to load data that depends on state was an RxJS pipeline: turn the signal into an Observable, `switchMap` to the request, `catchError`, track loading in a separate flag, and convert back with `toSignal()`. That works, but every component re-implemented the same loading/error/cancellation plumbing slightly differently. A resource packages that pattern into one primitive with a consistent status model, which also makes it easy for templates to render loading, error, and empty states explicitly.',
+            },
+            {
+              type: 'code',
+              language: 'ts',
+              title: 'the three flavours side by side',
+              code: `import { Component, inject, input, resource, signal } from '@angular/core';
+import { rxResource } from '@angular/core/rxjs-interop';
+import { httpResource } from '@angular/common/http';
+
+export class OrderDetail {
+  orderId = input.required<string>();
+  private orders = inject(OrderService);      // returns Observables
+
+  // 1. Promise-based, any async source (fetch, IndexedDB, a Web Worker...)
+  invoice = resource({
+    params: () => ({ id: this.orderId() }),
+    loader: async ({ params, abortSignal }) => {
+      const res = await fetch(\`/api/invoices/\${params.id}\`, { signal: abortSignal });
+      if (!res.ok) throw new Error('Invoice failed: ' + res.status);
+      return (await res.json()) as Invoice;
+    },
+  });
+
+  // 2. Observable-based, reuse an existing RxJS service
+  order = rxResource({
+    params: () => this.orderId(),
+    stream: ({ params: id }) => this.orders.getById(id),
+  });
+
+  // 3. HTTP shortcut: interceptors and SSR transfer cache apply
+  shipping = httpResource<Shipment>(() => \`/api/orders/\${this.orderId()}/shipment\`);
+
+  // idle until a carrier is chosen: params returning undefined = do not load
+  carrier = signal<string | undefined>(undefined);
+  rates = httpResource<Rate[]>(() =>
+    this.carrier() ? { url: '/api/rates', params: { carrier: this.carrier()! } } : undefined);
+}`,
+            },
+            {
+              type: 'mermaid',
+              code: `stateDiagram-v2
+    [*] --> idle: params is undefined
+    idle --> loading: params defined
+    loading --> resolved: loader succeeds
+    loading --> error: loader throws
+    resolved --> reloading: reload() called
+    reloading --> resolved
+    resolved --> loading: params change, previous load aborted
+    error --> loading: params change or reload()
+    resolved --> local: value.set() by the app
+    local --> loading: params change`,
+            },
+            {
+              type: 'code',
+              language: 'ts',
+              title: 'optimistic update after a mutation',
+              code: `async toggleFavorite(p: Product) {
+  const previous = this.products.value();
+  // optimistic: update the UI immediately (status becomes 'local')
+  this.products.update(list => list?.map(x => x.id === p.id ? { ...x, fav: !x.fav } : x));
+  try {
+    await firstValueFrom(this.api.toggleFavorite(p.id));
+  } catch {
+    this.products.set(previous);   // roll back
+    this.toast.error('Could not update favorite');
+  }
+}`,
+            },
+            {
+              type: 'table',
+              headers: ['Need', 'Best tool'],
+              rows: [
+                ['Load data that depends on signals (route input, filters)', '`httpResource` / `resource`'],
+                ['Existing service returns Observables', '`rxResource`'],
+                ['Polling, websockets, retry with back-off, combining many streams', 'RxJS pipeline, then `toSignal()`'],
+                ['Cross-component cache with deduplication and stale-while-revalidate', 'A shared store service, or TanStack Query for Angular'],
+                ['Writes (create/update/delete)', 'Imperative `HttpClient` call + `reload()` or optimistic `set()`'],
+              ],
+            },
+            {
+              type: 'callout',
+              kind: 'pitfall',
+              text: 'Reading `value()` while the resource is in the `error` state **throws**. Guard templates with `hasValue()` (which also narrows the type) or check `error()` first. Similarly, a resource is owned by the injector it was created in — creating one inside a method (outside an injection context) fails; declare resources as fields.',
+            },
+            {
+              type: 'callout',
+              kind: 'note',
+              text: 'The resource API changed shape during its experimental period (v19 used `request`/`loader`; v20 renamed them to `params`/`loader`, and `rxResource` to `params`/`stream`). If you read older articles, translate accordingly — `ng update` migrations handled the renames.',
             },
           ],
         },
@@ -1036,6 +1640,77 @@ export class Search {
           ],
         },
         {
+          id: 'signals-rxjs-interop',
+          title: 'Signals and RxJS Together: The Interop Layer',
+          summary:
+            '`@angular/core/rxjs-interop` bridges the two reactive models — `toSignal`, `toObservable`, `outputFromObservable`, `takeUntilDestroyed`, `rxResource` — and knowing which side a piece of logic belongs on is a core modern-Angular skill.',
+          keyPoints: [
+            '**Signals for state, RxJS for events and time.** Signals answer "what is the value now?"; Observables answer "what happens when, and in what order?"',
+            '`toSignal(obs$, { initialValue })` subscribes immediately in an injection context and unsubscribes on destroy. Without `initialValue` the signal type includes `undefined`; `{ requireSync: true }` asserts the Observable emits synchronously (e.g. a `BehaviorSubject`).',
+            '`toObservable(sig)` emits the signal\'s value through an effect — so emissions are **asynchronous** and intermediate values set in the same task are coalesced.',
+            '`outputFromObservable(obs$)` exposes an Observable as a component output; `outputToObservable(this.someOutput)` goes the other way.',
+            'Errors in an Observable passed to `toSignal` are re-thrown when the signal is read — handle errors in the pipe (`catchError`) unless you want the template to throw.',
+          ],
+          blocks: [
+            {
+              type: 'code',
+              language: 'ts',
+              title: 'choosing the right side for each concern',
+              code: `import { Component, computed, inject, signal } from '@angular/core';
+import { toObservable, toSignal, takeUntilDestroyed } from '@angular/core/rxjs-interop';
+import { debounceTime, distinctUntilChanged, switchMap, catchError, of, fromEvent, map, startWith } from 'rxjs';
+
+export class ProductSearch {
+  private api = inject(ProductService);
+
+  // state lives in signals
+  query = signal('');
+  category = signal<'all' | 'shoes' | 'bags'>('all');
+
+  // timing logic (debounce + cancel) is RxJS's strength
+  private results$ = toObservable(this.query).pipe(
+    debounceTime(300),
+    distinctUntilChanged(),
+    switchMap(q => this.api.search(q).pipe(catchError(() => of([] as Product[])))),
+  );
+  results = toSignal(this.results$, { initialValue: [] });
+
+  // pure derivation goes back to signals
+  visible = computed(() =>
+    this.category() === 'all' ? this.results() : this.results().filter(p => p.category === this.category()));
+
+  // a DOM event stream with a sensible starting value
+  isOnline = toSignal(
+    fromEvent(window, 'online').pipe(map(() => true), startWith(navigator.onLine)),
+    { requireSync: true },
+  );
+}`,
+            },
+            {
+              type: 'table',
+              headers: ['Concern', 'Signals', 'RxJS'],
+              rows: [
+                ['Current UI state', 'Natural fit', 'Possible (`BehaviorSubject`) but verbose'],
+                ['Derived values', '`computed()` — memoized, glitch-free', '`combineLatest` + `map` — can emit intermediate states'],
+                ['Debounce / throttle / timing', 'Not built in (v22 adds an experimental `debounced()`)', 'Rich operator set'],
+                ['Cancellation and race conditions', 'Resources abort stale loads', '`switchMap`, `takeUntil`, `race`'],
+                ['Streams of discrete events', 'Not a fit — signals hold one value and drop events', 'Natural fit (websockets, router events)'],
+                ['Template consumption', 'Read directly, no pipe', '`async` pipe or `toSignal()`'],
+              ],
+            },
+            {
+              type: 'callout',
+              kind: 'pitfall',
+              text: 'Signals are not event streams. Setting a signal to the same value twice notifies nobody (equality check), and setting it twice in one task delivers only the last value. If you model "the user clicked Save" as a signal, the second identical click is lost. Use an output, a method call, or a `Subject` for events.',
+            },
+            {
+              type: 'callout',
+              kind: 'warning',
+              text: 'Calling `toSignal()` inside a method or `ngOnInit` (outside an injection context) throws `NG0203`, and calling it repeatedly — e.g. inside a getter used by the template — creates a new subscription every time. Create it once, as a field.',
+            },
+          ],
+        },
+        {
           id: 'change-detection',
           title: 'Change Detection: Zone.js, OnPush, and Zoneless',
           summary:
@@ -1046,6 +1721,7 @@ export class Search {
             '`ChangeDetectionStrategy.OnPush` skips a component (and its subtree) unless an input reference changed, an event fired inside it, an `async` pipe emitted, a signal it reads changed, or `markForCheck()` was called.',
             '**Zoneless** (`provideZonelessChangeDetection()`, the default for new projects since Angular 21) removes Zone.js entirely; change detection is scheduled by signal updates, template events, `async` pipe, and `markForCheck()`.',
             'Zoneless means smaller bundles, no monkey-patching, cleaner stack traces, and predictable performance — but code that mutates plain fields inside a `setTimeout` or third-party callback will no longer update the view.',
+            '**Angular 22 made OnPush the default** strategy. The old `ChangeDetectionStrategy.Default` is renamed `Eager`, and `ng update` adds `changeDetection: ChangeDetectionStrategy.Eager` to existing components that did not specify a strategy, so upgrades keep their behaviour.',
           ],
           blocks: [
             {
@@ -1082,9 +1758,40 @@ export class Clock {
 // Fix: time = signal(new Date());  ...  this.time.set(new Date())`,
             },
             {
+              type: 'heading',
+              text: 'What actually happens during a check',
+            },
+            {
+              type: 'list',
+              ordered: true,
+              items: [
+                '**Something schedules a tick.** In zoneless apps, the scheduler is notified by a signal write that a template reads, a template/host event listener, `markForCheck()` (which the `async` pipe calls), `ComponentRef.setInput()`, or attaching/detaching a view. Multiple notifications in the same task coalesce into one tick.',
+                '**`ApplicationRef.tick()` runs.** Root effects run first, then Angular walks the view tree from the root.',
+                '**Each view decides whether to refresh.** An `Eager` view always refreshes. An `OnPush` view refreshes only if it is marked dirty. A view that is not dirty but contains a dirty descendant is *traversed* without refreshing its own bindings — signal-driven updates mark only the consuming view for refresh (rather than every ancestor), which is why a signal change deep in the tree is cheap.',
+                '**Refreshing a view** runs its update instructions: evaluate each binding, compare with the stored value, write to the DOM only on change, then run view effects and lifecycle hooks.',
+                '**After render**, `afterNextRender` / `afterEveryRender` callbacks run in their phases. In dev mode Angular then runs a verification pass and throws `NG0100` if any binding changed during the check.',
+              ],
+            },
+            {
+              type: 'table',
+              headers: ['Trigger', 'Zone.js + Eager', 'Zone.js + OnPush', 'Zoneless + OnPush'],
+              rows: [
+                ['Click inside the component', 'Whole tree checked', 'Component and ancestors marked dirty', 'Component and ancestors marked dirty'],
+                ['`setTimeout` mutating a plain field', 'View updates', 'View does NOT update', 'View does NOT update'],
+                ['`signal.set()` read by the template', 'View updates', 'View updates', 'View updates (only that view refreshed)'],
+                ['New input reference from parent', 'View updates', 'View updates', 'View updates'],
+                ['Mutating an input object in place', 'View updates', 'View does NOT update', 'View does NOT update'],
+              ],
+            },
+            {
+              type: 'callout',
+              kind: 'tip',
+              text: 'Migrating a large Zone.js app to zoneless: first make components OnPush and move state to signals (bugs surface early while Zone.js still masks timing), then remove `zone.js` from polyfills and add `provideZonelessChangeDetection()`. Watch for libraries that relied on `NgZone.onStable` or `NgZone.run` to trigger rendering — most maintained libraries support zoneless now, but check before you switch.',
+            },
+            {
               type: 'callout',
               kind: 'note',
-              text: 'OnPush + signals is the combination to aim for even in Zone.js apps: it makes the component\'s update conditions explicit, catches accidental mutation bugs early, and makes a later move to zoneless a non-event.',
+              text: 'OnPush + signals is the combination to aim for even in Zone.js apps (and since v22 OnPush is what you get without asking): it makes the component\'s update conditions explicit, catches accidental mutation bugs early, and makes a later move to zoneless a non-event.',
             },
           ],
         },
@@ -1155,6 +1862,66 @@ export class DataList<T> {
           ],
         },
         {
+          id: 'animations',
+          title: 'Animations: animate.enter / animate.leave and CSS',
+          summary:
+            'Modern Angular animates with native CSS driven by two compiler-supported features — `animate.enter` and `animate.leave` — replacing most uses of the older, JavaScript-based `@angular/animations` DSL.',
+          keyPoints: [
+            '`animate.enter="cls"` adds CSS classes when an element is inserted (by `@if`, `@for`, routing); the animation itself is plain CSS `@keyframes` or transitions.',
+            '`animate.leave="cls"` adds classes when the element is about to be removed and **delays removal until the animation finishes** — the hard part of leave animations that CSS alone cannot do.',
+            'Both accept a static string, a bound value (`[animate.enter]="cls()"`), or an event-binding form (`(animate.leave)="fn($event)"`) to hand off to a JS library; call `$event.animationComplete()` when done.',
+            'They are compiler features, not directives — no import, no extra package, and they work in zoneless apps.',
+            'The legacy `@angular/animations` package (`trigger`, `state`, `transition`, `animate`) is deprecated in favour of the native approach; it still works, but cannot be mixed with `animate.enter`/`animate.leave` in the same component.',
+            'Respect `prefers-reduced-motion` in your CSS; for page transitions, `withViewTransitions()` uses the browser View Transitions API.',
+          ],
+          blocks: [
+            {
+              type: 'code',
+              language: 'ts',
+              title: 'a toast list with enter and leave animations',
+              code: `@Component({
+  selector: 'app-toasts',
+  template: \`
+    @for (t of toasts(); track t.id) {
+      <div class="toast" animate.enter="slide-in" animate.leave="fade-out">
+        {{ t.text }} <button (click)="dismiss(t.id)">×</button>
+      </div>
+    }
+  \`,
+  styles: \`
+    .slide-in { animation: slide-in 200ms ease-out; }
+    .fade-out { animation: fade-out 150ms ease-in forwards; }
+    @keyframes slide-in { from { transform: translateY(-8px); opacity: 0; } }
+    @keyframes fade-out { to { opacity: 0; transform: scale(.96); } }
+    @media (prefers-reduced-motion: reduce) {
+      .slide-in, .fade-out { animation: none; }
+    }
+  \`,
+})
+export class Toasts {
+  toasts = signal<{ id: number; text: string }[]>([]);
+  dismiss(id: number) { this.toasts.update(list => list.filter(t => t.id !== id)); }
+}`,
+            },
+            {
+              type: 'table',
+              headers: ['', '`@angular/animations` (legacy)', 'Native `animate.enter` / `animate.leave`'],
+              rows: [
+                ['Where animations are defined', 'TypeScript DSL in component metadata', 'Plain CSS (or any JS library via callbacks)'],
+                ['Runtime cost', 'Animation engine in the bundle', 'Browser-native, GPU-friendly'],
+                ['Leave animations', 'Yes (`:leave` transitions)', 'Yes — removal waits for the longest animation'],
+                ['Complex choreography', '`query`, `stagger`, `group`', 'CSS delays / custom properties, or a library via callbacks'],
+                ['Status', 'Deprecated', 'Recommended'],
+              ],
+            },
+            {
+              type: 'callout',
+              kind: 'pitfall',
+              text: 'With the function form `(animate.leave)="fn($event)"` you **must** call `$event.animationComplete()`; otherwise Angular waits for a timeout (a few seconds by default, configurable via `MAX_ANIMATION_TIMEOUT`) before removing the element, and the UI feels stuck. Also, a child component\'s own `animate.leave` does not run when its *parent* is removed — put `animate.leave` on the child\'s host element in the parent template instead.',
+            },
+          ],
+        },
+        {
           id: 'state-management',
           title: 'State Management: Signal Services, NgRx, and SignalStore',
           summary:
@@ -1202,6 +1969,44 @@ export class CartStore {
     Store -- "action stream" --> Eff["Effect<br/>calls API"]
     Eff -- "success / failure action" --> Store
     Store -- "selector" --> Cmp`,
+            },
+            {
+              type: 'code',
+              language: 'ts',
+              title: 'the same cart as an NgRx SignalStore',
+              code: `import { computed, inject } from '@angular/core';
+import { patchState, signalStore, withComputed, withMethods, withState } from '@ngrx/signals';
+
+type CartState = { items: CartItem[]; checkingOut: boolean };
+
+export const CartStore = signalStore(
+  { providedIn: 'root' },
+  withState<CartState>({ items: [], checkingOut: false }),
+  withComputed(({ items }) => ({
+    count: computed(() => items().reduce((n, i) => n + i.qty, 0)),
+    total: computed(() => items().reduce((s, i) => s + i.qty * i.price, 0)),
+  })),
+  withMethods((store, api = inject(CheckoutApi)) => ({
+    add(p: Product) {
+      patchState(store, ({ items }) => ({ items: [...items, { ...p, qty: 1 }] }));
+    },
+    async checkout() {
+      patchState(store, { checkingOut: true });
+      try { await api.submit(store.items()); patchState(store, { items: [] }); }
+      finally { patchState(store, { checkingOut: false }); }
+    },
+  })),
+);`,
+            },
+            {
+              type: 'table',
+              headers: ['Option', 'Ceremony', 'DevTools / audit trail', 'Best when'],
+              rows: [
+                ['Signals in a component', 'None', 'Angular DevTools signal graph', 'State used by one component'],
+                ['Signal service', 'Low', 'Same', 'Shared state with a few operations — most apps'],
+                ['NgRx SignalStore', 'Medium', 'Optional Redux DevTools integration', 'Many stores needing shared patterns (entities, request status, plugins)'],
+                ['NgRx Store', 'High', 'Full action log, time travel', 'Large teams, complex cross-feature flows, auditable events'],
+              ],
             },
             {
               type: 'callout',
@@ -1270,7 +2075,8 @@ export class CartStore {
             'Add SSR with `ng new --ssr` or `ng add @angular/ssr`; routes can be configured to render on the server per request, prerender at build time (SSG), or render on the client only.',
             '**Hydration** (`provideClientHydration()`) makes the browser attach to the existing server DOM rather than destroying and re-creating it — avoiding flicker and improving Core Web Vitals.',
             '`withEventReplay()` records user clicks that happen before hydration finishes and replays them afterwards.',
-            '**Incremental hydration** (`withIncrementalHydration()`) combines with `@defer (hydrate on viewport)` so parts of the page stay as static HTML until a trigger hydrates them.',
+            '**Incremental hydration** combines with `@defer (hydrate on viewport)` so parts of the page stay as static HTML until a trigger hydrates them. It was opt-in via `withIncrementalHydration()` (v19–v21) and is **on by default since v22**, where that function is deprecated.',
+            'Per-route render modes live in `app.routes.server.ts`: `RenderMode.Server` (per request), `RenderMode.Prerender` (at build time, SSG), and `RenderMode.Client` (CSR only).',
             'Code that touches `window`, `document`, or `localStorage` directly breaks on the server — guard with `afterNextRender()` or inject `PLATFORM_ID` / `DOCUMENT`.',
             '`HttpClient` responses made on the server are cached into the page (transfer cache) so the client does not repeat them during hydration.',
           ],
@@ -1296,8 +2102,16 @@ export class CartStore {
               title: 'configuration and SSR-safe code',
               code: `// app.config.ts
 providers: [
-  provideClientHydration(withEventReplay(), withIncrementalHydration()),
+  provideClientHydration(withEventReplay()),   // incremental hydration is the default in v22+
 ]
+
+// app.routes.server.ts — choose a render mode per route
+export const serverRoutes: ServerRoute[] = [
+  { path: '', renderMode: RenderMode.Prerender },                 // static marketing page
+  { path: 'products/:id', renderMode: RenderMode.Server },        // fresh per request, SEO
+  { path: 'account/**', renderMode: RenderMode.Client },          // private, no SEO value
+  { path: '**', renderMode: RenderMode.Server },
+];
 
 // SSR-safe browser-only code
 export class ThemeToggle {
@@ -1323,6 +2137,82 @@ export class ThemeToggle {
               kind: 'warning',
               text: 'Hydration requires the server and client to produce the **same DOM**. Rendering `Date.now()`, random ids, or browser-only values directly in a template, or manipulating the DOM by hand, causes hydration mismatch errors (`NG0500`-series). Keep templates deterministic and push browser-only work into `afterNextRender`.',
             },
+            {
+              type: 'table',
+              headers: ['Mode', 'TTFB', 'Freshness', 'Server cost', 'Good for'],
+              rows: [
+                ['CSR', 'Fast (static shell) but blank until JS runs', 'Live', 'None', 'Authenticated dashboards'],
+                ['SSR', 'Slower — rendered per request', 'Live', 'CPU per request', 'Product pages, search results, SEO-critical dynamic pages'],
+                ['Prerender (SSG)', 'Fastest (CDN)', 'As of last build', 'Build time only', 'Marketing, docs, blogs'],
+              ],
+            },
+            {
+              type: 'callout',
+              kind: 'pitfall',
+              text: 'SSR servers are long-lived Node processes shared by all users. A `providedIn: \'root\'` service holds state *per request* (each request gets its own app instance), but module-level variables (`let cache = {}` at the top of a file) are shared across **all requests and users** — a classic data-leak bug. Also never let the server call your own public URL for data; call internal endpoints, and set timeouts so a slow API cannot exhaust the render pool.',
+            },
+          ],
+        },
+        {
+          id: 'security',
+          title: 'Security: XSS, Sanitization, CSP, and XSRF',
+          summary:
+            'Angular escapes and sanitizes untrusted values by default, which removes most XSS risk — as long as you do not bypass it. Content Security Policy, XSRF protection, and server-side authorization complete the picture.',
+          keyPoints: [
+            '**Interpolation and property bindings are safe by default**: `{{ value }}` is always text, and values bound to `[innerHTML]`, `[href]`, `[src]`, or `[style]` are sanitized for their *security context* (HTML, URL, resource URL, style).',
+            '`DomSanitizer.bypassSecurityTrustHtml()` and friends turn off that protection for one value — every call is a potential XSS hole and should be rare, reviewed, and fed only trusted or pre-sanitized content.',
+            'Direct DOM APIs (`el.innerHTML = …`, `ElementRef.nativeElement`, `document.write`) bypass Angular entirely; prefer bindings and `Renderer2`.',
+            'Never build templates from user input at runtime: AOT compilation means templates are trusted code; mixing server-side templating with Angular templates enables template injection.',
+            'A strict **CSP** with nonces is supported: the CLI\'s `autoCsp` option generates hash-based CSP for the index file, and `ngCspNonce` / the `CSP_NONCE` token supply a nonce for Angular\'s inline styles.',
+            '`HttpClient` has built-in **XSRF** support: it reads the `XSRF-TOKEN` cookie and sends it as `X-XSRF-TOKEN` on mutating same-origin requests (configurable with `withXsrfConfiguration`) — the server must still validate it.',
+          ],
+          blocks: [
+            {
+              type: 'code',
+              language: 'ts',
+              title: 'what Angular does with untrusted values',
+              code: `@Component({
+  selector: 'app-comment',
+  template: \`
+    <p>{{ comment().body }}</p>                    <!-- always rendered as text -->
+    <div [innerHTML]="comment().html"></div>      <!-- sanitized: <script>, onerror=... stripped -->
+    <a [href]="comment().website">Website</a>     <!-- javascript: URLs neutralized -->
+  \`,
+})
+export class Comment {
+  comment = input.required<{ body: string; html: string; website: string }>();
+}
+
+// DANGEROUS: only for content you fully control (e.g. your own CMS output, sanitized server-side)
+export class TrustedEmbed {
+  private sanitizer = inject(DomSanitizer);
+  embed = computed(() => this.sanitizer.bypassSecurityTrustResourceUrl(
+    'https://www.youtube-nocookie.com/embed/' + encodeURIComponent(this.videoId())));
+  videoId = input.required<string>();
+}`,
+            },
+            {
+              type: 'table',
+              headers: ['Threat', 'Angular\'s built-in defence', 'What you still must do'],
+              rows: [
+                ['XSS via data', 'Auto-escaping + context-aware sanitization', 'Avoid `bypassSecurityTrust*` and raw DOM writes'],
+                ['XSS via injected scripts', 'Works with strict CSP and Trusted Types', 'Configure CSP headers on the server'],
+                ['CSRF / XSRF', 'Cookie-to-header token in `HttpClient`', 'Issue the cookie and verify the header server-side'],
+                ['Unauthorized access', 'Guards hide UI only', 'Enforce authorization on every API endpoint'],
+                ['Token theft', 'None', 'Prefer `HttpOnly`, `Secure`, `SameSite` cookies over tokens in `localStorage`'],
+                ['Vulnerable dependencies', 'Regular, supported releases', 'Stay on a supported major; run `npm audit` in CI'],
+              ],
+            },
+            {
+              type: 'callout',
+              kind: 'warning',
+              text: 'Storing JWTs in `localStorage` is common in Angular tutorials, but any XSS on your origin can read and exfiltrate them. `HttpOnly` cookies (with XSRF protection and `SameSite`) cannot be read by JavaScript at all. If you must keep tokens in JS, keep them in memory and short-lived, with refresh via an `HttpOnly` cookie.',
+            },
+            {
+              type: 'callout',
+              kind: 'note',
+              text: 'Only versions under active or LTS support receive security patches. Running an out-of-support Angular major in production is itself a security finding in most audits — budget for staying within the supported window.',
+            },
           ],
         },
         {
@@ -1331,7 +2221,8 @@ export class ThemeToggle {
           summary:
             'Angular ships first-class testing support — `TestBed` builds a real component with real DI in a test, `HttpTestingController` fakes the backend, and component harnesses give stable, implementation-agnostic test APIs.',
           keyPoints: [
-            'Unit tests run with **Vitest** by default in new projects since Angular 21 (Karma + Jasmine is the long-standing legacy setup, now deprecated); Jest is also common.',
+            'Unit tests run with **Vitest** by default in new projects since Angular 21, via the CLI\'s `unit-test` builder. Karma + Jasmine is the legacy setup (Karma itself is deprecated upstream); v22 ships a `migrate-karma-to-vitest` migration. Jest is also common in existing codebases.',
+            'In zoneless tests, prefer `await fixture.whenStable()` and Vitest fake timers over Zone-based `fakeAsync`/`tick` (which need Zone.js loaded in the test environment).',
             '`TestBed.configureTestingModule({ imports: [Cmp], providers: [...] })` sets up a component with its real template and DI.',
             '`fixture.detectChanges()` (or `await fixture.whenStable()` in zoneless apps) applies pending updates before assertions.',
             'Test services directly with `TestBed.inject(Service)`; swap real dependencies for fakes with `{ provide: X, useValue: fake }`.',
@@ -1380,6 +2271,40 @@ describe('ProductService', () => {
 });`,
             },
             {
+              type: 'code',
+              language: 'ts',
+              title: 'testing a signal-based component with an httpResource (zoneless)',
+              code: `import { TestBed } from '@angular/core/testing';
+import { provideHttpClient } from '@angular/common/http';
+import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
+
+it('shows the user name once loaded', async () => {
+  TestBed.configureTestingModule({
+    providers: [provideHttpClient(), provideHttpClientTesting()],
+  });
+  const fixture = TestBed.createComponent(UserProfile);
+  const http = TestBed.inject(HttpTestingController);
+
+  fixture.detectChanges();                                  // resource issues its request
+  await fixture.whenStable();
+  http.expectOne('/api/users/1').flush({ id: 1, name: 'Ada' });
+
+  await fixture.whenStable();                               // let signals propagate and render
+  expect(fixture.nativeElement.querySelector('h2').textContent).toContain('Ada');
+  http.verify();
+});`,
+            },
+            {
+              type: 'table',
+              headers: ['Layer', 'Tool', 'What to test', 'Rough share'],
+              rows: [
+                ['Pure functions, services, stores', 'Vitest + `TestBed.inject`', 'Business rules, state transitions', 'Most tests'],
+                ['Components', 'TestBed (+ harnesses, Testing Library)', 'Rendering, inputs/outputs, user interaction', 'Many'],
+                ['Integration', 'TestBed with router (`RouterTestingHarness`)', 'Navigation, guards, lazy routes', 'Some'],
+                ['End-to-end', 'Playwright / Cypress', 'Critical user journeys against a real build', 'Few'],
+              ],
+            },
+            {
               type: 'callout',
               kind: 'tip',
               text: 'Test behaviour through the DOM and public API (click the button, assert the output) rather than calling private methods — the same philosophy as React Testing Library. Angular Material\'s **component harnesses** (`TestbedHarnessEnvironment`) apply this to library components, so tests survive internal markup changes.',
@@ -1396,7 +2321,8 @@ describe('ProductService', () => {
             '**Smart components** inject services and own data fetching; **presentational components** only take inputs and emit outputs, use OnPush, and are trivially reusable and testable.',
             'Keep business logic in services and pure functions, not in components or templates.',
             'Prefer `inject()`, signal inputs/outputs, built-in control flow, and standalone components in new code; migrate legacy code incrementally with the CLI schematics.',
-            'Use strict TypeScript and `strictTemplates` so the template type-checker catches binding errors at build time.',
+            'Use strict TypeScript and `strictTemplates` so the template type-checker catches binding errors at build time (`strictTemplates` is on by default since v22; the upgrade migration sets it to `false` for projects that had not enabled it).',
+            'Centralize error handling: `provideBrowserGlobalErrorListeners()` plus a custom `ErrorHandler` that reports to your monitoring tool, rather than `try/catch` sprinkled through components.',
             'In monorepos, Nx enforces module boundaries (e.g. "feature libs may not import other feature libs") with lint rules.',
           ],
           blocks: [
@@ -1427,6 +2353,70 @@ ng generate @angular/core:output-migration    # @Output() -> output()`,
               type: 'callout',
               kind: 'note',
               text: 'The presentational/smart split maps directly onto change detection: presentational components with OnPush only re-render when their inputs change, so a deep tree of them stays cheap no matter how often the smart parent updates.',
+            },
+          ],
+        },
+        {
+          id: 'upgrading-and-modernizing',
+          title: 'Upgrading and Modernizing a Legacy Angular App',
+          summary:
+            'Angular\'s predictable release cadence and automated migrations make upgrades routine if you do them regularly — and a large legacy app can be modernized incrementally, one feature at a time, without a rewrite.',
+          keyPoints: [
+            'Majors ship about every 6 months; each gets 6 months of active support plus 12 months of LTS. Falling more than two majors behind means losing security patches.',
+            '`ng update` upgrades packages **and** runs code migrations; go one major at a time and follow the interactive guide at [angular.dev/update-guide](https://angular.dev/update-guide).',
+            'Deprecated APIs are kept for at least two majors before removal, which gives you a window to migrate.',
+            'Modernize in a deliberate order: standalone → control flow → `inject()` → signal inputs/outputs/queries → OnPush + signals → zoneless → Signal Forms / resources for new code.',
+            'Check third-party library compatibility (component libraries, NgRx, testing tools) **before** starting a major upgrade — they are usually the real blocker.',
+          ],
+          blocks: [
+            {
+              type: 'code',
+              language: 'bash',
+              title: 'a safe upgrade routine',
+              code: `git switch -c chore/angular-22
+ng update                                   # lists what can be updated
+ng update @angular/core@22 @angular/cli@22  # framework + automated migrations
+ng update @angular/material@22              # first-party libraries next
+npx ng build && npx ng test                 # verify, then commit before the next step
+
+# opt-in modernization schematics (run one at a time, review the diff)
+ng generate @angular/core:standalone
+ng generate @angular/core:control-flow
+ng generate @angular/core:inject
+ng generate @angular/core:signal-input-migration
+ng generate @angular/core:signal-queries-migration
+ng generate @angular/core:output-migration`,
+            },
+            {
+              type: 'mermaid',
+              code: `flowchart LR
+    A["NgModules<br/>*ngIf, @Input"] --> B["Standalone<br/>components"]
+    B --> C["@if / @for<br/>control flow"]
+    C --> D["inject() and<br/>signal inputs/queries"]
+    D --> E["OnPush +<br/>signal state"]
+    E --> F["Zoneless"]
+    F --> G["Signal Forms and<br/>resources for new code"]`,
+            },
+            {
+              type: 'table',
+              headers: ['v22 default change', 'What `ng update` does', 'What you should review'],
+              rows: [
+                ['OnPush by default (`Default` renamed `Eager`)', 'Adds `ChangeDetectionStrategy.Eager` to components without a strategy', 'Gradually remove `Eager` as components move to signals'],
+                ['Fetch backend for `HttpClient`', 'Adds `withXhr()` where XHR-specific features are needed', 'Upload progress UI, interceptors relying on XHR behaviour'],
+                ['`strictTemplates` on by default', 'Sets it to `false` where it was not enabled', 'Turn it on and fix the type errors it reveals'],
+                ['Incremental hydration by default', 'Adds `withNoIncrementalHydration()` where needed', '`@defer` blocks with `hydrate` triggers'],
+                ['`?.` returns `undefined` instead of `null`', 'Wraps affected expressions so behaviour is unchanged', 'Templates comparing against `null` strictly'],
+              ],
+            },
+            {
+              type: 'callout',
+              kind: 'tip',
+              text: 'Make upgrades boring: schedule one shortly after each major ships (once your key libraries support it), keep the change set to "upgrade + migrations only", and do modernization refactors in separate PRs. Teams that upgrade every six months spend hours; teams that skip three majors spend weeks.',
+            },
+            {
+              type: 'callout',
+              kind: 'note',
+              text: 'AngularJS (1.x) apps are a different story: there is no `ng update` path. The realistic options are a hybrid app using `@angular/upgrade` during a strangler-fig migration, or a rewrite route by route behind a reverse proxy.',
             },
           ],
         },
@@ -1588,7 +2578,7 @@ export class ProductsPage {
             {
               question: 'How does change detection work in Angular, and what does OnPush actually change?',
               answer:
-                'Angular keeps a tree of component views. When change detection runs, it walks the tree top-down and, for each view, re-evaluates template bindings and updates DOM nodes whose values differ from the last check. With Zone.js, any async event anywhere (click, timer, HTTP) triggers a check of the whole tree. `OnPush` marks a component as "only check me when I am marked dirty" — which happens when an input reference changes, an event handler in its template fires, an `async` pipe in it emits, a signal read in its template changes, or `markForCheck()` is called. Otherwise the component and its subtree are skipped. The key implication is that OnPush relies on immutability: mutating an object passed as an input does not change its reference, so the child will not update.',
+                'Angular keeps a tree of component views. When change detection runs, it walks the tree top-down and, for each view, re-evaluates template bindings and updates DOM nodes whose values differ from the last check. With Zone.js, any async event anywhere (click, timer, HTTP) triggers a check of the whole tree. `OnPush` marks a component as "only check me when I am marked dirty" — which happens when an input reference changes, an event handler in its template fires, an `async` pipe in it emits, a signal read in its template changes, or `markForCheck()` is called. Otherwise the component and its subtree are skipped. The key implication is that OnPush relies on immutability: mutating an object passed as an input does not change its reference, so the child will not update. Since Angular 22 OnPush is the **default** strategy and the old behaviour is called `Eager`; `ng update` adds `Eager` explicitly to existing components so upgrades do not change behaviour.',
             },
             {
               question: 'What is zoneless Angular and what breaks when you migrate to it?',
@@ -1613,7 +2603,7 @@ export class ProductsPage {
             {
               question: 'Template-driven vs reactive forms — which would you choose and why?',
               answer:
-                'Template-driven forms build the form model implicitly from `ngModel` directives in the template; they are quick for a small login or contact form. Reactive forms build the model explicitly in the class with `FormGroup`/`FormControl`/`FormArray`; they are synchronous, strictly typed, easy to unit test without rendering, and handle dynamic fields, cross-field validation, and async validation cleanly. For anything beyond a trivial form, reactive forms are the standard choice. Worth mentioning that Angular 21 introduced experimental Signal Forms, which model the form as a signal with schema-based validation — promising, but experimental, so reactive forms remain the production default.',
+                'Template-driven forms build the form model implicitly from `ngModel` directives in the template; they are quick for a small login or contact form. Reactive forms build the model explicitly in the class with `FormGroup`/`FormControl`/`FormArray`; they are synchronous, strictly typed, easy to unit test without rendering, and handle dynamic fields, cross-field validation, and async validation cleanly. For anything beyond a trivial form, reactive forms have long been the standard choice. Since Angular 22 there is a third, stable option: **Signal Forms**, where your own signal is the model, validation is declared once in a schema function, and field state is exposed as signals. A senior answer: in a v22+ codebase I would build new forms with Signal Forms (they fit zoneless, signal-based components naturally), keep existing reactive forms unless I am already rewriting them, and reserve template-driven forms for very small cases.',
             },
             {
               question: 'What are pure and impure pipes? Why is calling a method in a template often worse than using a pipe?',
@@ -1674,6 +2664,71 @@ export class ProductsPage {
               question: 'What is content projection, and when would you use `ng-template` instead of `ng-content`?',
               answer:
                 '`<ng-content>` projects markup that a parent places between the component\'s tags into a slot in the component\'s template (with `select` for multiple named slots) — Angular\'s equivalent of React\'s `children`. The projected content is created and owned by the parent, so it is instantiated even if the child never displays it, and it can only be rendered once. When the child needs to render content conditionally, lazily, multiple times, or with data supplied by the child (like a row template for each list item), pass an `<ng-template>` instead and render it with `ngTemplateOutlet` and a context object — Angular\'s equivalent of render props.',
+            },
+            {
+              question: 'Explain how signals propagate changes internally. Why is it called "push-pull", and why does it avoid glitches?',
+              answer:
+                'Signals form a dependency graph built dynamically: while a `computed`, `effect`, or template runs, every signal it reads records it as a consumer. On `set()`, the signal increments its version and *pushes* only a "possibly stale" notification to its consumers — nothing is recomputed. Values are *pulled* lazily: when a stale `computed` is read, it checks whether any producer\'s version actually changed and only then reruns. Because recomputation happens on read, after all writes in the task have finished, a consumer never observes a half-updated state (a "glitch", like `fullName` combining a new first name with an old last name) — the classic problem with `combineLatest`, which emits once per source change. Equality checks make `computed`s act as firewalls: if a recomputed value is equal to the previous one, downstream consumers are not considered changed.',
+            },
+            {
+              question: 'What are `resource()`, `rxResource()`, and `httpResource()`, and when would you still use a hand-written RxJS pipeline?',
+              answer:
+                'They bring async data into the signal graph. You declare `params` as a reactive function of signals and a loader; Angular runs the loader whenever params change, aborts the stale in-flight load, and exposes `value()`, `hasValue()`, `error()`, `isLoading()`, and `status()` as signals. `resource` takes a Promise loader with an `abortSignal`; `rxResource` takes an Observable `stream`; `httpResource` is the HTTP shortcut that goes through `HttpClient`, so interceptors and the SSR transfer cache apply. Returning `undefined` from params keeps the resource idle. All three are stable since v22. I would still write an RxJS pipeline for polling, websockets, retry with exponential back-off, or coordinating multiple streams with precise timing — and resources are for reads, so mutations stay imperative followed by `reload()` or an optimistic `set()`.',
+            },
+            {
+              question: 'What changed in Angular 22 that you need to know when upgrading?',
+              answer:
+                'The headline changes: OnPush became the default change-detection strategy (`Default` was renamed `Eager`, and the migration adds it explicitly to existing components); Signal Forms and the resource APIs became stable; `HttpClient` uses the Fetch backend by default (`withFetch()` deprecated, `withXhr()` to opt back into XHR, mainly for upload progress); incremental hydration is on by default; `strictTemplates` is on by default for new projects; safe navigation `?.` in templates now returns `undefined` like TypeScript instead of `null`; and the router\'s `paramsInheritanceStrategy` defaults to `\'always\'`. A new `@Service()` decorator offers a shorter root-provided service. TypeScript 6 is required. The practical advice is to run `ng update` one major at a time, review each migration\'s diff, and specifically check the router params change, which has no automatic migration.',
+            },
+            {
+              question: 'Signal Forms vs reactive forms: what is the architectural difference?',
+              answer:
+                'In reactive forms each `FormControl` owns a copy of the value and announces changes through `valueChanges` Observables; your domain object and the form state are two things you keep in sync. In Signal Forms, `form(model, schema)` wraps **your own signal** — the model is the single source of truth, and the form is a typed field tree over it that adds validation and interaction state (`value`, `errors`, `touched`, `dirty`, `invalid`) as signals. Validation is declared once in a schema function against paths (`required(p.email)`, `validate(p.confirm, ...)`), which makes rules reusable across forms, and `submit()` handles touched-marking, validity checks, the `submitting` state, and mapping server errors back onto fields. Custom controls implement a lightweight `FormValueControl` instead of `ControlValueAccessor`. The trade-off is maturity: reactive forms have a decade of ecosystem; Signal Forms are stable since v22 but newer.',
+            },
+            {
+              question: 'What is `ExpressionChangedAfterItHasBeenCheckedError` (NG0100), why does it exist, and how do you fix it properly?',
+              answer:
+                'In development mode, after each change detection pass Angular runs a second verification pass and checks that no binding value changed. If one did, it throws `NG0100`, because it means the data flow is not unidirectional: something updated state *during* rendering (a child changing parent state in `ngAfterViewInit`, a getter returning a new object every time, a service updated by a child that a parent already rendered). In production the check does not run, so the UI would silently show stale values. Wrong fixes are `setTimeout` or `detectChanges()` hacks that hide the symptom. Proper fixes: derive the value with `computed()` instead of setting it in a lifecycle hook, move the state up so it is set before the parent renders, return stable references from getters, or — when a child genuinely must inform a parent after render — use an output handled in the next cycle with signals, which schedule a new pass rather than mutating the current one.',
+            },
+            {
+              question: 'How would you design an Angular app for 50+ developers across several teams?',
+              answer:
+                'Structure around **features and boundaries**, not file types. In an Nx (or similar) monorepo, split into libraries by domain and type — feature (smart, routed), UI (presentational), data-access (stores, API clients), and util — and enforce dependency rules with lint (`feature` may use `ui` and `data-access`, never another `feature`). Each feature is a lazy route with its own route-level providers so state is scoped and the code is split. Share a design system as a library of OnPush, signal-input components with harnesses for tests. Standardize the cross-cutting pieces once: HTTP interceptors, error handling, auth, logging, i18n. Enforce `strictTemplates`, OnPush, and the style guide with lint and CI budgets, and use affected-only builds/tests so CI stays fast. Organizationally, give each team ownership of a set of libraries via CODEOWNERS, and treat shared libraries as products with versioned, reviewed APIs. Micro-frontends (Module/Native Federation) are a last resort for genuinely independent deployment needs, not a default.',
+            },
+            {
+              question: 'When should you NOT use `effect()`, and what are legitimate uses?',
+              answer:
+                'Do not use `effect()` to derive state (`effect(() => this.total.set(...))`) — use `computed()`; to reset state when a source changes — use `linkedSignal()`; or to fetch data when params change — use a resource. Those patterns create extra change-detection passes, ordering bugs, and potential loops, and they hide data flow. Legitimate uses are side effects that leave the signal world: syncing to `localStorage` or the URL, analytics/logging, driving an imperative third-party widget (often better as `afterRenderEffect` when it touches the DOM), or bridging to non-signal APIs. Use the `onCleanup` callback to cancel timers or subscriptions between runs, and `untracked()` for reads that should not retrigger the effect.',
+            },
+            {
+              question: 'How does Angular protect against XSS, and how can developers accidentally defeat it?',
+              answer:
+                'Angular treats every bound value as untrusted. Interpolation renders text, never HTML. Property bindings into dangerous sinks are sanitized according to their security context: `[innerHTML]` strips scripts and event-handler attributes, URL bindings neutralize `javascript:` URLs, and resource URLs (iframe `src`, script `src`) are blocked unless explicitly trusted. Templates are compiled AOT, so user data never becomes template code. Developers defeat this by calling `DomSanitizer.bypassSecurityTrust*` on user-influenced data, writing to `nativeElement.innerHTML` directly, using third-party libraries that manipulate the DOM unsafely, or generating Angular templates on the server from user input. Defence in depth adds a strict CSP (Angular supports nonces and `autoCsp`), Trusted Types, and `HttpOnly` cookies so that even a successful injection cannot steal tokens.',
+            },
+            {
+              question: 'What is the difference between `providedIn: \'root\'`, route-level `providers`, and component `providers` in terms of lifetime?',
+              answer:
+                '`providedIn: \'root\'` creates one instance lazily on first injection that lives for the whole application (and is tree-shaken if never used). Route-level `providers` create an environment injector when the route is first activated; the instance is shared by everything under that route and — importantly — **is not destroyed when you navigate away**; it lives as long as the route configuration\'s injector, which is effectively the app lifetime once created. Component `providers` create a new instance per component instance, shared by its view and content children, and destroyed with the component (its `ngOnDestroy`/`DestroyRef` fires). So for "state that must reset when I leave this screen", provide it on the routed component, not on the route.',
+            },
+            {
+              question: 'How do you make a third-party, non-Angular library (charts, maps, editors) work well in a zoneless, SSR-enabled Angular app?',
+              answer:
+                'Wrap it in a component that owns its lifecycle. Create the instance in `afterNextRender` so it never runs on the server and the DOM exists; dispose of it with `DestroyRef.onDestroy`. Push data from signals into the library with `afterRenderEffect` (or an `effect`) that calls its imperative API. When the library fires callbacks (a marker click, an editor change), write to a signal or emit an output — in zoneless apps, mutating a plain field in that callback would not re-render. Lazy-load the heavy library with a dynamic `import()` inside `afterNextRender`, or wrap the whole component in `@defer (on viewport)`, so it does not bloat the initial bundle. With SSR, render a placeholder of the same size on the server to avoid layout shift.',
+            },
+            {
+              question: 'Why can calling `inject()` fail with NG0203, and what is an injection context?',
+              answer:
+                'An injection context is a period during which Angular knows which injector is current: while constructing a class instantiated by DI (constructor and field initializers), inside a provider `useFactory`, in functional guards/resolvers/interceptors, and inside `runInInjectionContext(injector, fn)`. `inject()` reads that ambient injector, so calling it from a lifecycle hook, an event handler, a `setTimeout`, or after an `await` throws `NG0203`. The same rule applies to APIs that use `inject()` internally: `toSignal`, `takeUntilDestroyed` without an explicit `DestroyRef`, `effect`, and resources. The fix is to call them in field initializers or the constructor, or pass the needed `Injector`/`DestroyRef` explicitly when you must create them later.',
+            },
+            {
+              question: 'How do you approach performance for a page rendering thousands of rows?',
+              answer:
+                'First question whether thousands of rows should be in the DOM at all — pagination or server-side filtering often solves it. If not, virtualize with the CDK `cdk-virtual-scroll-viewport` so only visible rows exist. Make the row component OnPush with signal inputs and immutable data, and `track` by a stable id so updates touch only changed rows. Avoid per-row work in templates (methods, impure pipes, `track` expressions that compute). Move heavy computation (sorting/filtering 100k items) into a `computed()` so it runs once per input change, or into a Web Worker if it blocks the main thread. Batch incoming updates (e.g. from a websocket) and write them to the signal once per frame rather than per message. Measure with the Angular DevTools profiler and the browser Performance panel before and after.',
+            },
+            {
+              question: 'Explain the role of `ControlValueAccessor` and a common bug when implementing it.',
+              answer:
+                '`ControlValueAccessor` is the adapter that lets any component participate in reactive and template-driven forms. Forms calls `writeValue` to push a value from the model to the view, `registerOnChange` and `registerOnTouched` to give the component callbacks for view-to-model updates, and `setDisabledState` to propagate disabled status; the component registers itself with the `NG_VALUE_ACCESSOR` multi-provider (usually with `forwardRef`). Common bugs: calling `onChange` inside `writeValue` (echoing the model\'s own value back marks the control dirty and can loop), never calling `onTouched` (so "show errors when touched" logic never fires), and ignoring `setDisabledState`. With Signal Forms, the simpler `FormValueControl` interface replaces most of this.',
             },
           ],
         },

@@ -40,7 +40,7 @@ export const lldSection = {
             {
               type: 'mermaid',
               code: `flowchart LR
-    A["System / Architecture\n(HLD)"] --> B["Service / Module\nboundary"] --> C["Class Diagram\n(LLD)"] --> D["Method Body\n(working code)"]`,
+    A["System / Architecture<br/>(HLD)"] --> B["Service / Module<br/>boundary"] --> C["Class Diagram<br/>(LLD)"] --> D["Method Body<br/>(working code)"]`,
             },
             {
               type: 'p',
@@ -48,20 +48,57 @@ export const lldSection = {
             },
             {
               type: 'heading',
+              text: 'The two flavours of the round',
+            },
+            {
+              type: 'table',
+              headers: ['Format', 'What you produce', 'What is really being tested'],
+              rows: [
+                ['Whiteboard / design-discussion LLD', 'Requirements, class diagram, 1-2 sequence flows, a few key method bodies', 'Modeling judgment, vocabulary, ability to defend tradeoffs under follow-up questions'],
+                ['Machine-coding round (60-120 min, common at Indian product companies and many startups)', 'A running, modular program in your language of choice, often with a small driver/demo and sometimes tests', 'Can you ship clean, extensible, working code under time pressure — separation of concerns, no god class, correct edge cases'],
+                ['Hybrid (most FAANG-style "OO design" rounds)', 'Short design discussion then code for the core class(es)', 'Both, with heavier weight on whether the code matches the design you drew'],
+              ],
+            },
+            {
+              type: 'heading',
               text: 'How LLD rounds are actually graded',
+            },
+            {
+              type: 'p',
+              text: 'Every company uses its own rubric, and the weights below are an illustrative synthesis rather than an official scorecard — but the *dimensions* are remarkably consistent across companies, and they map one-to-one onto the order you should work in: **requirements -> entities -> relationships -> APIs -> code -> extensibility**.',
             },
             {
               type: 'list',
               ordered: true,
               items: [
-                '**Requirement gathering (10%)** — did you ask clarifying questions instead of assuming?',
-                '**Entity/class identification (20%)** — right nouns become classes, right verbs become methods, no god classes.',
-                '**Relationships & OOP correctness (20%)** — composition vs aggregation vs inheritance used correctly; SOLID respected.',
-                '**Pattern application (15%)** — patterns used because they fit, not shoehorned in to show off.',
-                '**Code quality (20%)** — compiles/runs mentally, handles edge cases (null, empty, concurrent access, capacity limits), uses appropriate data structures for the complexity budget.',
-                '**Extensibility discussion (10%)** — you can answer "how would this change if we added X" without a redesign.',
-                '**Communication (5%)** — you narrate tradeoffs as you go, not just at the end.',
+                '**Requirement gathering (~10%)** — did you ask clarifying questions, state assumptions, and draw an explicit out-of-scope line instead of silently assuming?',
+                '**Entity/class identification (~20%)** — right nouns become classes, right verbs become methods, value objects (`Money`, `TimeSlot`) are distinguished from entities (`Booking` with an id and lifecycle), no god classes.',
+                '**Relationships & OOP correctness (~20%)** — composition vs aggregation vs inheritance used correctly; SOLID respected; inheritance only where there is a genuine behavioral subtype.',
+                '**API / contract design (~10%)** — clear public methods with sensible names, inputs, return types and error behavior (exceptions vs result objects), and nothing exposed that callers should not touch.',
+                '**Pattern application (~10%)** — patterns used because a force in the problem demands them, not shoehorned in to show off. Naming the force ("pricing rules will change independently of parking logic, so pricing goes behind a Strategy") is the signal.',
+                '**Code quality (~20%)** — compiles/runs mentally, handles edge cases (null, empty, concurrent access, capacity limits), uses appropriate data structures for the complexity budget.',
+                '**Extensibility, concurrency & testability discussion (~10%)** — you can answer "how would this change if we added X", "what if two requests race", and "how would you unit-test this" without a redesign.',
               ],
+            },
+            {
+              type: 'heading',
+              text: 'What separates levels',
+            },
+            {
+              type: 'table',
+              headers: ['Signal', 'Junior / mid', 'Senior / staff'],
+              rows: [
+                ['Requirements', 'Starts drawing classes immediately', 'Spends 5 minutes on scope, writes down assumptions, prioritises the core use cases'],
+                ['Patterns', 'Names many patterns, applies them everywhere', 'Uses few patterns, each justified by a concrete axis of change; explains when NOT to use one'],
+                ['Inheritance', 'Deep hierarchies (`Vehicle -> Car -> ElectricCar -> ...`)', 'Shallow hierarchies, interfaces + composition, enums or data for variation that is really just data'],
+                ['Concurrency', 'Not mentioned unless asked', 'Volunteers the race, picks a lock granularity, and mentions the DB-level backstop'],
+                ['Code', 'Pseudocode or a single giant class', 'Small cohesive classes, injected dependencies, value objects, meaningful exceptions'],
+              ],
+            },
+            {
+              type: 'callout',
+              kind: 'pitfall',
+              text: 'The single most common failure mode is **pattern-stuffing**: a parking lot with a Singleton, Factory, Builder, Observer, Strategy and Visitor, none of which is justified. Interviewers read unjustified patterns as a sign you memorised a template rather than understood the problem. Every abstraction you add should answer the question "what change does this protect me from?"',
             },
           ],
         },
@@ -159,7 +196,54 @@ for s in shapes:
             {
               type: 'callout',
               kind: 'note',
-              text: 'Compile-time (static) polymorphism — method **overloading**, same name with different parameter lists resolved at compile time — is the other kind, but it is far less relevant to LLD interviews (and Python doesn\'t support it natively at all). When an interviewer says "polymorphism" in an LLD context, they almost always mean runtime/dynamic polymorphism via inheritance or interface implementation.',
+              text: 'Compile-time (static) polymorphism — method **overloading**, same name with different parameter lists resolved at compile time, plus generics/templates — is the other kind, but it is far less relevant to LLD interviews. Python has no true overloading (a second `def` with the same name replaces the first); `typing.overload` only describes signatures for type checkers, and `functools.singledispatch` dispatches at runtime on the first argument\'s type. When an interviewer says "polymorphism" in an LLD context, they almost always mean runtime/dynamic polymorphism via inheritance or interface implementation.',
+            },
+            {
+              type: 'heading',
+              text: 'Polymorphism without inheritance: structural typing',
+            },
+            {
+              type: 'p',
+              text: 'Modern languages increasingly decouple polymorphism from inheritance. Go interfaces and TypeScript types are satisfied **structurally** — any value with the right methods/shape qualifies, no `implements` keyword required. Python offers the same via `typing.Protocol` (checked statically by mypy/pyright). This matters for LLD because it lets you define the abstraction on the **consumer** side ("what do I need?") instead of forcing every provider into a shared base class — the essence of the Interface Segregation and Dependency Inversion principles.',
+            },
+            {
+              type: 'code',
+              language: 'python',
+              title: 'Protocol: polymorphism with no shared base class',
+              code: `from typing import Protocol
+
+class Notifier(Protocol):
+    def send(self, to: str, body: str) -> None: ...
+
+class SmtpEmailer:            # does NOT inherit from Notifier
+    def send(self, to: str, body: str) -> None:
+        print(f"email to {to}: {body}")
+
+class FakeNotifier:           # test double, also no inheritance
+    def __init__(self) -> None:
+        self.sent: list[tuple[str, str]] = []
+    def send(self, to: str, body: str) -> None:
+        self.sent.append((to, body))
+
+def notify_overdue(notifier: Notifier, user_email: str) -> None:
+    notifier.send(user_email, "Your book is overdue")
+
+notify_overdue(SmtpEmailer(), "a@example.com")   # type-checks structurally`,
+            },
+            {
+              type: 'table',
+              headers: ['Pillar', 'Protects against', 'Typical violation', 'Interview phrase'],
+              rows: [
+                ['Encapsulation', 'Invalid state from outside mutation', 'Public setters for every field; returning internal mutable lists', '"The invariant lives in one place"'],
+                ['Abstraction', 'Callers coupling to implementation details', 'Leaky method names like `saveToMySql()`', '"Callers know what, not how"'],
+                ['Inheritance', 'Duplicated code among true subtypes', 'Inheriting just to reuse a helper method', '"Is it really a behavioral subtype?"'],
+                ['Polymorphism', 'Type-switching `if/else` chains', '`if isinstance(x, Circle) ... elif ...`', '"Replace conditional with polymorphism"'],
+              ],
+            },
+            {
+              type: 'callout',
+              kind: 'pitfall',
+              text: 'Encapsulation leaks through getters too: `def get_items(self): return self._items` hands the caller the internal list, which they can mutate behind your back. Return a copy, an immutable view (`tuple(self._items)`), or expose intention-revealing methods (`add_item`, `item_count`) instead.',
             },
             {
               type: 'callout',
@@ -246,7 +330,8 @@ for s in shapes:
                 '`+` public, `-` private, `#` protected.',
                 '`<<interface>>` / `<<abstract>>` stereotypes mark a class as non-instantiable.',
                 'Underlined members are `static`/class-level (not per-instance).',
-                '`~List~T~~` in Mermaid is how generic types like `List<T>` are written, since `<` `>` are reserved for arrows.',
+                'In Mermaid, a generic type like `List<T>` is written `List~T~` (and a map as `Map~K,V~`), since `<` and `>` are reserved for arrow syntax.',
+                'Abstract methods are shown in *italics* in classic UML; Mermaid marks them with a trailing `*` (e.g. `+calculatePay() Money*`) and static members with a trailing `$`.',
               ],
             },
             {
@@ -340,8 +425,15 @@ for s in shapes:
                 ['Holds state?', 'No (contract only)', 'Yes — fields, shared logic'],
                 ['A class can have how many?', 'Many (implements)', 'One (extends), in most languages'],
                 ['Constructor?', 'No', 'Yes — can run shared init logic'],
+                ['Method bodies?', 'Java 8+: `default` and `static` methods; Java 9+: `private` helpers. C# 8+: default interface methods. Still no instance fields.', 'Yes, any mix of concrete and abstract methods'],
+                ['Evolution cost', 'Adding an abstract method breaks every implementor (a `default` method softens this)', 'Adding a concrete method is non-breaking; adding an abstract one breaks subclasses'],
                 ['Use when...', 'Unrelated classes share a *capability* (`Comparable`, `PaymentStrategy`)', 'Related classes share meaningful *code/state* (`AbstractEmployee`)'],
               ],
+            },
+            {
+              type: 'callout',
+              kind: 'note',
+              text: 'Language nuance worth knowing: Python has no `interface` keyword — you use `abc.ABC` with `@abstractmethod` (nominal, enforced at instantiation) or `typing.Protocol` (structural, enforced by the type checker). Java 17+ adds **sealed** interfaces/classes (`sealed interface Shape permits Circle, Square`), which restrict who may implement a type and let `switch` pattern matching check exhaustiveness — a closed hierarchy is sometimes exactly what you want (a fixed set of order states), and an open one is what you want for plug-ins (payment methods).',
             },
             {
               type: 'heading',
@@ -389,6 +481,32 @@ for s in shapes:
               kind: 'pitfall',
               text: 'This is also exactly the shape of a classic Liskov Substitution violation: if `FlyingBird.fly()` is inherited by `Penguin`, either `Penguin` breaks the contract (throws, or does nothing) or every caller of `fly()` now has to special-case penguins. Composition sidesteps the problem entirely by not forcing the capability onto types that don\'t have it.',
             },
+            {
+              type: 'heading',
+              text: 'When inheritance is still the right call',
+            },
+            {
+              type: 'list',
+              items: [
+                '**A genuine, stable behavioral subtype** where every subclass honours the full parent contract (`IOException extends Exception`).',
+                '**Framework extension points** designed for subclassing — a Template Method base class whose hooks are documented (`HttpServlet.doGet`, `unittest.TestCase`).',
+                '**Closed sum types** — a sealed hierarchy of variants (`Shape = Circle | Square`) where you want exhaustive handling.',
+                'Otherwise default to composition, and if you do inherit, keep it to one or two levels. The **fragile base class** problem — a harmless-looking change in a parent silently breaking a subclass that relied on its internal call order — grows with every level.',
+              ],
+            },
+            {
+              type: 'code',
+              language: 'java',
+              title: 'The fragile base class problem, in five lines (Effective Java, Item 18)',
+              code: `class CountingSet<E> extends HashSet<E> {
+    int added = 0;
+    @Override public boolean add(E e) { added++; return super.add(e); }
+    @Override public boolean addAll(Collection<? extends E> c) { added += c.size(); return super.addAll(c); }
+}
+// new CountingSet<String>().addAll(List.of("a", "b", "c")) -> added == 6, not 3,
+// because HashSet.addAll() happens to call add() internally (an implementation detail).
+// Fix: composition — wrap a Set and forward calls (a "forwarding"/decorator class).`,
+            },
           ],
         },
         {
@@ -428,7 +546,7 @@ for s in shapes:
         +formatInvoicePdf()
         +sendConfirmationEmail()
     }
-    note for OrderGod "Violation: 5 unrelated\nreasons to change"`,
+    note for OrderGod "Violation: 5 unrelated<br/>reasons to change"`,
             },
             {
               type: 'mermaid',
@@ -476,7 +594,7 @@ for s in shapes:
         +setHeight(h)
     }
     Rectangle <|-- Square
-    note for Square "Violation: setWidth() also\nforces height = w to stay\na square — breaks any caller\nthat sets width/height independently"`,
+    note for Square "Violation: setWidth() also<br/>forces height = w to stay<br/>a square — breaks any caller<br/>that sets width/height independently"`,
             },
             {
               type: 'mermaid',
@@ -499,7 +617,20 @@ for s in shapes:
             },
             {
               type: 'p',
-              text: 'The fix isn\'t "make `Square` smarter" — it\'s recognizing that `Square` was never really a behavioral subtype of `Rectangle` in the first place (a mutable rectangle is not substitutable for a mutable square and vice versa). Making both independently implement a shared `Shape` interface removes the false is-a relationship entirely.',
+              text: 'The fix isn\'t "make `Square` smarter" — it\'s recognizing that `Square` was never really a behavioral subtype of `Rectangle` in the first place (a mutable rectangle is not substitutable for a mutable square and vice versa). Making both independently implement a shared `Shape` interface removes the false is-a relationship entirely. (If the shapes are **immutable** value objects, `Square` *can* be a valid subtype of `Rectangle` — the violation comes from the mutators, not from geometry.)',
+            },
+            {
+              type: 'p',
+              text: 'LSP is really a statement about **contracts**, and Barbara Liskov\'s rule can be checked mechanically. A subtype must:',
+            },
+            {
+              type: 'list',
+              items: [
+                '**Not strengthen preconditions** — if `Account.withdraw(amount)` accepts any positive amount, `SavingsAccount.withdraw` cannot suddenly reject amounts above 10,000.',
+                '**Not weaken postconditions** — if the base promises "returns a sorted list", the subtype cannot return an unsorted one.',
+                '**Preserve invariants** of the base type (e.g. "balance is never negative").',
+                '**Not throw new, unexpected exception types** that callers of the base type were never told to handle (`UnsupportedOperationException` from an inherited method is the classic smell — Java\'s `Collections.unmodifiableList().add()` is a deliberate, documented trade-off, not something to imitate).',
+              ],
             },
             {
               type: 'heading',
@@ -538,7 +669,9 @@ for s in shapes:
               type: 'code',
               language: 'python',
               title: 'DIP done correctly via constructor injection',
-              code: `class PaymentStrategy(ABC):
+              code: `from abc import ABC, abstractmethod
+
+class PaymentStrategy(ABC):
     @abstractmethod
     def pay(self, amount: Money) -> Receipt: ...
 
@@ -562,6 +695,136 @@ class OrderService:
             raise ValueError("amount must be positive")
         return self.strategy.pay(amount)`,
             },
+            {
+              type: 'heading',
+              text: 'The forces behind each principle',
+            },
+            {
+              type: 'table',
+              headers: ['Principle', 'The force it balances', 'Over-applied, it becomes...'],
+              rows: [
+                ['SRP', 'Code that changes for different reasons (and different stakeholders) should not be tangled', 'Dozens of one-method classes and "Manager/Helper/Util" sprawl; cohesion lost in the other direction'],
+                ['OCP', 'Stable, tested code should not be edited every time a new variant appears', 'Speculative plug-in points for variations that never arrive (YAGNI)'],
+                ['LSP', 'Callers must be able to trust the base contract without type checks', 'Rarely over-applied — it is a correctness rule, not a style preference'],
+                ['ISP', 'Clients should not be coupled to (or recompiled for) methods they never call', 'An interface per method, making implementations hard to discover'],
+                ['DIP', 'Policy (business rules) should not depend on mechanism (DB, HTTP, SDK)', 'An interface for every class even when there is one implementation and no test seam is needed'],
+              ],
+            },
+            {
+              type: 'callout',
+              kind: 'tip',
+              text: 'A practical heuristic for OCP: apply the **rule of three**. The first time a variation appears, a simple `if` is fine. The second time, notice it. The third time, extract the abstraction — by then you know which axis really varies. In an interview, say this out loud: it shows you understand SOLID as a cost/benefit trade, not dogma.',
+            },
+            {
+              type: 'callout',
+              kind: 'note',
+              text: 'SRP is often misquoted as "a class should do one thing". Robert C. Martin\'s own later formulation is "a module should be responsible to one, and only one, **actor**" — i.e. one group of people who would request changes. The invoice layout (finance) and the tax rule (legal) changing for different stakeholders is the real reason to split them.',
+            },
+          ],
+        },
+        {
+          id: 'dependency-injection-testability',
+          title: 'Dependency Injection, Composition Roots & Testability',
+          summary:
+            'DIP says "depend on abstractions"; dependency injection is the mechanism that makes it real — and testability is the fastest way to tell whether a design actually achieved it.',
+          keyPoints: [
+            'Dependency injection means an object receives its collaborators instead of constructing or looking them up itself.',
+            'Prefer constructor injection: dependencies are explicit, required, and the object is valid from birth.',
+            'Wire concrete classes in one place — the composition root (main, app startup, DI container config).',
+            'Inject time, randomness and IDs (Clock, Random, IdGenerator) so business logic is deterministic under test.',
+            'Use fakes for your own abstractions and mocks sparingly; over-mocking couples tests to implementation.',
+          ],
+          blocks: [
+            {
+              type: 'p',
+              text: 'A class that calls `new StripeClient()` or `Database.getInstance()` inside its methods has **hidden dependencies**: you cannot see them from its constructor, you cannot replace them in a test, and you cannot reuse the class with a different provider. Dependency injection (DI) flips this — the class declares what it needs, and something outside hands it in. That "something outside" is the **composition root**: the single place, close to `main`, where concrete classes are chosen and wired together.',
+            },
+            {
+              type: 'table',
+              headers: ['Style', 'How', 'Verdict'],
+              rows: [
+                ['Constructor injection', 'Dependencies are constructor parameters, stored in final/read-only fields', 'Default choice: explicit, immutable, object is always fully initialised'],
+                ['Setter / property injection', 'Dependencies assigned after construction', 'Only for genuinely optional collaborators; risks half-built objects'],
+                ['Method injection', 'Dependency passed per call (`checkout(cart, clock)`)', 'Good when the dependency varies per call'],
+                ['Service locator', 'Class asks a global registry `Locator.get(PaymentGateway)`', 'Anti-pattern in most designs: dependencies hidden again, just behind a lookup'],
+              ],
+            },
+            {
+              type: 'code',
+              language: 'java',
+              title: 'Constructor injection + a composition root (no framework needed)',
+              code: `public final class LateFeeService {
+    private final LoanRepository loans;
+    private final Clock clock;               // java.time.Clock — injectable time
+    private final FeePolicy policy;          // Strategy
+
+    public LateFeeService(LoanRepository loans, Clock clock, FeePolicy policy) {
+        this.loans = Objects.requireNonNull(loans);
+        this.clock = Objects.requireNonNull(clock);
+        this.policy = Objects.requireNonNull(policy);
+    }
+
+    public Money feeFor(LoanId id) {
+        Loan loan = loans.findById(id).orElseThrow(() -> new LoanNotFoundException(id));
+        long daysLate = loan.daysOverdue(LocalDate.now(clock));
+        return policy.feeFor(daysLate);
+    }
+}
+
+// Composition root — the ONLY place that knows concrete classes.
+public static void main(String[] args) {
+    var service = new LateFeeService(
+        new JdbcLoanRepository(dataSource()),
+        Clock.systemUTC(),
+        new TieredFeePolicy());
+    // ... hand service to controllers
+}
+
+// In a test: deterministic time, in-memory repo, no mocking library needed.
+var clock = Clock.fixed(Instant.parse("2026-01-15T00:00:00Z"), ZoneOffset.UTC);
+var service = new LateFeeService(new InMemoryLoanRepository(seed), clock, new FlatFeePolicy(10));`,
+            },
+            {
+              type: 'heading',
+              text: 'Frameworks vs pure DI',
+            },
+            {
+              type: 'p',
+              text: 'Spring, Guice, Dagger (Java), ASP.NET Core\'s built-in container (.NET), NestJS and Angular (TypeScript) automate the wiring and manage lifetimes (singleton, request-scoped, transient). They are a convenience, not the principle — in an interview, plain constructor injection with a hand-written composition root is clearer and shows you understand what the container does for you. Note that a DI container\'s "singleton scope" gives you one shared instance **without** the GoF Singleton\'s global access point, which is why it is the modern replacement for most Singletons.',
+            },
+            {
+              type: 'heading',
+              text: 'Test doubles, precisely',
+            },
+            {
+              type: 'table',
+              headers: ['Double', 'What it does', 'Use for'],
+              rows: [
+                ['Dummy', 'Passed but never used', 'Filling a required parameter'],
+                ['Stub', 'Returns canned answers', 'Driving the code down a specific path'],
+                ['Fake', 'A working lightweight implementation (in-memory repo)', 'Your own ports/interfaces — the most robust option'],
+                ['Spy', 'Records calls for later assertions', 'Verifying an interaction happened (an email was sent)'],
+                ['Mock', 'Pre-programmed expectations, verified automatically', 'Third-party boundaries; use sparingly'],
+              ],
+            },
+            {
+              type: 'callout',
+              kind: 'pitfall',
+              text: '**Mocking what you do not own and mocking everything** both produce brittle tests that break on every refactor while still passing when the real integration is broken. Wrap third-party SDKs behind your own small interface (an Adapter), fake that interface in unit tests, and cover the adapter itself with a few integration tests.',
+            },
+            {
+              type: 'callout',
+              kind: 'tip',
+              text: 'Hidden non-determinism is the most common testability bug in LLD code: `datetime.now()`, `uuid4()`, `random.random()` called inside domain logic. Inject a `Clock`, an `IdGenerator` and a `Random`/seed. Interviewers notice when your rate limiter or parking-fee calculator can be tested without `sleep()`.',
+            },
+            {
+              type: 'heading',
+              text: 'Functional DI',
+            },
+            {
+              type: 'p',
+              text: 'In languages with first-class functions, a dependency that is a single operation can simply be a function parameter: `make_fee_calculator(now: Callable[[], datetime])`. Partial application and closures are DI too. Use an interface when the dependency has several related operations or its own state; use a function when it is one verb.',
+            },
           ],
         },
         {
@@ -580,12 +843,13 @@ class OrderService:
             {
               type: 'mermaid',
               code: `flowchart LR
-    A[Clarify scope\n& actors] --> B[Nouns -> classes\nVerbs -> methods]
-    B --> C[Relationships &\nresponsibilities]
-    C --> D[Class diagram\nwith multiplicities]
-    D --> E[Sequence walkthrough\nof 2-3 core flows]
-    E --> F[Code the core\n20%, out loud]
-    F --> G[Extensibility,\nconcurrency, persistence]`,
+    A["Clarify scope<br/>and actors"] --> B["Nouns to classes<br/>Verbs to methods"]
+    B --> C["Relationships and<br/>responsibilities"]
+    C --> D["Class diagram<br/>with multiplicities"]
+    D --> E["Public APIs<br/>and contracts"]
+    E --> F["Sequence walkthrough<br/>of 2-3 core flows"]
+    F --> G["Code the core<br/>20 percent, out loud"]
+    G --> H["Extensibility, concurrency,<br/>persistence, testing"]`,
             },
             {
               type: 'list',
@@ -608,6 +872,50 @@ class OrderService:
               type: 'callout',
               kind: 'tip',
               text: 'Run through this same eleven-step order for every LLD prompt you practice, even ones you already know cold — the process itself, narrated out loud, is a large part of what is being graded, independent of the specific design you land on.',
+            },
+            {
+              type: 'heading',
+              text: 'A time budget for a 60-minute round',
+            },
+            {
+              type: 'table',
+              headers: ['Minutes', 'Activity', 'Artifact on the board'],
+              rows: [
+                ['0-7', 'Clarify requirements, state assumptions and out-of-scope items', 'Bulleted functional + non-functional list'],
+                ['7-20', 'Entities, relationships, class diagram', 'Class diagram with multiplicities and 2-3 interfaces'],
+                ['20-25', 'Public API of the main service(s); walk one core flow', 'Method signatures, one sequence diagram'],
+                ['25-50', 'Code the core classes', 'Working code for the heart of the problem'],
+                ['50-60', 'Extensions, concurrency, persistence, testing', 'Verbal, plus small diagram deltas'],
+              ],
+            },
+            {
+              type: 'heading',
+              text: 'Designing the API before the internals',
+            },
+            {
+              type: 'p',
+              text: 'Strong candidates write the **public surface** of the main service before any implementation, because it forces decisions about inputs, outputs and failure modes early. Think about: what does the caller pass (ids or objects?), what comes back (a domain object, a DTO, a result type?), and how failure is signalled (domain-specific exceptions such as `SpotUnavailableError`, or a `Result`/`Optional`). Avoid returning `null`/`None` for errors that callers must distinguish.',
+            },
+            {
+              type: 'code',
+              language: 'java',
+              title: 'API-first sketch for a library-management prompt',
+              code: `public interface LibraryService {
+    /** @throws MemberNotFoundException, CopyUnavailableException, BorrowLimitExceededException */
+    Loan borrow(MemberId member, BookId book);
+
+    /** Idempotent: returning an already-returned loan is a no-op that returns the same Receipt. */
+    ReturnReceipt returnCopy(LoanId loan, Instant returnedAt);
+
+    Reservation reserve(MemberId member, BookId book);   // FIFO queue per book
+
+    List<Loan> overdueLoans(LocalDate asOf);
+}`,
+            },
+            {
+              type: 'callout',
+              kind: 'pitfall',
+              text: 'Do not spend 25 minutes on the diagram. A beautiful diagram with no code is usually scored as an incomplete answer, while a slightly rougher diagram backed by working code is not. Get a "good enough" model, then iterate while coding.',
             },
           ],
         },
@@ -761,7 +1069,83 @@ class OrderService:
             {
               type: 'callout',
               kind: 'tip',
-              text: 'For Singleton, know the standard thread-safety options (eager init, double-checked locking, initialization-on-demand holder, or a class-level lock) — but volunteer the downside unprompted: Singletons hurt unit testing because they hide global state, and dependency injection of the single instance is usually the better fit.',
+              text: 'For Singleton, know the standard thread-safety options (eager init, double-checked locking, initialization-on-demand holder, enum, or a class-level lock) — but volunteer the downside unprompted: Singletons hurt unit testing because they hide global state, and dependency injection of the single instance is usually the better fit.',
+            },
+            {
+              type: 'code',
+              language: 'java',
+              title: 'Thread-safe Singletons in Java: three correct variants',
+              code: `// 1. Initialization-on-demand holder: lazy, thread-safe, no locking on the hot path.
+//    The JVM guarantees Holder is initialised exactly once, on first access.
+public final class ConfigManager {
+    private ConfigManager() { /* load config */ }
+    private static final class Holder { static final ConfigManager INSTANCE = new ConfigManager(); }
+    public static ConfigManager getInstance() { return Holder.INSTANCE; }
+}
+
+// 2. Enum singleton (Effective Java, Item 3): also safe against reflection and serialization.
+public enum IdGenerator {
+    INSTANCE;
+    private final AtomicLong next = new AtomicLong();
+    public long nextId() { return next.incrementAndGet(); }
+}
+
+// 3. Double-checked locking: ONLY correct with volatile (Java 5+ memory model).
+//    Without volatile another thread can observe a non-null but partially constructed object.
+public final class Registry {
+    private static volatile Registry instance;
+    public static Registry getInstance() {
+        Registry local = instance;
+        if (local == null) {
+            synchronized (Registry.class) {
+                local = instance;
+                if (local == null) instance = local = new Registry();
+            }
+        }
+        return local;
+    }
+}`,
+            },
+            {
+              type: 'code',
+              language: 'python',
+              title: 'Python: a module is already a singleton; lock if you must be lazy',
+              code: `# config.py — module objects are created once per interpreter and cached in sys.modules
+settings = load_settings()
+
+# If construction must be lazy AND thread-safe (do not rely on the GIL: free-threaded
+# CPython builds exist since 3.13), guard it explicitly:
+import threading
+
+_instance = None
+_lock = threading.Lock()
+
+def get_pool() -> "ConnectionPool":
+    global _instance
+    if _instance is None:
+        with _lock:
+            if _instance is None:      # second check inside the lock
+                _instance = ConnectionPool(size=10)
+    return _instance`,
+            },
+            {
+              type: 'heading',
+              text: 'Modern alternatives that often replace these patterns',
+            },
+            {
+              type: 'table',
+              headers: ['Pattern', 'Lighter modern alternative', 'Still reach for the pattern when...'],
+              rows: [
+                ['Factory Method', 'A dict/map from key to constructor or lambda; DI container bindings', 'Creation needs logic, validation, pooling or caching'],
+                ['Builder', 'Python `@dataclass` with keyword-only defaults; Kotlin/C# named & default args; Java `record` + static factories', 'Many optional parts, staged/validated construction, or an immutable object built step by step (Java has no named args)'],
+                ['Singleton', 'One instance created at the composition root and injected; DI-container singleton scope', 'A true process-wide resource with no test seam needed (rare)'],
+                ['Prototype', 'Copy constructors, `dataclasses.replace()`, `record` with-ers', 'Cloning a complex pre-configured object is cheaper than building it'],
+              ],
+            },
+            {
+              type: 'callout',
+              kind: 'pitfall',
+              text: 'Singleton is not "one instance" — it is "one instance **plus a global access point**". The global access point is what hurts: any code anywhere can reach it, so dependencies become invisible and tests share state. If you need one instance, create one at startup and pass it in.',
             },
           ],
         },
@@ -839,7 +1223,9 @@ class OrderService:
               type: 'code',
               language: 'python',
               title: 'Decorator — pricing composed from independent add-ons',
-              code: `class Beverage(ABC):
+              code: `from abc import ABC, abstractmethod
+
+class Beverage(ABC):
     @abstractmethod
     def cost(self) -> int: ...
     @abstractmethod
@@ -930,6 +1316,63 @@ class WithExtraShot(AddOnDecorator):
     Image <|.. RealImage
     Image <|.. ProxyImage
     ProxyImage --> RealImage : lazily creates on first display()`,
+            },
+            {
+              type: 'heading',
+              text: 'Four wrappers that look alike — tell them apart by intent',
+            },
+            {
+              type: 'table',
+              headers: ['Pattern', 'Interface exposed vs wrapped', 'Intent', 'Real-world example'],
+              rows: [
+                ['Adapter', 'Different — converts one interface into another', 'Make an incompatible class usable', 'Wrapping a vendor SDK behind your `PaymentGateway` port'],
+                ['Decorator', 'Same interface', 'Add responsibilities, stackable', 'Java `BufferedInputStream(new FileInputStream(f))`; HTTP middleware adding retries/logging'],
+                ['Proxy', 'Same interface', 'Control access (lazy, remote, cache, auth) — the client usually does not know', 'ORM lazy-loaded relations; gRPC client stubs; Spring AOP `@Transactional` proxies'],
+                ['Facade', 'New, simpler interface over many classes', 'Reduce coupling to a subsystem', 'An `OrderFacade.placeOrder()` hiding inventory, payment, shipping'],
+              ],
+            },
+            {
+              type: 'code',
+              language: 'python',
+              title: 'Decorator in practice: a retrying, logging gateway built from wrappers',
+              code: `import logging
+import time
+from typing import Protocol
+
+class PaymentGateway(Protocol):
+    def charge(self, order_id: str, amount_paise: int) -> str: ...
+
+class TransientError(Exception): ...
+
+class RetryingGateway:
+    def __init__(self, inner: PaymentGateway, attempts: int = 3, base_delay: float = 0.2):
+        self._inner, self._attempts, self._base_delay = inner, attempts, base_delay
+
+    def charge(self, order_id: str, amount_paise: int) -> str:
+        for attempt in range(1, self._attempts + 1):
+            try:
+                # safe to retry ONLY because order_id doubles as an idempotency key downstream
+                return self._inner.charge(order_id, amount_paise)
+            except TransientError:
+                if attempt == self._attempts:
+                    raise
+                time.sleep(self._base_delay * 2 ** (attempt - 1))   # exponential backoff
+        raise AssertionError("unreachable")
+
+class LoggingGateway:
+    def __init__(self, inner: PaymentGateway):
+        self._inner = inner
+    def charge(self, order_id: str, amount_paise: int) -> str:
+        logging.info("charge %s %d", order_id, amount_paise)
+        return self._inner.charge(order_id, amount_paise)
+
+# Composition root decides the stack; OrderService only sees a PaymentGateway.
+# gateway = LoggingGateway(RetryingGateway(StripeAdapter(client)))`,
+            },
+            {
+              type: 'callout',
+              kind: 'pitfall',
+              text: 'Decorator order matters: `Logging(Retrying(x))` logs once per logical call, `Retrying(Logging(x))` logs every attempt. Also beware **identity and equality** — a decorated object is not `==` to the original, and code that does `isinstance(gateway, StripeAdapter)` breaks once it is wrapped (which is itself a hint that the caller was violating the abstraction).',
             },
           ],
         },
@@ -1075,31 +1518,48 @@ class WithExtraShot(AddOnDecorator):
               type: 'code',
               language: 'python',
               title: 'State pattern — Order lifecycle',
-              code: `class OrderState(ABC):
-    @abstractmethod
-    def next(self, order: "Order"): ...
-    @abstractmethod
-    def cancel(self, order: "Order"): ...
+              code: `from abc import ABC, abstractmethod
+
+class IllegalStateTransition(Exception): ...
+
+class OrderState(ABC):
+    name = "?"
+    def next(self, order: "Order") -> None:
+        raise IllegalStateTransition(f"{self.name}: no next state")
+    def cancel(self, order: "Order") -> None:
+        raise IllegalStateTransition(f"{self.name}: cannot cancel")
 
 class PlacedState(OrderState):
-    def next(self, order):
-        order.state = ShippedState()
-    def cancel(self, order):
-        order.state = CancelledState()
+    name = "PLACED"
+    def next(self, order):   order._transition(SHIPPED)
+    def cancel(self, order): order._transition(CANCELLED)
 
 class ShippedState(OrderState):
-    def next(self, order):
-        order.state = DeliveredState()
-    def cancel(self, order):
-        raise IllegalStateTransition("cannot cancel a shipped order")
+    name = "SHIPPED"
+    def next(self, order):   order._transition(DELIVERED)
+    # cancel() inherits the default: illegal once shipped
+
+class DeliveredState(OrderState):
+    name = "DELIVERED"          # terminal: both defaults raise
+
+class CancelledState(OrderState):
+    name = "CANCELLED"          # terminal
+
+# States hold no per-order data, so one shared instance of each is enough (Flyweight).
+PLACED, SHIPPED, DELIVERED, CANCELLED = PlacedState(), ShippedState(), DeliveredState(), CancelledState()
 
 class Order:
-    def __init__(self):
-        self.state: OrderState = PlacedState()
-    def next(self):
-        self.state.next(self)
-    def cancel(self):
-        self.state.cancel(self)`,
+    def __init__(self) -> None:
+        self._state: OrderState = PLACED
+    @property
+    def status(self) -> str:
+        return self._state.name
+    def _transition(self, new_state: OrderState) -> None:
+        self._state = new_state      # single place to add audit logging / events
+    def next(self) -> None:
+        self._state.next(self)
+    def cancel(self) -> None:
+        self._state.cancel(self)`,
             },
             {
               type: 'callout',
@@ -1110,6 +1570,219 @@ class Order:
               type: 'callout',
               kind: 'note',
               text: 'Strategy vs State, precisely: both hold a reference to an interface implementation, so they look structurally identical. Strategy: the client chooses the algorithm and it typically doesn\'t change on its own. State: the object transitions between states on its own based on internal logic/events. If the choice is external and static, it\'s Strategy; if the object drives its own transitions, it\'s State.',
+            },
+            {
+              type: 'callout',
+              kind: 'tip',
+              text: 'When NOT to use the State pattern: if the states have little behavior and the transitions are just a table, an `enum` plus a transition map (`ALLOWED = {PLACED: {SHIPPED, CANCELLED}, SHIPPED: {DELIVERED}}`) is shorter, easier to persist, and easy to visualise. Reach for state classes when each state has genuinely different behavior for several operations (a vending machine, a TCP connection).',
+            },
+            {
+              type: 'heading',
+              text: 'Chain of Responsibility: a validation / approval pipeline',
+            },
+            {
+              type: 'code',
+              language: 'ts',
+              title: 'Expense approval chain — each handler approves or passes it on',
+              code: `interface Expense { amount: number; category: string; submittedBy: string }
+type Decision = { approvedBy: string } | { rejected: string };
+
+abstract class Approver {
+  private next?: Approver;
+  setNext(next: Approver): Approver { this.next = next; return next; }   // fluent chaining
+  handle(e: Expense): Decision {
+    return this.next ? this.next.handle(e) : { rejected: 'no approver with sufficient authority' };
+  }
+}
+
+class TeamLead extends Approver {
+  handle(e: Expense): Decision { return e.amount <= 1_000 ? { approvedBy: 'team-lead' } : super.handle(e); }
+}
+class Director extends Approver {
+  handle(e: Expense): Decision { return e.amount <= 25_000 ? { approvedBy: 'director' } : super.handle(e); }
+}
+class Cfo extends Approver {
+  handle(e: Expense): Decision { return e.amount <= 250_000 ? { approvedBy: 'cfo' } : super.handle(e); }
+}
+
+const chain = new TeamLead();
+chain.setNext(new Director()).setNext(new Cfo());
+chain.handle({ amount: 12_000, category: 'travel', submittedBy: 'u1' }); // { approvedBy: 'director' }`,
+            },
+            {
+              type: 'p',
+              text: 'The modern, everyday form of this pattern is the **middleware pipeline** — Express/Koa middleware, ASP.NET Core middleware, servlet filters, gRPC interceptors — where each link can short-circuit (reject an unauthenticated request) or call `next()`.',
+            },
+            {
+              type: 'heading',
+              text: 'Observer: the pitfalls interviewers probe',
+            },
+            {
+              type: 'list',
+              items: [
+                '**Lapsed-listener memory leak** — the subject holds strong references to observers, so an observer that forgets to `detach()` is never garbage-collected. Return an unsubscribe handle from `attach()`, or use weak references.',
+                '**One failing observer breaks the rest** — wrap each `update()` call so an exception in one subscriber does not stop delivery to the others (and log it).',
+                '**Re-entrancy and modification during iteration** — an observer that detaches itself (or triggers another notification) while the subject is iterating its list. Iterate over a snapshot copy.',
+                '**Ordering and synchronous latency** — observers run on the publisher\'s thread in registration order; a slow observer slows the publisher. Dispatch to an executor/event loop if handlers are slow, and accept that ordering guarantees then weaken.',
+                '**Thread safety of the subscriber list** — use a copy-on-write list (Java `CopyOnWriteArrayList`) when reads (notifications) vastly outnumber subscriptions.',
+              ],
+            },
+            {
+              type: 'code',
+              language: 'python',
+              title: 'A defensive in-process event bus',
+              code: `import logging
+import threading
+from collections import defaultdict
+from typing import Callable
+
+Handler = Callable[[dict], None]
+
+class EventBus:
+    def __init__(self) -> None:
+        self._handlers: dict[str, list[Handler]] = defaultdict(list)
+        self._lock = threading.Lock()
+
+    def subscribe(self, topic: str, handler: Handler) -> Callable[[], None]:
+        with self._lock:
+            self._handlers[topic].append(handler)
+        def unsubscribe() -> None:
+            with self._lock:
+                if handler in self._handlers[topic]:
+                    self._handlers[topic].remove(handler)
+        return unsubscribe                       # caller owns the lifecycle
+
+    def publish(self, topic: str, event: dict) -> None:
+        with self._lock:
+            snapshot = list(self._handlers[topic])   # safe if handlers (un)subscribe
+        for handler in snapshot:                     # call outside the lock
+            try:
+                handler(event)
+            except Exception:
+                logging.exception("handler failed for %s", topic)  # isolate failures`,
+            },
+          ],
+        },
+        {
+          id: 'patterns-in-modern-languages',
+          title: 'Patterns in Modern Languages: Functional & Idiomatic Alternatives',
+          summary:
+            'Many GoF patterns (1994) were workarounds for languages without first-class functions, sum types or pattern matching — know the idiomatic modern form, and when the full class-based pattern still earns its keep.',
+          keyPoints: [
+            'A single-method Strategy or Command is often just a function (lambda, closure, `Callable`).',
+            'Sealed types/records plus exhaustive `switch`/`match` frequently replace Visitor for closed hierarchies.',
+            'Enums with behavior, or a transition table, can replace small State hierarchies.',
+            'Immutability (records, frozen dataclasses, `readonly`) removes whole classes of concurrency and aliasing bugs.',
+            'The class-based pattern still wins when the variant carries state, multiple operations, or must be discoverable/registered as a plug-in.',
+          ],
+          blocks: [
+            {
+              type: 'p',
+              text: 'Peter Norvig observed back in 1996 that most GoF patterns become simpler or "invisible" in dynamic languages with first-class functions. Today Java (lambdas since 8, records since 16, sealed types since 17, pattern matching for `switch` since 21), C#, Kotlin, TypeScript and Python all have these features, so senior interviewers expect you to know both forms and pick deliberately.',
+            },
+            {
+              type: 'table',
+              headers: ['GoF pattern', 'Modern idiom', 'Keep the class form when'],
+              rows: [
+                ['Strategy', 'Pass a function: `sorted(items, key=by_price)`, `Comparator.comparing(Item::price)`', 'The strategy has configuration/state, several methods, or needs a name in the domain (`SurgePricing`)'],
+                ['Command', 'A closure or `Runnable` queued for later', 'You need undo, serialization (job queues), or metadata (who, when)'],
+                ['Template Method', 'Higher-order function taking the varying step as a parameter', 'A framework exposes several related hooks'],
+                ['Observer', 'Callbacks, event emitters, reactive streams (RxJS, Kotlin Flow, Reactor)', 'Rarely — use the platform event mechanism'],
+                ['Visitor', 'Sealed hierarchy + exhaustive pattern matching', 'Open hierarchy, or double dispatch across two hierarchies'],
+                ['Iterator', 'Language iterators/generators (`yield`, `Iterable`)', 'Almost never hand-roll'],
+                ['Singleton', 'Module-level instance or DI singleton scope', 'Almost never'],
+                ['Factory', 'Constructor references in a map: `Map.of("sms", SmsChannel::new)`', 'Creation involves non-trivial logic'],
+              ],
+            },
+            {
+              type: 'code',
+              language: 'python',
+              title: 'Strategy as a function vs as a class',
+              code: `from dataclasses import dataclass
+from datetime import datetime
+from typing import Callable
+
+# Function form: perfect when the strategy is one stateless operation.
+PricingFn = Callable[[int], int]          # minutes -> paise
+
+def flat_rate(minutes: int) -> int:
+    return 2000 * ((minutes + 59) // 60)  # Rs 20 per started hour
+
+# Class form: earns its keep once the strategy has config + needs a domain name.
+@dataclass(frozen=True)
+class SurgePricing:
+    base: PricingFn
+    multiplier: float
+    peak_hours: range = range(17, 21)
+
+    def __call__(self, minutes: int, at: datetime) -> int:
+        price = self.base(minutes)
+        return round(price * self.multiplier) if at.hour in self.peak_hours else price`,
+            },
+            {
+              type: 'heading',
+              text: 'Visitor vs sealed types + pattern matching',
+            },
+            {
+              type: 'p',
+              text: 'Visitor exists so you can add new *operations* over a fixed class hierarchy without editing those classes, using double dispatch (`node.accept(visitor)` calls `visitor.visitX(this)`). With sealed types and exhaustive pattern matching, the compiler itself tells you every place that must handle a newly added variant, and the operation is a plain function. This is the **expression problem** in miniature: OOP makes adding new types easy and new operations hard; pattern matching flips that trade-off.',
+            },
+            {
+              type: 'code',
+              language: 'java',
+              title: 'Java 21: sealed interface + records + exhaustive switch',
+              code: `sealed interface Shape permits Circle, Rect, Triangle {}
+record Circle(double r) implements Shape {}
+record Rect(double w, double h) implements Shape {}
+record Triangle(double base, double height) implements Shape {}
+
+static double area(Shape s) {
+    return switch (s) {                 // no default needed: the compiler checks exhaustiveness
+        case Circle c   -> Math.PI * c.r() * c.r();
+        case Rect r     -> r.w() * r.h();
+        case Triangle t -> 0.5 * t.base() * t.height();
+    };
+}
+// Adding "record Hexagon(...) implements Shape" (and to permits) makes every
+// non-exhaustive switch a compile error — the safety net Visitor used to provide.`,
+            },
+            {
+              type: 'code',
+              language: 'ts',
+              title: 'TypeScript: discriminated union + exhaustiveness check',
+              code: `type PaymentEvent =
+  | { kind: 'authorized'; amount: number }
+  | { kind: 'captured'; amount: number }
+  | { kind: 'refunded'; amount: number; reason: string };
+
+function describe(e: PaymentEvent): string {
+  switch (e.kind) {
+    case 'authorized': return 'Held ' + e.amount;
+    case 'captured':   return 'Charged ' + e.amount;
+    case 'refunded':   return 'Refunded ' + e.amount + ' (' + e.reason + ')';
+    default: {
+      const unreachable: never = e;   // compile error if a new kind is added and not handled
+      return unreachable;
+    }
+  }
+}`,
+            },
+            {
+              type: 'heading',
+              text: 'Immutability as a design tool',
+            },
+            {
+              type: 'list',
+              items: [
+                '**Value objects should be immutable** — `Money`, `DateRange`, `Coordinates`. Use Java `record`, Python `@dataclass(frozen=True)`, Kotlin `data class` with `val`, TypeScript `readonly`.',
+                'Immutable objects are **thread-safe by construction**, can be shared and cached freely, and make `equals`/`hashCode` safe for map keys.',
+                'Entities (things with identity and a lifecycle, like `Order`) are mutable by nature, but expose intention-revealing methods (`order.ship()`) rather than setters, and keep their collections private.',
+              ],
+            },
+            {
+              type: 'callout',
+              kind: 'warning',
+              text: 'Do not over-correct into "patterns are obsolete". Interviewers still use GoF vocabulary because it is the shared language for *intent*. Say both: "this is a Strategy — in Python I would just pass a callable here, but since surge pricing carries config I will make it a small frozen dataclass."',
             },
           ],
         },
@@ -1133,7 +1806,7 @@ class Order:
                 '**Pessimistic locking** (`SELECT ... FOR UPDATE`, `synchronized`, mutex) — good when contention is frequent and retries would be wasteful (seat booking at the exact moment tickets go on sale).',
                 '**Compare-and-swap / atomic operations** — lock-free updates for simple counters (`AtomicInteger`, Redis `INCR`).',
                 '**Read-write locks** — when reads vastly outnumber writes and reads don\'t need to block each other (a config cache updated rarely, read constantly).',
-                '**Distributed locks** (Redis Redlock, Zookeeper/etcd) — when the resource is shared across multiple processes/machines, not just threads in one process. Always pair with a TTL/lease so a crashed lock-holder doesn\'t deadlock the resource forever.',
+                '**Distributed locks** (a single Redis `SET key token NX PX ttl`, Redlock, ZooKeeper/etcd leases) — when the resource is shared across multiple processes/machines, not just threads in one process. Always pair with a TTL/lease so a crashed lock-holder doesn\'t deadlock the resource forever — and understand that a lease means the lock can expire **while the holder still thinks it owns it** (GC pause, slow network). For correctness-critical work, the protected resource must also reject stale writers via a **fencing token** (a monotonically increasing number issued with each lock grant), or you rely on a DB constraint as the real guard.',
                 '**Idempotency keys** — not a lock, but the other half of correctness: even with perfect locking, retries (client timeout + resend) can cause double-processing unless the operation itself is idempotent.',
               ],
             },
@@ -1181,6 +1854,67 @@ class Order:
               kind: 'tip',
               text: 'When an interviewer asks "what if two requests hit this at the same time?", first name which of these patterns fits the contention profile before writing any code — that single sentence is often worth more than the lock implementation itself.',
             },
+            {
+              type: 'heading',
+              text: 'Choosing a mechanism',
+            },
+            {
+              type: 'table',
+              headers: ['Situation', 'Reach for', 'Watch out for'],
+              rows: [
+                ['Single counter / flag in one process', '`AtomicLong`, `AtomicReference.compareAndSet`, `LongAdder` for hot counters', 'ABA problem on CAS of reused references (rare in GC languages)'],
+                ['Compound invariant across several fields in one process', '`synchronized` / `ReentrantLock` / `threading.Lock` around the whole check-then-act', 'Holding locks while doing I/O or calling foreign code'],
+                ['Read-mostly shared map', '`ConcurrentHashMap` (`computeIfAbsent`, `merge`), immutable snapshots swapped atomically', 'Compound operations that are not atomic even on a concurrent map (`get` then `put`)'],
+                ['Producer/consumer hand-off', 'Bounded `BlockingQueue` / `asyncio.Queue(maxsize=...)`', 'Unbounded queues hiding back-pressure until memory runs out'],
+                ['Row in a database', 'Optimistic version column, or `SELECT ... FOR UPDATE` (pessimistic), or a unique constraint', 'Long transactions holding locks across user think-time'],
+                ['Resource across services', 'Lease-based lock + fencing token, or design for idempotency instead', 'Clock assumptions, lease expiry during GC pauses'],
+              ],
+            },
+            {
+              type: 'heading',
+              text: 'Deadlocks and how designs avoid them',
+            },
+            {
+              type: 'p',
+              text: 'A deadlock needs all four Coffman conditions: mutual exclusion, hold-and-wait, no preemption, and a circular wait. In LLD code the practical cure is to break circular wait with a **global lock ordering** — e.g. a bank transfer always locks the account with the smaller id first — or to avoid holding one lock while acquiring another at all. `tryLock` with a timeout breaks no-preemption as a fallback.',
+            },
+            {
+              type: 'code',
+              language: 'java',
+              title: 'Deadlock-free transfer via consistent lock ordering',
+              code: `public final class Account {
+    private final long id;
+    private final ReentrantLock lock = new ReentrantLock();
+    private long balancePaise;
+    // ... constructor, getters
+
+    static void transfer(Account from, Account to, long amountPaise) {
+        if (from == to) throw new IllegalArgumentException("same account");
+        if (amountPaise <= 0) throw new IllegalArgumentException("amount must be positive");
+        Account first  = from.id < to.id ? from : to;    // global ordering by id
+        Account second = from.id < to.id ? to : from;
+        first.lock.lock();
+        try {
+            second.lock.lock();
+            try {
+                if (from.balancePaise < amountPaise) throw new InsufficientFundsException(from.id);
+                from.balancePaise -= amountPaise;
+                to.balancePaise += amountPaise;
+            } finally { second.lock.unlock(); }
+        } finally { first.lock.unlock(); }
+    }
+}`,
+            },
+            {
+              type: 'callout',
+              kind: 'note',
+              text: 'Modern runtimes change the cost model, not the correctness rules. Java 21 virtual threads make blocking cheap, so a thread-per-request design with plain locks is viable again — but long blocking inside `synchronized` could pin the carrier thread on Java 21-23 (JDK 24 removed most of that pinning via JEP 491). Python\'s free-threaded builds (PEP 703) mean code that "worked" only because of the GIL needs real locks. In both cases: protect invariants explicitly, never rely on incidental atomicity.',
+            },
+            {
+              type: 'callout',
+              kind: 'pitfall',
+              text: 'A thread-safe collection does not make your *operation* thread-safe. `if (!map.containsKey(k)) map.put(k, v)` on a `ConcurrentHashMap` is still a race; use `putIfAbsent`/`computeIfAbsent`. The same applies to Redis: `GET` then `SET` is a race — use `SET NX`, `INCR`, or a Lua script so the check and the write happen atomically on the server.',
+            },
           ],
         },
         {
@@ -1205,7 +1939,7 @@ class Order:
         +sendConfirmationEmail()
         +generateInvoicePdf()
     }
-    note for OrderGod "God Class: one class,\nfive unrelated reasons to change"`,
+    note for OrderGod "God Class: one class,<br/>five unrelated reasons to change"`,
             },
             {
               type: 'callout',
@@ -1232,15 +1966,70 @@ class Order:
               kind: 'pitfall',
               text: '**Shotgun Surgery** — adding one feature requires touching a dozen classes; usually a missing abstraction (often solved by Strategy/Template Method).',
             },
+            {
+              type: 'callout',
+              kind: 'pitfall',
+              text: '**Speculative Generality / pattern-itis** — interfaces with one implementation and no test seam, abstract factories for one product family, plug-in points for requirements nobody stated. Each layer of indirection has a reading cost. YAGNI is a design principle too.',
+            },
+            {
+              type: 'callout',
+              kind: 'pitfall',
+              text: '**Boolean / flag parameters** — `createUser(name, true, false)` hides intent and usually means one method is doing two jobs. Split the method or pass an enum/options object.',
+            },
+            {
+              type: 'callout',
+              kind: 'pitfall',
+              text: '**Inheritance for code reuse** — `class Stack extends ArrayList` (Java\'s own `java.util.Stack extends Vector` is the historical cautionary tale) exposes operations that break the abstraction (`stack.add(0, x)`). Compose and delegate instead.',
+            },
+            {
+              type: 'heading',
+              text: 'Fixing Primitive Obsession with a value object',
+            },
+            {
+              type: 'code',
+              language: 'python',
+              title: 'Money as an immutable value object (integer minor units, never float)',
+              code: `from __future__ import annotations
+from dataclasses import dataclass
+
+@dataclass(frozen=True, slots=True)
+class Money:
+    amount_minor: int          # paise / cents — floats cannot represent 0.1 exactly
+    currency: str
+
+    def __post_init__(self) -> None:
+        if len(self.currency) != 3:
+            raise ValueError("ISO-4217 code expected")
+
+    def __add__(self, other: Money) -> Money:
+        self._same_currency(other)
+        return Money(self.amount_minor + other.amount_minor, self.currency)
+
+    def split(self, parts: int) -> list[Money]:
+        """Split without losing a paisa: remainder goes to the first shares."""
+        base, rem = divmod(self.amount_minor, parts)
+        return [Money(base + (1 if i < rem else 0), self.currency) for i in range(parts)]
+
+    def _same_currency(self, other: Money) -> None:
+        if other.currency != self.currency:
+            raise ValueError(f"currency mismatch {self.currency}/{other.currency}")
+
+# Money(1000, "INR").split(3) -> [334, 333, 333] paise: the shares always sum to the total`,
+            },
+            {
+              type: 'callout',
+              kind: 'warning',
+              text: 'Never model money with binary floating point (`float`/`double`): `0.1 + 0.2 != 0.3`. Use integer minor units or a decimal type (`BigDecimal`, Python `decimal.Decimal`), and decide explicitly how rounding remainders are allocated — this exact detail comes up in Splitwise and billing prompts.',
+            },
           ],
         },
         {
           id: 'case-study-parking-lot',
           title: 'Case Study: Parking Lot System',
           summary:
-            'A favorite warm-up because it cleanly exercises Singleton, Strategy, vehicle/spot compatibility modeling, and a concrete concurrency race condition.',
+            'A favorite warm-up because it cleanly exercises Strategy, vehicle/spot compatibility modeling, the "should this be a Singleton?" debate, and a concrete concurrency race condition.',
           keyPoints: [
-            'ParkingLot is a Singleton — justify it (one lot per building), don\'t apply it by reflex.',
+            'One ParkingLot per process is a lifecycle fact, not a reason for a GoF Singleton — create it once at startup and inject it (this also keeps multi-lot support and tests easy).',
             'Spot allocation and pricing are both Strategy so algorithms can be swapped without touching ParkingLot.',
             'Vehicle-to-spot compatibility is modeled explicitly rather than as scattered if-statements.',
             'The classic race: two attendants scanning the same spot as free — needs a lock or DB-level SELECT ... FOR UPDATE.',
@@ -1255,8 +2044,7 @@ class Order:
               code: `classDiagram
     class ParkingLot {
         -List~Floor~ floors
-        -ParkingLot instance
-        +getInstance() ParkingLot
+        -SpotAllocationStrategy allocator
         +parkVehicle(vehicle) Ticket
         +unparkVehicle(ticket) Receipt
     }
@@ -1302,7 +2090,7 @@ class Order:
             {
               type: 'list',
               items: [
-                '`ParkingLot` is a **Singleton** — there\'s exactly one lot per building (justify it, don\'t just apply it by reflex).',
+                '**Singleton or not?** Many tutorials make `ParkingLot` a GoF Singleton because "there is one lot per building". The stronger answer: there is one *instance* per process, created at the composition root and injected into gates and controllers. That gives the same uniqueness without a global access point, keeps tests isolated, and survives the inevitable follow-up "now support a chain of 50 lots".',
                 'Spot allocation uses a **Strategy** so "nearest spot" vs "best-fit spot" algorithms can be swapped.',
                 'Pricing uses **Strategy** so weekday/weekend or member/non-member pricing plugs in without touching `ParkingLot`.',
                 'Vehicle-to-spot compatibility is modeled explicitly (a motorcycle can use a compact spot, a bus needs a large spot) rather than as scattered `if` statements — this is the detail that separates a strong answer from a mediocre one.',
@@ -1341,7 +2129,82 @@ class Floor:
             },
             {
               type: 'p',
-              text: 'The reason to present code like this (rather than pseudocode) is that it demonstrates three things at once: correct handling of the classic parking-lot race condition (two cars for one spot), a smallest-fit allocation policy stated as an explicit, arguable design decision, and a Singleton implemented safely with a class-level lock — all things interviewers specifically probe with "what if two cars arrive at the same time?"',
+              text: 'The reason to present code like this (rather than pseudocode) is that it demonstrates three things at once: correct handling of the classic parking-lot race condition (two cars for one spot), a smallest-fit allocation policy stated as an explicit, arguable design decision, and lock granularity chosen deliberately (per spot, not per lot) — all things interviewers specifically probe with "what if two cars arrive at the same time?"',
+            },
+            {
+              type: 'heading',
+              text: 'Going deeper: O(1) allocation, fees and the exit flow',
+            },
+            {
+              type: 'p',
+              text: 'Scanning every spot on every entry is O(spots). For a large lot, keep a **free-spot pool per (floor, spot type)** — a deque or a min-heap keyed by distance to the entrance — so allocation is O(1) or O(log n). Popping from a shared pool must itself be atomic (a lock around the pool, or a concurrent queue), and unpark must return the spot to its pool. Once the pool owns availability, the per-spot lock becomes a secondary safety check.',
+            },
+            {
+              type: 'code',
+              language: 'python',
+              title: 'Pool-based allocator and a duration-based pricing strategy',
+              code: `import math
+import threading
+from collections import deque
+from datetime import datetime
+from typing import Protocol
+
+COMPATIBLE_SPOTS = {                      # smallest-fit first
+    VehicleType.MOTORCYCLE: [SpotType.COMPACT, SpotType.LARGE],
+    VehicleType.CAR:        [SpotType.COMPACT, SpotType.LARGE],
+    VehicleType.BUS:        [SpotType.LARGE],
+}
+
+class SpotPool:
+    def __init__(self, spots: list[ParkingSpot]) -> None:
+        self._free: dict[SpotType, deque[ParkingSpot]] = {t: deque() for t in SpotType}
+        for s in spots:
+            self._free[s.spot_type].append(s)
+        self._lock = threading.Lock()
+
+    def acquire(self, vehicle_type: VehicleType) -> ParkingSpot | None:
+        with self._lock:
+            for t in COMPATIBLE_SPOTS[vehicle_type]:
+                if self._free[t]:
+                    return self._free[t].popleft()
+        return None                         # caller raises LotFullError
+
+    def release(self, spot: ParkingSpot) -> None:
+        with self._lock:
+            self._free[spot.spot_type].append(spot)
+
+class PricingStrategy(Protocol):
+    def fee(self, entry: datetime, exit: datetime, spot_type: SpotType) -> int: ...
+
+class HourlyPricing:
+    RATES = {SpotType.COMPACT: 2000, SpotType.LARGE: 5000}     # paise per started hour
+    def fee(self, entry, exit, spot_type):
+        if exit < entry:
+            raise ValueError("exit before entry")
+        hours = max(1, math.ceil((exit - entry).total_seconds() / 3600))
+        return hours * self.RATES[spot_type]`,
+            },
+            {
+              type: 'mermaid',
+              code: `sequenceDiagram
+    participant Gate as ExitGate
+    participant Lot as ParkingLot
+    participant Price as PricingStrategy
+    participant Pay as PaymentProcessor
+    participant Pool as SpotPool
+    Gate->>Lot: unpark(ticketId)
+    Lot->>Lot: load ticket, reject if already closed
+    Lot->>Price: fee(entry, now, spotType)
+    Price-->>Lot: amount
+    Lot->>Pay: charge(ticketId, amount)
+    Pay-->>Lot: receipt
+    Lot->>Pool: release(spot)
+    Lot-->>Gate: receipt, open barrier`,
+            },
+            {
+              type: 'callout',
+              kind: 'tip',
+              text: 'Edge cases to volunteer: a lost ticket (charge a daily maximum, look up by license plate), paying twice for the same ticket (make `unpark` idempotent on ticket id), the clock source (inject a `Clock` so fee tests do not depend on wall time), and a vehicle that needs multiple contiguous spots (a bus spanning five compact spots — model it as an allocation of a spot *range*, which is where a naive design breaks).',
             },
           ],
         },
@@ -1406,6 +2269,185 @@ class Floor:
             {
               type: 'p',
               text: 'Design talking points: where does state live (in-process map vs Redis for a distributed rate limiter shared across app servers), what happens under clock skew across nodes (use `time.monotonic()`/monotonic clocks, never wall-clock, to avoid going backward on NTP adjustment), how the limiter degrades gracefully (fail-open vs fail-closed) if the store backing it is unavailable, and how you\'d evict stale per-client buckets so the bucket map doesn\'t grow unboundedly (an LRU eviction or periodic sweep of buckets untouched for N minutes).',
+            },
+            {
+              type: 'table',
+              headers: ['Algorithm', 'Memory per key', 'Burst behavior', 'Accuracy'],
+              rows: [
+                ['Fixed window counter', 'O(1)', 'Up to 2x limit across a window boundary', 'Low at edges'],
+                ['Sliding window log', 'O(limit) timestamps', 'Exact', 'Exact'],
+                ['Sliding window counter', 'O(1) (two counters)', 'Smoothed approximation', 'Good (assumes uniform traffic in the previous window)'],
+                ['Token bucket', 'O(1) (tokens + timestamp)', 'Allows bursts up to capacity, then the refill rate', 'Exact for its model'],
+                ['Leaky bucket (as a queue)', 'O(queue size)', 'No bursts out; excess queued or dropped', 'Exact output rate'],
+              ],
+            },
+            {
+              type: 'code',
+              language: 'python',
+              title: 'Complete, testable token-bucket limiter (injected clock, bounded memory)',
+              code: `import threading
+import time
+from collections import OrderedDict
+from dataclasses import dataclass, field
+from typing import Callable
+
+@dataclass
+class Bucket:
+    capacity: int
+    refill_per_sec: float
+    tokens: float
+    last: float
+    lock: threading.Lock = field(default_factory=threading.Lock)
+
+    def try_consume(self, now: float, cost: int = 1) -> bool:
+        with self.lock:
+            self.tokens = min(self.capacity, self.tokens + (now - self.last) * self.refill_per_sec)
+            self.last = now
+            if self.tokens >= cost:
+                self.tokens -= cost
+                return True
+            return False
+
+class TokenBucketLimiter:
+    def __init__(self, capacity: int, refill_per_sec: float,
+                 clock: Callable[[], float] = time.monotonic, max_keys: int = 100_000):
+        self._capacity, self._rate, self._clock = capacity, refill_per_sec, clock
+        self._buckets: OrderedDict[str, Bucket] = OrderedDict()
+        self._max_keys = max_keys
+        self._map_lock = threading.Lock()          # guards the dict, not the buckets
+
+    def allow_request(self, client_id: str) -> bool:
+        now = self._clock()
+        with self._map_lock:
+            bucket = self._buckets.get(client_id)
+            if bucket is None:
+                bucket = Bucket(self._capacity, self._rate, self._capacity, now)
+                self._buckets[client_id] = bucket
+                if len(self._buckets) > self._max_keys:
+                    self._buckets.popitem(last=False)   # evict least-recently-used client
+            else:
+                self._buckets.move_to_end(client_id)
+        return bucket.try_consume(now)                  # per-key lock: no global contention
+
+# Test without sleeping: limiter = TokenBucketLimiter(2, 1.0, clock=lambda: fake_now[0])`,
+            },
+            {
+              type: 'callout',
+              kind: 'note',
+              text: 'For a limiter shared by many app servers, the state moves to Redis, and the read-refill-write sequence must run **atomically on the server** — typically a small Lua script (`EVAL`/`EVALSHA`) per request, or a module/library implementing GCRA (the generic cell rate algorithm, a token-bucket equivalent that stores a single timestamp per key). A client-side `GET` followed by `SET` reintroduces the lost-update race.',
+            },
+            {
+              type: 'callout',
+              kind: 'tip',
+              text: 'Return useful metadata, not just a boolean: HTTP 429 with a `Retry-After` header, and optionally `RateLimit-*` headers describing the remaining quota. In the class design that means `allow_request` returns a small `Decision(allowed, remaining, retry_after)` value object.',
+            },
+          ],
+        },
+        {
+          id: 'case-study-lru-cache',
+          title: 'Case Study: LRU Cache (and LFU, TTL, Thread Safety)',
+          summary:
+            'The most frequently asked machine-coding warm-up: O(1) get/put with a hash map plus a doubly linked list, then the follow-ups that separate levels — eviction policies as a Strategy, TTL, and concurrency.',
+          keyPoints: [
+            'HashMap from key to node gives O(1) lookup; a doubly linked list gives O(1) move-to-front and evict-from-tail.',
+            'Sentinel head/tail nodes remove every null-check edge case from insert and remove.',
+            'get() is a write (it changes recency), so a read-write lock buys nothing — use one mutex, or shard.',
+            'LFU needs frequency buckets (map of frequency to an ordered set) plus a running minimum frequency to stay O(1).',
+            'Make the eviction policy pluggable only if the interviewer asks for multiple policies — otherwise it is speculative generality.',
+          ],
+          blocks: [
+            {
+              type: 'p',
+              text: 'Requirements to confirm: fixed capacity in entries (or bytes?), behavior of `get` on a miss (return `None`/`Optional`, not throw), whether `put` on an existing key updates recency (yes), whether entries expire (TTL), thread safety, and whether eviction should notify a listener (write-back caches need that).',
+            },
+            {
+              type: 'mermaid',
+              code: `flowchart LR
+    H["head sentinel"] <--> A["key 7<br/>most recent"] <--> B["key 3"] <--> C["key 9<br/>least recent"] <--> T["tail sentinel"]
+    M["HashMap key to node"] -.-> A
+    M -.-> B
+    M -.-> C`,
+            },
+            {
+              type: 'code',
+              language: 'python',
+              title: 'Hand-rolled LRU cache with sentinels, thread-safe',
+              code: `import threading
+from typing import Generic, Hashable, Optional, TypeVar
+
+K = TypeVar("K", bound=Hashable)
+V = TypeVar("V")
+
+class _Node(Generic[K, V]):
+    __slots__ = ("key", "value", "prev", "next")
+    def __init__(self, key=None, value=None):
+        self.key, self.value = key, value
+        self.prev: Optional[_Node] = None
+        self.next: Optional[_Node] = None
+
+class LRUCache(Generic[K, V]):
+    def __init__(self, capacity: int) -> None:
+        if capacity <= 0:
+            raise ValueError("capacity must be positive")
+        self._cap = capacity
+        self._map: dict[K, _Node[K, V]] = {}
+        self._head, self._tail = _Node(), _Node()      # sentinels: never hold data
+        self._head.next, self._tail.prev = self._tail, self._head
+        self._lock = threading.Lock()
+
+    def get(self, key: K) -> Optional[V]:
+        with self._lock:
+            node = self._map.get(key)
+            if node is None:
+                return None
+            self._unlink(node)
+            self._push_front(node)                     # access refreshes recency
+            return node.value
+
+    def put(self, key: K, value: V) -> None:
+        with self._lock:
+            node = self._map.get(key)
+            if node is not None:
+                node.value = value
+                self._unlink(node)
+                self._push_front(node)
+                return
+            if len(self._map) == self._cap:
+                lru = self._tail.prev                  # real node, since capacity > 0
+                self._unlink(lru)
+                del self._map[lru.key]
+            node = _Node(key, value)
+            self._map[key] = node
+            self._push_front(node)
+
+    def _unlink(self, n: _Node) -> None:
+        n.prev.next, n.next.prev = n.next, n.prev
+
+    def _push_front(self, n: _Node) -> None:
+        n.prev, n.next = self._head, self._head.next
+        self._head.next.prev = n
+        self._head.next = n`,
+            },
+            {
+              type: 'heading',
+              text: 'Follow-ups and how to answer them',
+            },
+            {
+              type: 'table',
+              headers: ['Follow-up', 'Design answer'],
+              rows: [
+                ['Add TTL', 'Store `expires_at` in the node; treat expired entries as misses on `get` (lazy expiry) and optionally run a periodic sweep or keep a min-heap by expiry for eager cleanup. Inject the clock.'],
+                ['Support LFU', 'Map key to (value, freq) plus map freq to an insertion-ordered set of keys, and track `min_freq`; on access move the key to freq+1 and bump `min_freq` if its old bucket emptied; evict from the `min_freq` bucket. All O(1).'],
+                ['Multiple policies', 'Extract an `EvictionPolicy` interface (`on_access`, `on_insert`, `evict_candidate`) — Strategy — and keep storage in the cache class.'],
+                ['High concurrency', 'Shard into N independent caches by key hash (each with its own lock) — approximate global LRU, far less contention. Production libraries (Caffeine on the JVM) instead record reads in lock-free buffers and apply them in batches, and use W-TinyLFU admission for better hit rates than pure LRU.'],
+                ['Size in bytes', 'Track a running weight; evict until total weight fits; reject single entries larger than capacity.'],
+                ['Thundering herd on miss', 'Single-flight loading: concurrent misses for the same key wait on one in-flight future instead of all hitting the database.'],
+              ],
+            },
+            {
+              type: 'callout',
+              kind: 'tip',
+              text: 'Mention the library shortcut first, then implement by hand: Python `functools.lru_cache` / `OrderedDict.move_to_end`, Java `LinkedHashMap(capacity, 0.75f, true)` with `removeEldestEntry`. Interviewers almost always then say "now without the library" — but knowing it exists signals real-world experience.',
             },
           ],
         },
@@ -1511,9 +2553,9 @@ class Floor:
             'Tests graph thinking layered on top of OOP — the interesting part is not the class diagram but the greedy debt-simplification algorithm.',
           keyPoints: [
             'Split is a Strategy interface (EqualSplit, ExactSplit, PercentSplit) so new splitting rules plug in without touching Expense or Group.',
-            'Debt simplification reduces N pairwise debts to the minimum number of settling transactions.',
+            'Debt simplification collapses many pairwise debts into a small number of settling transactions computed from net balances.',
             'The greedy approach: repeatedly match the largest creditor with the largest debtor via a max-heap/min-heap pair.',
-            'This is O(N log N) and a variant of the classic minimum cash-flow problem — state both the complexity and why the greedy choice works.',
+            'Greedy is O(N log N) and yields at most N-1 transfers, but it is a heuristic: the true minimum-transactions problem is NP-hard — say so.',
           ],
           blocks: [
             {
@@ -1550,7 +2592,7 @@ class Floor:
             },
             {
               type: 'p',
-              text: 'The core algorithm — debt simplification — reduces N pairwise debts to the minimum number of settling transactions: compute each user\'s net balance (total paid minus total owed), then greedily match the largest creditor with the largest debtor repeatedly (a min-heap/max-heap pair, or sort-and-two-pointer) until all balances are zero.',
+              text: 'The core algorithm — debt simplification — reduces many pairwise debts to a small number of settling transactions: compute each user\'s net balance (total paid minus total owed), then greedily match the largest creditor with the largest debtor repeatedly (a min-heap/max-heap pair, or sort-and-two-pointer) until all balances are zero.',
             },
             {
               type: 'code',
@@ -1584,7 +2626,39 @@ def simplify_debts(net_balance: dict[str, int]) -> list[tuple[str, str, int]]:
             },
             {
               type: 'p',
-              text: 'This greedy approach is provably optimal in count of transactions among "always fully settle the larger side" strategies commonly taught, and it\'s O(N log N) — worth stating both the complexity and why the greedy choice works (it\'s a variant of the classic "minimum cash flow" problem).',
+              text: 'Be precise about what the greedy algorithm guarantees. Each iteration fully settles at least one person, so it produces **at most N-1 transactions** in O(N log N) time — a large improvement over the raw pairwise debts. It is **not** guaranteed to find the true minimum: finding the minimum number of transactions is NP-hard, because it amounts to partitioning the balances into as many zero-sum subgroups as possible (each subgroup of size k settles in k-1 transfers). Example: balances `{A:+5, B:+5, C:-5, D:-5}` are optimally two transfers, which greedy happens to find, but crafted inputs exist where greedy matching of the largest values misses a zero-sum subset and uses more transfers. Saying this unprompted is a strong senior signal.',
+            },
+            {
+              type: 'callout',
+              kind: 'pitfall',
+              text: 'Splitting money is where precision bugs hide. Rs 100 split three ways is 3333 + 3333 + 3334 paise, not 33.33 x 3. Store integer minor units, allocate the remainder deterministically (e.g. to the payer or the first participants), and validate that `ExactSplit` amounts sum to the total and `PercentSplit` percentages sum to 100 **when the expense is created**, not at settlement time.',
+            },
+            {
+              type: 'code',
+              language: 'java',
+              title: 'Split strategies validate themselves and return exact shares',
+              code: `public sealed interface SplitStrategy permits EqualSplit, ExactSplit, PercentSplit {
+    Map<UserId, Long> shares(long totalPaise, List<UserId> participants);
+}
+
+public record EqualSplit() implements SplitStrategy {
+    public Map<UserId, Long> shares(long total, List<UserId> people) {
+        long base = total / people.size(), rem = total % people.size();
+        Map<UserId, Long> out = new LinkedHashMap<>();
+        for (int i = 0; i < people.size(); i++) out.put(people.get(i), base + (i < rem ? 1 : 0));
+        return out;
+    }
+}
+
+public record ExactSplit(Map<UserId, Long> amounts) implements SplitStrategy {
+    public Map<UserId, Long> shares(long total, List<UserId> people) {
+        long sum = amounts.values().stream().mapToLong(Long::longValue).sum();
+        if (sum != total) throw new InvalidSplitException("exact amounts must sum to " + total);
+        return Map.copyOf(amounts);
+    }
+}
+// PercentSplit: validate percentages sum to 100 (use basis points to stay integral),
+// compute floor shares, then hand out the leftover paise one by one.`,
             },
           ],
         },
@@ -1594,7 +2668,7 @@ def simplify_debts(net_balance: dict[str, int]) -> list[tuple[str, str, int]]:
           summary:
             'The hard part isn\'t the class diagram — it\'s preventing two users from booking the same seat, without holding a seat hostage forever if a user abandons checkout.',
           keyPoints: [
-            'A short-TTL lock in a fast store (Redis SETNX/SET NX EX) reserves a seat during checkout, not a DB row lock held for minutes.',
+            'A short-TTL lock in a fast store (Redis `SET key owner NX EX ttl`) reserves a seat during checkout, not a DB row lock held for minutes.',
             'If payment succeeds, the lock converts into a permanent DB row inside a transaction with a unique constraint on (show_id, seat_id).',
             'The lock is a latency/UX optimization (fail fast); the DB unique constraint is the actual correctness guarantee.',
             'If the TTL expires before payment, the seat silently becomes available again — no manual cleanup process needed.',
@@ -1647,12 +2721,12 @@ def simplify_debts(net_balance: dict[str, int]) -> list[tuple[str, str, int]]:
     participant DB
 
     UserA->>BookingService: selectSeats([A1, A2])
-    BookingService->>SeatLockStore: SETNX lock:A1 userA EX 300
+    BookingService->>SeatLockStore: SET lock:show42:A1 userA NX EX 300
     SeatLockStore-->>BookingService: OK (locked)
     BookingService-->>UserA: seats held for 5 min
 
     UserB->>BookingService: selectSeats([A1])
-    BookingService->>SeatLockStore: SETNX lock:A1 userB EX 300
+    BookingService->>SeatLockStore: SET lock:show42:A1 userB NX EX 300
     SeatLockStore-->>BookingService: FAIL (already locked)
     BookingService-->>UserB: seat unavailable
 
@@ -1660,16 +2734,425 @@ def simplify_debts(net_balance: dict[str, int]) -> list[tuple[str, str, int]]:
     BookingService->>PaymentService: charge(userA)
     PaymentService-->>BookingService: success
     BookingService->>DB: persist booking (A1, A2 -> userA), status=CONFIRMED
-    BookingService->>SeatLockStore: DEL lock:A1, lock:A2`,
+    BookingService->>SeatLockStore: release locks only if value is still userA (Lua compare-and-delete)`,
             },
             {
               type: 'p',
-              text: 'Key design decisions: the lock is a short-TTL entry in a fast store (Redis `SETNX`/`SET NX EX`), not a DB row lock held across the entire checkout flow — checkout can take minutes (entering card details) and you cannot hold a pessimistic DB lock that long without starving other requests. If payment succeeds, the lock is converted into a permanent DB row (`booking` table) inside a transaction with a unique constraint on `(show_id, seat_id)` as the final correctness backstop — the lock is an optimization for good UX (fail fast, show "seat taken" immediately), the DB unique constraint is what actually guarantees no double-booking even if the lock layer has a bug or an expired-but-not-yet-cleaned-up entry.',
+              text: 'Key design decisions: the lock is a short-TTL entry in a fast store (Redis `SET key owner NX EX ttl` — a single atomic command; the older `SETNX` + `EXPIRE` pair is not atomic and can leave a lock with no TTL), not a DB row lock held across the entire checkout flow — checkout can take minutes (entering card details) and you cannot hold a pessimistic DB lock that long without starving other requests. If payment succeeds, the lock is converted into a permanent DB row (`booking` table) inside a transaction with a unique constraint on `(show_id, seat_id)` as the final correctness backstop — the lock is an optimization for good UX (fail fast, show "seat taken" immediately), the DB unique constraint is what actually guarantees no double-booking even if the lock layer has a bug or an expired-but-not-yet-cleaned-up entry.',
             },
             {
               type: 'callout',
               kind: 'tip',
               text: 'If the TTL expires before payment, the seat silently becomes available again — no manual cleanup process needed, which is precisely why TTL-based locks are preferred here over an explicit "release" call that a crashed client would never send.',
+            },
+            {
+              type: 'heading',
+              text: 'The subtle failure: the hold expires during payment',
+            },
+            {
+              type: 'list',
+              ordered: true,
+              items: [
+                'User A holds seat A1 with a 5-minute TTL and spends 6 minutes on a 3-D Secure page.',
+                'The hold expires; user B grabs A1 and starts paying.',
+                'Both payments succeed. Only one `INSERT` can win the unique constraint — the other must be **automatically refunded** (or the payment must be authorized first and captured only after the seat row commits).',
+              ],
+            },
+            {
+              type: 'p',
+              text: 'The production-grade answer combines three things: (1) re-check that you still own the hold right before charging, (2) use **authorize-then-capture** so a lost race costs a void, not a refund, and (3) make the confirmation idempotent with a booking/idempotency key so a retried "confirm" request cannot charge twice. Releasing a hold must also check ownership — a plain `DEL` could delete a lock that expired and was re-acquired by someone else.',
+            },
+            {
+              type: 'code',
+              language: 'sql',
+              title: 'Schema where the database is the final arbiter',
+              code: `CREATE TABLE booking (
+  id              BIGINT PRIMARY KEY,
+  show_id         BIGINT NOT NULL REFERENCES show(id),
+  user_id         BIGINT NOT NULL,
+  status          VARCHAR(16) NOT NULL,         -- PENDING, CONFIRMED, CANCELLED
+  idempotency_key VARCHAR(64) NOT NULL UNIQUE,  -- retried confirm requests hit this
+  created_at      TIMESTAMP NOT NULL
+);
+
+CREATE TABLE booking_seat (
+  booking_id BIGINT NOT NULL REFERENCES booking(id),
+  show_id    BIGINT NOT NULL,
+  seat_id    BIGINT NOT NULL,
+  PRIMARY KEY (booking_id, seat_id),
+  UNIQUE (show_id, seat_id)          -- no seat can be sold twice for a show
+);
+-- Cancellation: delete the booking_seat rows (or move them to history) so the
+-- seat becomes sellable again; a status flag alone would keep the UNIQUE row.`,
+            },
+            {
+              type: 'code',
+              language: 'text',
+              title: 'Owner-checked release (Redis Lua script)',
+              code: `-- KEYS[1] = lock key, ARGV[1] = owner token
+if redis.call("GET", KEYS[1]) == ARGV[1] then
+  return redis.call("DEL", KEYS[1])
+else
+  return 0   -- someone else owns it now (our hold expired); do nothing
+end`,
+            },
+            {
+              type: 'callout',
+              kind: 'note',
+              text: 'Alternative without Redis: a `seat_hold` table with `(show_id, seat_id)` primary key and an `expires_at` column, acquired with an `INSERT ... ON CONFLICT DO UPDATE ... WHERE seat_hold.expires_at < now()` (PostgreSQL) in a short transaction. One fewer moving part, and fine for moderate traffic; Redis wins when on-sale spikes would hammer the primary database.',
+            },
+          ],
+        },
+        {
+          id: 'case-study-vending-machine',
+          title: 'Case Study: Vending Machine (State Pattern Done Right)',
+          summary:
+            'The canonical State-pattern prompt: the same button does different things depending on what has happened so far, and the interesting bugs are in money handling, refunds and partial failures.',
+          keyPoints: [
+            'Model states explicitly (Idle, HasMoney, Dispensing, OutOfService) — each state decides which operations are legal.',
+            'Keep money as integer minor units and compute change with a bounded coin inventory, not an infinite-coin assumption.',
+            'Dispense is a side effect that can fail: refund on hardware failure, and never take money without either delivering or returning it.',
+            'Inventory, coin box and the state machine are separate classes; the VendingMachine is the context that wires them.',
+          ],
+          blocks: [
+            {
+              type: 'p',
+              text: 'Clarify first: which payment inputs (coins, notes, cards)? Select-then-pay or pay-then-select? Can the user cancel? What if exact change cannot be made — reject the purchase before taking the item? Is there an admin mode for restocking? These answers define the state set.',
+            },
+            {
+              type: 'mermaid',
+              code: `stateDiagram-v2
+    [*] --> Idle
+    Idle --> HasMoney: insertCoin
+    HasMoney --> HasMoney: insertCoin
+    HasMoney --> Idle: cancel / refund all
+    HasMoney --> Dispensing: select item, enough money, change available
+    HasMoney --> HasMoney: select item, insufficient funds
+    Dispensing --> Idle: item dropped, change returned
+    Dispensing --> Idle: motor fault, full refund
+    Idle --> OutOfService: admin lock
+    OutOfService --> Idle: admin unlock`,
+            },
+            {
+              type: 'mermaid',
+              code: `classDiagram
+    class VendingMachine {
+        -VendingState state
+        -Inventory inventory
+        -CoinBox coinBox
+        -int balance
+        +insertCoin(coin)
+        +select(slotCode)
+        +cancel() List~Coin~
+    }
+    class VendingState {
+        <<interface>>
+        +insertCoin(vm, coin)
+        +select(vm, slotCode)
+        +cancel(vm) List~Coin~
+    }
+    class IdleState
+    class HasMoneyState
+    class DispensingState
+    class OutOfServiceState
+    class Inventory {
+        -Map~String,Slot~ slots
+        +priceOf(code) int
+        +take(code) Product
+    }
+    class CoinBox {
+        -Map~Coin,Integer~ counts
+        +makeChange(amount) Optional~List~Coin~~
+    }
+    VendingState <|.. IdleState
+    VendingState <|.. HasMoneyState
+    VendingState <|.. DispensingState
+    VendingState <|.. OutOfServiceState
+    VendingMachine --> VendingState
+    VendingMachine *-- Inventory
+    VendingMachine *-- CoinBox`,
+            },
+            {
+              type: 'code',
+              language: 'java',
+              title: 'HasMoney state: validation, change-making and refund on failure',
+              code: `final class HasMoneyState implements VendingState {
+    @Override public void insertCoin(VendingMachine vm, Coin coin) {
+        vm.coinBox().deposit(coin);
+        vm.addToBalance(coin.valuePaise());
+    }
+
+    @Override public void select(VendingMachine vm, String code) {
+        int price = vm.inventory().priceOf(code);               // throws UnknownSlotException
+        if (!vm.inventory().inStock(code)) throw new SoldOutException(code);
+        if (vm.balance() < price) throw new InsufficientFundsException(price - vm.balance());
+
+        // Check change BEFORE committing: never dispense if we cannot pay change back.
+        List<Coin> change = vm.coinBox().makeChange(vm.balance() - price)
+                .orElseThrow(() -> new ExactChangeOnlyException());
+
+        vm.setState(vm.dispensingState());
+        try {
+            vm.hardware().dispense(code);                        // may throw MotorFaultException
+            vm.inventory().decrement(code);
+            vm.coinBox().withdraw(change);
+            vm.hardware().returnCoins(change);
+        } catch (MotorFaultException e) {
+            vm.hardware().returnCoins(vm.coinBox().withdrawAmount(vm.balance()));  // full refund
+            vm.setState(vm.outOfServiceState());
+            vm.resetBalance();
+            throw e;
+        }
+        vm.resetBalance();
+        vm.setState(vm.idleState());
+    }
+
+    @Override public List<Coin> cancel(VendingMachine vm) {
+        List<Coin> refund = vm.coinBox().withdrawAmount(vm.balance());
+        vm.resetBalance();
+        vm.setState(vm.idleState());
+        return refund;
+    }
+}`,
+            },
+            {
+              type: 'callout',
+              kind: 'pitfall',
+              text: 'Greedy change-making (largest coin first) is only optimal for **canonical** coin systems. With a limited coin inventory, or denominations like {1, 3, 4}, greedy can fail to find change that exists (making 6 from {4, 3, 3}: greedy takes the 4 and gets stuck). A small bounded DP or backtracking over the actual coin counts is correct; mention the trade-off.',
+            },
+            {
+              type: 'callout',
+              kind: 'tip',
+              text: 'A vending machine is a single-user device, so concurrency is mostly about the hardware callback thread vs the UI thread. Serialize all events through one queue/actor (a single-threaded event loop) rather than sprinkling locks — it matches the physical reality and makes the state machine trivially safe.',
+            },
+          ],
+        },
+        {
+          id: 'case-study-tic-tac-toe',
+          title: 'Case Study: Tic-Tac-Toe / Board Games (N x N, Extensible)',
+          summary:
+            'A deceptively small prompt that tests separation of concerns (board vs rules vs players vs game loop), an O(1) win check, and extensibility to N x N, more players, AI opponents and undo.',
+          keyPoints: [
+            'Separate Board (state), Game (turn order and lifecycle), WinStrategy (rules) and Player (who chooses a move).',
+            'Player is an interface so Human, Random and Minimax AI players plug in without touching Game.',
+            'An O(1)-per-move win check keeps row/column/diagonal counters instead of rescanning the board.',
+            'Game status is an explicit enum (IN_PROGRESS, WON, DRAW); illegal moves raise domain exceptions.',
+            'Command objects for moves give undo/redo and replay for free.',
+          ],
+          blocks: [
+            {
+              type: 'mermaid',
+              code: `classDiagram
+    class Game {
+        -Board board
+        -List~Player~ players
+        -int turn
+        -GameStatus status
+        -Deque~Move~ history
+        +play() GameStatus
+        +undo()
+    }
+    class Board {
+        -int size
+        -List~List~Symbol~~ cells
+        +place(move)
+        +clear(row, col)
+        +isFull() bool
+    }
+    class Player {
+        <<interface>>
+        +symbol() Symbol
+        +nextMove(BoardView) Move
+    }
+    class HumanPlayer
+    class MinimaxPlayer
+    class WinChecker {
+        <<interface>>
+        +recordAndCheck(move) bool
+        +revert(move)
+    }
+    class CounterWinChecker
+    class Move {
+        +int row
+        +int col
+        +Symbol symbol
+    }
+    Game *-- Board
+    Game o-- Player
+    Game --> WinChecker
+    Player <|.. HumanPlayer
+    Player <|.. MinimaxPlayer
+    WinChecker <|.. CounterWinChecker
+    Game ..> Move`,
+            },
+            {
+              type: 'code',
+              language: 'python',
+              title: 'O(1) win detection for an N x N board, any number of players',
+              code: `from collections import defaultdict
+
+class CounterWinChecker:
+    """Per player: count marks in each row, column and both diagonals.
+    A line is won when a single player's count in it reaches n."""
+
+    def __init__(self, n: int) -> None:
+        self.n = n
+        self.rows = defaultdict(lambda: [0] * n)    # player -> counts per row
+        self.cols = defaultdict(lambda: [0] * n)
+        self.diag = defaultdict(int)
+        self.anti = defaultdict(int)
+
+    def _apply(self, player: str, r: int, c: int, delta: int) -> None:
+        self.rows[player][r] += delta
+        self.cols[player][c] += delta
+        if r == c:
+            self.diag[player] += delta
+        if r + c == self.n - 1:
+            self.anti[player] += delta
+
+    def record_and_check(self, player: str, r: int, c: int) -> bool:
+        self._apply(player, r, c, +1)
+        n = self.n
+        return (self.rows[player][r] == n or self.cols[player][c] == n
+                or self.diag[player] == n or self.anti[player] == n)
+
+    def revert(self, player: str, r: int, c: int) -> None:   # supports undo
+        self._apply(player, r, c, -1)`,
+            },
+            {
+              type: 'list',
+              items: [
+                '**Validation lives in one place**: `Board.place` rejects out-of-range or occupied cells with `InvalidMoveError`; `Game` rejects moves after the game ended or from the wrong player.',
+                '**Players receive a read-only `BoardView`**, not the mutable `Board` — an AI player cannot cheat by writing to the board (encapsulation as a security property).',
+                '**Extensibility**: Connect-Four style "K in a row" on an N x M board breaks the counter trick (lines are not whole rows); swap in a `WinChecker` that scans outward from the last move in four directions — O(K) per move. That is exactly why the win rule is behind an interface.',
+                '**Minimax** with alpha-beta pruning is fine for 3 x 3 (the full game tree is tiny); for larger boards mention depth limits and heuristics — but only if asked.',
+              ],
+            },
+            {
+              type: 'callout',
+              kind: 'tip',
+              text: 'The same skeleton (Board, Piece/Cell, Player, Game loop, Rules) is reused for chess, Snake and Ladder and Connect Four. For chess, the extra signal is giving each `Piece` subclass its own move-generation rule (polymorphism) while keeping cross-piece rules (check, castling, en passant) in a separate `RuleEngine` — pieces should not know about kings in check.',
+            },
+          ],
+        },
+        {
+          id: 'case-study-notification-system',
+          title: 'Case Study: Notification Service (Channels, Preferences, Retries)',
+          summary:
+            'A prompt that combines Strategy, Factory, Observer/event-driven design, Template Method and reliability concerns — retries, idempotency, rate limits and user preferences.',
+          keyPoints: [
+            'Channels (Email, SMS, Push, WhatsApp, in-app) implement one NotificationChannel interface and are looked up through a registry.',
+            'Templates and user preferences (opt-outs, quiet hours, preferred channels) are data, not code branches.',
+            'Producers publish domain events; the notification service decides who gets what — producers never call channels directly.',
+            'Delivery is asynchronous with retry, exponential backoff with jitter, a dead-letter queue and an idempotency key per (event, user, channel).',
+          ],
+          blocks: [
+            {
+              type: 'mermaid',
+              code: `classDiagram
+    class NotificationService {
+        +handle(event: DomainEvent)
+    }
+    class PreferenceStore {
+        +channelsFor(userId, category) List~ChannelType~
+        +inQuietHours(userId, at) bool
+    }
+    class TemplateRenderer {
+        +render(templateId, locale, data) Message
+    }
+    class ChannelRegistry {
+        -Map~ChannelType,NotificationChannel~ channels
+        +get(type) NotificationChannel
+    }
+    class NotificationChannel {
+        <<interface>>
+        +send(recipient, message) DeliveryResult
+    }
+    class EmailChannel
+    class SmsChannel
+    class PushChannel
+    class DeliveryQueue {
+        +enqueue(job: DeliveryJob)
+    }
+    class DeliveryWorker {
+        -RetryPolicy retryPolicy
+        +process(job)
+    }
+    NotificationService --> PreferenceStore
+    NotificationService --> TemplateRenderer
+    NotificationService --> DeliveryQueue
+    DeliveryWorker --> ChannelRegistry
+    ChannelRegistry o-- NotificationChannel
+    NotificationChannel <|.. EmailChannel
+    NotificationChannel <|.. SmsChannel
+    NotificationChannel <|.. PushChannel`,
+            },
+            {
+              type: 'mermaid',
+              code: `sequenceDiagram
+    participant Orders as OrderService
+    participant Bus as Event bus
+    participant NS as NotificationService
+    participant Q as DeliveryQueue
+    participant W as DeliveryWorker
+    participant Ch as SmsChannel
+    Orders->>Bus: publish OrderShipped
+    Bus->>NS: handle(OrderShipped)
+    NS->>NS: resolve users, preferences, render templates
+    NS->>Q: enqueue job per user and channel, with idempotency key
+    Q->>W: deliver job
+    W->>Ch: send(recipient, message)
+    alt transient failure
+        Ch-->>W: error
+        W->>Q: re-enqueue with backoff delay
+    else success
+        Ch-->>W: providerMessageId
+        W->>W: mark key as delivered
+    end`,
+            },
+            {
+              type: 'code',
+              language: 'ts',
+              title: 'Worker with idempotency and a retry policy',
+              code: `interface DeliveryJob { key: string; channel: ChannelType; to: string; message: Message; attempt: number }
+
+class DeliveryWorker {
+  constructor(
+    private readonly channels: ChannelRegistry,
+    private readonly sent: IdempotencyStore,     // e.g. a table/Redis set of delivered keys
+    private readonly queue: DeliveryQueue,
+    private readonly policy: RetryPolicy,
+  ) {}
+
+  async process(job: DeliveryJob): Promise<void> {
+    if (await this.sent.has(job.key)) return;   // duplicate delivery of the job: ignore
+    try {
+      await this.channels.get(job.channel).send(job.to, job.message);
+      await this.sent.add(job.key);
+    } catch (err) {
+      if (!isTransient(err) || job.attempt + 1 >= this.policy.maxAttempts) {
+        await this.queue.deadLetter(job, err);   // poison or exhausted: park it for inspection
+        return;
+      }
+      const delayMs = this.policy.delayFor(job.attempt);   // exponential backoff + jitter
+      await this.queue.enqueue({ ...job, attempt: job.attempt + 1 }, delayMs);
+    }
+  }
+}`,
+            },
+            {
+              type: 'callout',
+              kind: 'warning',
+              text: 'Exactly-once delivery to an external provider is not achievable in general: if the SMS provider accepted the message but the acknowledgement was lost, a retry sends a duplicate. You get **at-least-once delivery plus de-duplication** — pass your idempotency key to providers that support one, and accept rare duplicates for those that do not. Saying this precisely is a strong senior signal.',
+            },
+            {
+              type: 'list',
+              items: [
+                '**Strategy**: each channel; also the retry policy. **Factory/registry**: channel lookup by type. **Template Method**: a base channel can fix the flow (validate recipient, render, send, record) while subclasses implement only the provider call.',
+                '**Per-channel rate limits and provider failover** (primary SMS vendor down, switch to secondary) are a Decorator/Composite around the channel.',
+                '**Priorities**: OTPs must not queue behind a marketing blast — separate queues or priority lanes.',
+                '**Compliance**: unsubscribe links, quiet hours and per-region consent rules are preference data checked before enqueueing.',
+              ],
             },
           ],
         },
@@ -1699,10 +3182,15 @@ def simplify_debts(net_balance: dict[str, int]) -> list[tuple[str, str, int]]:
                 'Splitwise / expense sharing',
                 'Elevator system',
                 'Chess / tic-tac-toe game',
-                'Library management system',
-                'Vending machine',
-                'LRU / LFU cache',
+                'Library management system (API sketch above)',
+                'Vending machine (case study above)',
+                'LRU / LFU cache (case study above)',
               ],
+            },
+            {
+              type: 'callout',
+              kind: 'tip',
+              text: 'Case studies in this guide: parking lot, rate limiter, LRU cache, elevator, Splitwise, BookMyShow, vending machine, tic-tac-toe and notification service. For each, close your notes and re-derive the class diagram, the one hard algorithm or race, and two extension answers; then time yourself coding the core in 40 minutes.',
             },
             {
               type: 'heading',
@@ -1753,12 +3241,12 @@ def simplify_debts(net_balance: dict[str, int]) -> list[tuple[str, str, int]]:
         {
           id: 'qa',
           title: 'Questions & Answers',
-          summary: '30 Low-Level Design interview questions with full-depth answers, spanning OOP fundamentals, UML notation, patterns, and the five case studies.',
+          summary: '44 Low-Level Design interview questions with full-depth answers, spanning OOP fundamentals, UML notation, SOLID, patterns, concurrency, and the case studies.',
           qa: [
             {
               question: 'What\'s the difference between aggregation and composition?',
               answer:
-                'Both are "has-a" relationships. In composition, the child\'s lifecycle is bound to the parent — if the parent is destroyed, so is the child (e.g., a `House` and its `Room`s). In aggregation, the child can exist independently (e.g., a `University` has `Department`s, but a `Department` could theoretically be reassigned; more classically, a `Car` and its `Engine` — the engine can exist without the car in inventory).',
+                'Both are "has-a" relationships. In composition, the child\'s lifecycle is bound to the parent — if the parent is destroyed, so is the child (e.g., a `House` and its `Room`s). In aggregation, the child can exist independently and may even be shared (e.g., a `Team` aggregates `Player`s — disband the team and the players still exist; a `Playlist` aggregates `Song`s). The honest nuance: the distinction is about **who owns the lifecycle in your model**, not about the real world — a `Car`/`Engine` is composition in a car-rental app and aggregation in a parts-inventory app. In code, composition usually means the whole creates the parts and never hands out references that outlive it; aggregation means the parts are passed in from outside.',
             },
             {
               question: 'What is the difference between association, aggregation, and composition, and how do you show multiplicity on a UML diagram?',
@@ -1783,7 +3271,7 @@ def simplify_debts(net_balance: dict[str, int]) -> list[tuple[str, str, int]]:
             {
               question: 'How would you make a Singleton thread-safe?',
               answer:
-                'Options: (1) eager initialization (instance created at class load, trades startup cost for simplicity), (2) double-checked locking with a volatile field in Java, (3) initialization-on-demand holder idiom (nested static class, JVM class-loading guarantees thread safety for free), (4) in Python, module-level objects are singletons by import semantics, or use a class-level lock as shown in the parking lot design. Always mention that Singletons hurt unit testing (global state, hidden dependencies) and dependency injection is often a better fit.',
+                'Options in Java: (1) eager initialization in a `static final` field (class initialization is thread-safe; costs startup time even if unused), (2) the initialization-on-demand holder idiom (a nested static class whose initialization the JVM performs lazily and exactly once — the usual best choice), (3) an `enum` with a single constant (also robust against reflection and serialization attacks), (4) double-checked locking — correct **only** if the field is `volatile`, otherwise a thread can see a non-null reference to a partially constructed object. In Python, a module-level instance is already a singleton; if construction must be lazy, guard it with a `threading.Lock` and a second check inside the lock rather than relying on the GIL (free-threaded CPython builds exist since 3.13). Then volunteer the bigger point: the global access point hurts testability and hides dependencies, so prefer one instance created at the composition root and injected (or a DI container\'s singleton scope).',
             },
             {
               question: 'Design a class hierarchy for a payment system that needs to support adding new payment methods without modifying existing code. Which principle does this test?',
@@ -1823,7 +3311,7 @@ def simplify_debts(net_balance: dict[str, int]) -> list[tuple[str, str, int]]:
             {
               question: 'How do you prevent two threads from booking the same parking spot/seat simultaneously?',
               answer:
-                'At the data layer: pessimistic locking (`SELECT ... FOR UPDATE`) or optimistic locking (version column, retry on conflict) on the spot/seat row. In-memory: synchronize on a per-resource lock (a per-spot `threading.Lock`, as in the parking lot design), or a distributed lock via Redis `SETNX`/Redlock if multiple app instances share the resource. Always prefer the smallest possible lock scope (per-spot, not global) to avoid throughput collapse.',
+                'At the data layer: pessimistic locking (`SELECT ... FOR UPDATE`) or optimistic locking (version column, retry on conflict) on the spot/seat row. In-memory: synchronize on a per-resource lock (a per-spot `threading.Lock`, as in the parking lot design), or a distributed lock via Redis `SET NX PX` (with an owner token and TTL) if multiple app instances share the resource. Always prefer the smallest possible lock scope (per-spot, not global) to avoid throughput collapse.',
             },
             {
               question: 'In the Decorator vs Inheritance debate, when does Decorator clearly win?',
@@ -1866,7 +3354,7 @@ def simplify_debts(net_balance: dict[str, int]) -> list[tuple[str, str, int]]:
                 'Template Method uses inheritance: a base class defines the algorithm\'s skeleton and calls abstract "hook" methods that subclasses override to fill in specific steps — the control flow lives in the base class. Strategy uses composition: the entire algorithm is swapped out as one interchangeable object, and the client holds a reference to whichever implementation it\'s configured with — the control flow lives in the client/context. Rule of thumb: if you\'re overriding one step of a larger fixed algorithm, it\'s Template Method; if you\'re swapping the whole algorithm, it\'s Strategy.',
             },
             {
-              question: 'How would you extend the Rate Limiter\'s `TokenBucketRateLimiter` (the in-process Python version) to avoid unbounded memory growth from millions of distinct client IDs?',
+              question: 'How would you extend the Rate Limiter\'s `TokenBucketLimiter` (the in-process Python version) to avoid unbounded memory growth from millions of distinct client IDs?',
               answer:
                 'The bucket dict grows forever as new client IDs appear and never shrinks. Fix options: (1) wrap it in an LRU cache with a max size, evicting the least-recently-used client\'s bucket (acceptable — a fresh bucket for a returning client just starts full, which is a safe default, not an exploit); (2) a periodic background sweep that removes buckets whose `last_refill_ts` is older than some threshold (e.g., 10 minutes of inactivity); (3) at real scale, move the state out of process entirely into Redis with per-key TTLs, which gives you eviction for free and also solves the multi-server consistency problem simultaneously.',
             },
@@ -1893,7 +3381,7 @@ def simplify_debts(net_balance: dict[str, int]) -> list[tuple[str, str, int]]:
             {
               question: 'What would you change about the LRU cache implementation to make it thread-safe for concurrent `get`/`put` calls?',
               answer:
-                'Wrap the critical sections (the linked-list pointer manipulation plus the dict mutation) in a single `threading.Lock` acquired for the duration of each `get`/`put` call — because both operations mutate shared structure (the list and the map together), a lock per-operation is needed rather than per-node, since `get` still needs to move a node, which is a write to the list even though it\'s conceptually a "read." At higher throughput, you\'d shard the cache into N independent LRU segments (hash the key to a segment) each with its own lock, trading strict global LRU ordering for much lower lock contention — the same idea Java\'s `ConcurrentHashMap` uses internally.',
+                'Wrap the critical sections (the linked-list pointer manipulation plus the dict mutation) in a single `threading.Lock` acquired for the duration of each `get`/`put` call — because both operations mutate shared structure (the list and the map together), a lock per-operation is needed rather than per-node, since `get` still needs to move a node, which is a write to the list even though it\'s conceptually a "read." At higher throughput, you\'d shard the cache into N independent LRU segments (hash the key to a segment) each with its own lock, trading strict global LRU ordering for much lower lock contention — the lock-striping idea pre-Java-8 `ConcurrentHashMap` used (Java 8+ switched to CAS plus per-bin locking). Production caches such as Caffeine go further: reads are recorded in lock-free ring buffers and replayed against the eviction policy in batches, so `get` almost never contends on a lock. Note that a read-write lock does not help here, because every `get` mutates recency order.',
             },
             {
               question: 'What does "program to an interface, not an implementation" mean concretely when you\'re sketching a class diagram?',
@@ -1904,6 +3392,71 @@ def simplify_debts(net_balance: dict[str, int]) -> list[tuple[str, str, int]]:
               question: 'When would you deliberately choose an anemic domain model over a rich one, even in an OOP-focused interview?',
               answer:
                 'When the "business logic" is really just orchestration across multiple services/external systems rather than a single entity\'s own invariant — e.g., a checkout flow that calls inventory, payment, and shipping in sequence doesn\'t belong on any one entity, so a transaction-script style service naturally owns it, with the entities themselves staying closer to data holders. It\'s also a reasonable pragmatic choice in simple CRUD-heavy systems where the "domain logic" is thin and forcing rich behavior onto entities would be over-engineering. The general rule from this guide still applies as a default, though: if a rule can be checked using only one entity\'s own state, put it on that entity first, and only fall back to a service when the logic genuinely spans multiple entities.',
+            },
+            {
+              question: 'You are given a 60-minute LLD round with a vague prompt. Walk me through exactly how you spend the time.',
+              answer:
+                'Roughly: 5-7 minutes on requirements (functional list, non-functional constraints such as concurrency and persistence, explicit out-of-scope items, written assumptions); 10-12 minutes on entities, relationships and a class diagram with multiplicities; a few minutes on the public API of the main service and one sequence walkthrough of the core flow; about 25 minutes of real code for the heart of the problem; and the last 10 on extensibility, concurrency and testing. The failure modes I avoid are jumping to code before agreeing scope, and polishing the diagram so long that no working code exists. I narrate tradeoffs as I go because the process is part of what is graded.',
+            },
+            {
+              question: 'Is Singleton an anti-pattern? How would you decide whether a class should be one?',
+              answer:
+                'It is not wrong to have exactly one instance; it is wrong to enforce that through a global access point. The Singleton pattern bundles two things: uniqueness and global reach. Global reach hides dependencies, makes tests share state, and blocks later requirements such as multiple tenants or a second parking lot. I treat uniqueness as a lifecycle decision: construct one instance at the composition root (or use a DI container singleton scope) and inject it. I keep a real GoF Singleton only for a truly process-wide resource where passing it around would be absurd, and then I make it thread-safe (holder idiom or enum in Java, module-level in Python).',
+            },
+            {
+              question: 'Explain the Liskov Substitution Principle in terms of contracts rather than "is-a".',
+              answer:
+                'A subtype is substitutable if it honours the base type\'s contract: it must not strengthen preconditions (reject inputs the base accepted), must not weaken postconditions (return less than the base promised), must preserve the base invariants, and must not throw new kinds of exceptions callers were not told about. Square/Rectangle breaks it because mutable setWidth/setHeight give Rectangle an invariant (the dimensions are independent) that Square cannot keep. Immutable shapes do not have that problem. Practical test: if a caller has to check the concrete type or catch UnsupportedOperationException, the hierarchy is violating LSP and composition or a narrower interface is the fix.',
+            },
+            {
+              question: 'When is a design pattern the wrong answer?',
+              answer:
+                'When there is no concrete axis of change it protects against. A Strategy with one implementation and no test seam, an Abstract Factory for one product family, or a Visitor over a hierarchy that never gets new operations adds indirection with no payoff (speculative generality). In modern languages many patterns collapse into language features: a single-method Strategy or Command is a function or lambda, Iterator is a generator, Visitor over a closed hierarchy is sealed types plus exhaustive pattern matching, and Singleton is an injected instance. I apply the rule of three: tolerate the first variation inline, notice the second, extract an abstraction on the third.',
+            },
+            {
+              question: 'How do you make time and randomness testable in an LLD solution?',
+              answer:
+                'Inject them as dependencies instead of calling datetime.now(), System.currentTimeMillis(), uuid4() or random inside business logic: a Clock (java.time.Clock, or a Callable[[], float] in Python), an IdGenerator and a seeded Random. The rate limiter, parking fee calculator and TTL cache then become deterministic: tests advance a fake clock instead of sleeping. This is dependency inversion applied to ambient state, and it is the first thing I check when an interviewer asks how I would unit test a component.',
+            },
+            {
+              question: 'Compare Adapter, Decorator, Proxy and Facade. They all wrap something.',
+              answer:
+                'The difference is intent and interface. Adapter changes the interface so an incompatible class fits what the client expects. Decorator keeps the same interface and adds behavior, and decorators stack (logging around retry around the real client). Proxy keeps the same interface and controls access (lazy loading, caching, auth, remote call), usually transparently to the client. Facade defines a new, simpler interface over many collaborating classes to reduce coupling to a subsystem. Quick test: same interface and adds behavior is Decorator; same interface and gates or defers access is Proxy; different interface for one class is Adapter; simplified interface over several classes is Facade.',
+            },
+            {
+              question: 'Design an in-process event bus. What can go wrong with a naive Observer implementation?',
+              answer:
+                'Naive Observer has five classic problems. Memory leaks: subjects hold strong references, so forgotten subscribers are never collected; return an unsubscribe handle or use weak references. Failure isolation: one throwing handler must not stop delivery to others, so catch and log per handler. Re-entrancy: handlers that subscribe or unsubscribe during dispatch corrupt iteration, so iterate over a snapshot and call handlers outside the lock. Latency and ordering: handlers run on the publisher thread, so slow ones should be dispatched to an executor, at the price of weaker ordering. Thread safety: guard the subscriber list or use a copy-on-write structure. If subscribers must survive restarts or live in other processes, it is no longer an Observer problem; use a durable broker.',
+            },
+            {
+              question: 'Why is greedy debt simplification in Splitwise not guaranteed to give the minimum number of transactions?',
+              answer:
+                'Greedy matching of the largest creditor with the largest debtor settles at least one person per step, so it yields at most N-1 transfers in O(N log N). But the true minimum equals N minus the maximum number of disjoint zero-sum subgroups of the net balances, and finding that partition is NP-hard (a subset-sum style problem). Greedy can miss a zero-sum subgroup that does not align with the largest-first order and use extra transfers. In practice groups are small, so an exponential bitmask DP is viable for small N, and greedy is the pragmatic default. I would also store money as integer minor units and distribute rounding remainders deterministically.',
+            },
+            {
+              question: 'Your Redis seat hold expires while a user is still on the payment page. How do you prevent double booking and double charging?',
+              answer:
+                'Treat the hold as an optimization and the database as the arbiter. A unique constraint on (show_id, seat_id) guarantees only one booking row can exist. Before charging, re-verify the hold is still owned by the user; prefer authorize-then-capture so a user who loses the race gets a void instead of a refund; and make confirmation idempotent with a booking or idempotency key so retries cannot charge twice. Releasing a hold must be owner-checked (a compare-and-delete Lua script), otherwise one client can delete a lock that expired and was re-acquired by someone else. Acquire holds with a single atomic SET key owner NX EX ttl rather than SETNX followed by EXPIRE.',
+            },
+            {
+              question: 'How would you avoid deadlock in a money-transfer method that locks two accounts?',
+              answer:
+                'Break the circular-wait condition with a global lock ordering: always acquire the lock of the account with the smaller id first, regardless of transfer direction, so two opposite transfers cannot each hold one lock and wait for the other. Also reject transfers where from equals to, keep the critical section free of I/O, and consider tryLock with a timeout as a fallback. At the database level the same idea applies: update rows in a consistent order within one transaction, or use optimistic versioning and retry. Fine-grained locks plus consistent ordering give correctness without serializing unrelated transfers.',
+            },
+            {
+              question: 'Make an LRU cache faster under heavy concurrent reads. Why does a read-write lock not help?',
+              answer:
+                'In an LRU cache a get is a write: it moves the node to the front of the recency list, so readers cannot run in parallel under a shared read lock. Options: shard the cache by key hash into N independent LRU segments, each with its own mutex, for approximate global LRU with far less contention; or follow production caches like Caffeine, where reads are recorded in lock-free buffers and applied to the eviction policy in batches, so the hot path rarely takes a lock. You can also relax recency updates (only promote an entry if it has not been touched recently). Whichever you choose, state the tradeoff between strict ordering and throughput.',
+            },
+            {
+              question: 'How would you structure a notification system so delivery is reliable but duplicates stay bounded?',
+              answer:
+                'Producers publish domain events; a notification service resolves recipients and preferences, renders templates and enqueues one delivery job per (event, user, channel) with a deterministic idempotency key. Workers send through a channel abstraction, retry only transient failures with exponential backoff and jitter, and park exhausted or poison jobs in a dead-letter queue. Because a provider may accept a message while the acknowledgement is lost, exactly-once is not achievable; the realistic guarantee is at-least-once plus de-duplication on the idempotency key, passing that key to providers that support one. Use separate priority lanes so OTPs are not stuck behind bulk campaigns, and check opt-outs and quiet hours before enqueueing.',
+            },
+            {
+              question: 'How would you design the state handling for a vending machine, and what are the non-obvious failure cases?',
+              answer:
+                'Use the State pattern with Idle, HasMoney, Dispensing and OutOfService states, each deciding which operations are legal; the machine is the context holding balance, inventory and coin box. The non-obvious cases are financial: verify change can be made from the actual bounded coin inventory before committing (greedy change-making is only optimal for canonical coin systems), never take money without either dispensing or refunding, and handle a hardware fault mid-dispense by refunding and moving to OutOfService. Money is integer minor units. Because the hardware callback and UI can race, serialize all events through a single event queue rather than adding locks everywhere.',
             },
           ],
         },
